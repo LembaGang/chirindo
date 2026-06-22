@@ -199,7 +199,16 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
       receiptCount += 1;
       return true;
     } catch (e) {
-      deps.log(`[proxy] receipt write FAILED: ${(e as Error).message}`);
+      const err = e as NodeJS.ErrnoException;
+      // Surface everything diagnostic: the resolved chain path we tried to
+      // write to, the syscall, errno code, and the message. The Cursor-vs-
+      // PowerShell discrepancy that motivated this logging was an ENOENT on
+      // the sessions dir; the path + errno is what makes that obvious.
+      deps.log(
+        `[proxy] receipt write FAILED: ${err.message} ` +
+          `(code=${err.code ?? "?"} syscall=${err.syscall ?? "?"} ` +
+          `path=${err.path ?? deps.chainPath} chainPath=${deps.chainPath})`,
+      );
       return false;
     }
   }

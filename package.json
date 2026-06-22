@@ -17,6 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/server-everything": "^2026.1.26",
     "recorder": "file:../recorder"
   },
   "devDependencies": {
