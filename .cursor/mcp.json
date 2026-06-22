@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "everything-gated": {
+      "command": "node",
+      "args": [
+        "C:/Users/User/mcp-gate-spike/dist/cli.js",
+        "proxy",
+        "--policy", "C:/Users/User/mcp-gate-spike/policy.json",
+        "--server-label", "everything",
+        "--dir", "C:/Users/User/mcp-gate-spike/.gate",
+        "--",
+        "node", "C:/Users/User/mcp-gate-spike/node_modules/@modelcontextprotocol/server-everything/dist/index.js"
+      ]
+    }
+  }
+}

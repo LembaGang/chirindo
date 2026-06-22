@@ -15,7 +15,12 @@
 // Chain receipts default to ./.gate/sessions/<session-id>.jsonl.
 
 import { randomUUID } from "node:crypto";
-import { join, resolve } from "node:path";
+import {
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
   IDENTITY_FILENAME,
   PRIVATE_KEY_FILENAME,
@@ -92,8 +97,44 @@ function parseArgs(argv: string[]): ParsedArgs {
   return { command, flags, positional, passthrough };
 }
 
+// Resolve a user-supplied path to an absolute path. Absolute inputs are
+// returned unchanged (so `--dir C:/...` is independent of process.cwd()).
+// Relative inputs are anchored to cwd — that anchor is the only sensible
+// default for a relative input, but cwd under a host (Cursor, Claude
+// Desktop) is generally NOT the user's project. We log the resolved path
+// at boot so the divergence is visible instead of silent.
 function resolvePath(p: string): string {
-  return resolve(process.cwd(), p);
+  return isAbsolute(p) ? p : resolve(process.cwd(), p);
+}
+
+// Boot-time self-check: confirm we can write to the chain directory before
+// we accept any tools/call. Fail-closed surfaces here as a clear fatal at
+// startup, not as an opaque per-call "receipt could not be written" deny.
+function probeChainDirOrFatal(chainPath: string): void {
+  const chainDir = dirname(chainPath);
+  try {
+    mkdirSync(chainDir, { recursive: true });
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    process.stderr.write(
+      `[mcp-gate] FATAL: cannot create chain directory ${chainDir} ` +
+        `(code=${err.code ?? "?"} syscall=${err.syscall ?? "?"}): ${err.message}\n`,
+    );
+    process.exit(1);
+  }
+  const probePath = join(chainDir, `.probe-${process.pid}-${Date.now()}`);
+  try {
+    writeFileSync(probePath, "ok", "utf8");
+    rmSync(probePath, { force: true });
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    process.stderr.write(
+      `[mcp-gate] FATAL: chain directory ${chainDir} is not writable ` +
+        `(code=${err.code ?? "?"} syscall=${err.syscall ?? "?"} ` +
+        `path=${err.path ?? probePath}): ${err.message}\n`,
+    );
+    process.exit(1);
+  }
 }
 
 function cmdInit(args: ParsedArgs): number {
@@ -136,6 +177,18 @@ function cmdProxy(args: ParsedArgs): number {
     (args.flags.get("chain") as string | undefined) !== undefined
       ? resolvePath(args.flags.get("chain") as string)
       : join(dir, "sessions", `${sessionId}.jsonl`);
+
+  // Log the resolved absolute paths and the cwd we were spawned with. This
+  // is the single most useful diagnostic when a host (Cursor / Claude
+  // Desktop) launches us from an unexpected directory.
+  process.stderr.write(
+    `[mcp-gate] boot: cwd=${process.cwd()} dir=${dir} chain=${chainPath}\n`,
+  );
+
+  // Self-check: prove we can actually write to the chain dir. If not, fail
+  // loudly at boot rather than denying every tools/call with an opaque
+  // "receipt could not be written".
+  probeChainDirOrFatal(chainPath);
 
   let identity;
   try {
