@@ -1,16 +1,23 @@
-# mcp-gate-spike
+# Chirindo
 
-**Fail-closed cryptographic gate at the MCP `tools/call` boundary.** A stdio
-MCP proxy that intercepts `tools/call` requests from a real MCP client
-(Claude Desktop, Cursor), evaluates a policy, and either forwards the
-call to the real downstream server (ALLOW) or returns a tool-failure
+**A fail-closed cryptographic gate for the MCP tool-call boundary — the
+watchtower for your AI agents. By Headless Oracle.**
+
+> Chirindo — Shona for "watchtower."
+
+A stdio MCP proxy that intercepts `tools/call` requests from a real MCP
+client (Claude Desktop, Cursor), evaluates a policy, and either forwards
+the call to the real downstream server (ALLOW) or returns a tool-failure
 response WITHOUT forwarding (DENY) — emitting a signed receipt in
 either case.
 
-This is a **spike**. Its purpose is to de-risk the single greenfield
-unknown on the critical path: can a stdio MCP proxy emit signed
-recomputable receipts AND have a real MCP client honor its DENY as a
-block? The receipt format and signing reuse the existing
+Chirindo emits **calibrated evidence**: a verifying party can prove that
+the gate fired for a given call and that the chain is recomputable from
+the signed records. The receipts do **not** prove an action was "safe" —
+only that the gate's decision is captured, signed, and tamper-evident
+(not tamper-proof: any actor with the chain file can rewrite history,
+but a mutation breaks the hash chain and is caught by `recorder verify`).
+The receipt format and signing reuse the existing
 [`recorder`](../recorder) engine — no reimplementation of JCS, hashing,
 or Ed25519.
 
@@ -35,13 +42,13 @@ agent from acting on an un-receipted result).
 MCP client (Claude Desktop)
         │
         ▼ stdio (JSON-RPC 2.0, newline-delimited)
-   mcp-gate proxy   ◀── policy.json (deny rules)
+   chirindo proxy   ◀── policy.json (deny rules)
         │
         ▼ stdio
   downstream MCP server (the real one)
 ```
 
-The client launches `mcp-gate proxy` as its MCP server. The proxy spawns
+The client launches `chirindo proxy` as its MCP server. The proxy spawns
 the real downstream MCP server as a child process. Every JSON-RPC frame
 in either direction passes through the proxy. `tools/call` requests are
 evaluated against the loaded policy:
@@ -72,7 +79,7 @@ block populated:
   "seq": 0,
   "session_id": "<uuid>",
   "ts": "...",
-  "agent": {"vendor": "mcp-gate-spike", "version": "0.0.0"},
+  "agent": {"vendor": "chirindo", "version": "0.0.1"},
   "event": {
     "type": "mcp_call",
     "outcome": "denied",                     // or "executed" on ALLOW
@@ -104,8 +111,8 @@ the recorder's verifier already understands.
 ## Usage
 
 ```
-mcp-gate init [--dir <path>]
-mcp-gate proxy --policy <file> --server-label <name>
+chirindo init [--dir <path>]
+chirindo proxy --policy <file> --server-label <name>
                [--dir <path>] [--chain <file>] [--session-id <id>]
                -- <downstream-command> [<args>...]
 ```
@@ -167,7 +174,7 @@ Cursor. This requires hand-on-keyboard.
 # From the spike root:
 mkdir -p .gate
 node /abs/path/to/mcp-gate-spike/dist/cli.js init --dir .gate
-# -> initialized mcp-gate at <abs path>
+# -> initialized chirindo at <abs path>
 #    kid: ed25519/...
 
 # Build first:
