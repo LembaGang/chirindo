@@ -1,5 +1,7 @@
 # mcp-gate-spike — Result
 
+> Product branded **Chirindo** (Shona for "watchtower"), by Headless Oracle. The directory name `mcp-gate-spike` is retained for path stability; the brand identity inside the files is Chirindo.
+
 ## What was proven
 
 End-to-end, against a real MCP client (Cursor) speaking stdio to the gate,

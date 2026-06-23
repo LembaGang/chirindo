@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// mcp-gate — fail-closed cryptographic gate at the MCP tools/call boundary.
+// chirindo — fail-closed cryptographic gate at the MCP tools/call boundary.
 //
 // Two subcommands:
-//   mcp-gate init [--dir <path>]
+//   chirindo init [--dir <path>]
 //       Generate the gate's signing identity (reuses recorder's runInit).
 //
-//   mcp-gate proxy --policy <file> --server-label <name> \
+//   chirindo proxy --policy <file> --server-label <name> \
 //                  -- <downstream-command> [<args>...]
 //       Launch the proxy: spawn the downstream MCP server, mediate every
 //       JSON-RPC frame, enforce policy at tools/call. Run by the MCP client
@@ -33,11 +33,11 @@ import { runProxy, spawnRealDownstream } from "./proxy.js";
 const DATA_DIR = ".gate";
 
 function helpText(): string {
-  return `mcp-gate — fail-closed cryptographic gate at the MCP tools/call boundary
+  return `chirindo — fail-closed cryptographic gate at the MCP tools/call boundary
 
 Usage:
-  mcp-gate init [--dir <path>]
-  mcp-gate proxy --policy <file> --server-label <name>
+  chirindo init [--dir <path>]
+  chirindo proxy --policy <file> --server-label <name>
                  [--dir <path>] [--chain <file>] [--session-id <id>]
                  -- <downstream-command> [<args>...]
 
@@ -117,7 +117,7 @@ function probeChainDirOrFatal(chainPath: string): void {
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
     process.stderr.write(
-      `[mcp-gate] FATAL: cannot create chain directory ${chainDir} ` +
+      `[chirindo] FATAL: cannot create chain directory ${chainDir} ` +
         `(code=${err.code ?? "?"} syscall=${err.syscall ?? "?"}): ${err.message}\n`,
     );
     process.exit(1);
@@ -129,7 +129,7 @@ function probeChainDirOrFatal(chainPath: string): void {
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
     process.stderr.write(
-      `[mcp-gate] FATAL: chain directory ${chainDir} is not writable ` +
+      `[chirindo] FATAL: chain directory ${chainDir} is not writable ` +
         `(code=${err.code ?? "?"} syscall=${err.syscall ?? "?"} ` +
         `path=${err.path ?? probePath}): ${err.message}\n`,
     );
@@ -147,7 +147,7 @@ function cmdInit(args: ParsedArgs): number {
     return 1;
   }
   process.stdout.write(
-    `initialized mcp-gate at ${result.dir}\n` +
+    `initialized chirindo at ${result.dir}\n` +
       `  kid:          ${result.identity.kid}\n` +
       `  identity:     ${result.identityPath}\n` +
       `  private key:  ${result.privateKeyPath}\n`,
@@ -161,7 +161,7 @@ function cmdProxy(args: ParsedArgs): number {
   const serverLabel = args.flags.get("server-label");
   if (typeof policyPath !== "string" || typeof serverLabel !== "string") {
     process.stderr.write(
-      "usage: mcp-gate proxy --policy <file> --server-label <name> -- <cmd> [args...]\n",
+      "usage: chirindo proxy --policy <file> --server-label <name> -- <cmd> [args...]\n",
     );
     return 2;
   }
@@ -182,7 +182,7 @@ function cmdProxy(args: ParsedArgs): number {
   // is the single most useful diagnostic when a host (Cursor / Claude
   // Desktop) launches us from an unexpected directory.
   process.stderr.write(
-    `[mcp-gate] boot: cwd=${process.cwd()} dir=${dir} chain=${chainPath}\n`,
+    `[chirindo] boot: cwd=${process.cwd()} dir=${dir} chain=${chainPath}\n`,
   );
 
   // Self-check: prove we can actually write to the chain dir. If not, fail
@@ -198,8 +198,8 @@ function cmdProxy(args: ParsedArgs): number {
     );
   } catch (e) {
     process.stderr.write(
-      `[mcp-gate] cannot load identity from ${dir}: ${(e as Error).message}\n` +
-        `[mcp-gate] run 'mcp-gate init' first.\n`,
+      `[chirindo] cannot load identity from ${dir}: ${(e as Error).message}\n` +
+        `[chirindo] run 'chirindo init' first.\n`,
     );
     return 1;
   }
@@ -212,7 +212,7 @@ function cmdProxy(args: ParsedArgs): number {
     loadPolicy(resolvedPolicyPath);
   } catch (e) {
     process.stderr.write(
-      `[mcp-gate] policy load failed at boot: ${(e as Error).message}\n`,
+      `[chirindo] policy load failed at boot: ${(e as Error).message}\n`,
     );
     return 1;
   }
@@ -227,7 +227,7 @@ function cmdProxy(args: ParsedArgs): number {
         return loadPolicy(resolvedPolicyPath);
       } catch (e) {
         process.stderr.write(
-          `[mcp-gate] policy reload failed: ${(e as Error).message}\n`,
+          `[chirindo] policy reload failed: ${(e as Error).message}\n`,
         );
         return null;
       }
@@ -240,12 +240,12 @@ function cmdProxy(args: ParsedArgs): number {
   });
 
   process.stderr.write(
-    `[mcp-gate] proxy up: server-label='${serverLabel}' session=${sessionId} chain=${chainPath}\n`,
+    `[chirindo] proxy up: server-label='${serverLabel}' session=${sessionId} chain=${chainPath}\n`,
   );
 
   handle.done.then(() => {
     process.stderr.write(
-      `[mcp-gate] proxy exiting (${handle.receiptCount()} receipts written)\n`,
+      `[chirindo] proxy exiting (${handle.receiptCount()} receipts written)\n`,
     );
     process.exit(0);
   });

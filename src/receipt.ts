@@ -54,8 +54,8 @@ export interface ReceiptInputs {
 }
 
 export const GATE_AGENT = {
-  vendor: "mcp-gate-spike",
-  version: "0.0.0",
+  vendor: "chirindo",
+  version: "0.0.1",
 } as const;
 
 // Build the mcp_call event matching the recorder's adapter shape. Outcome

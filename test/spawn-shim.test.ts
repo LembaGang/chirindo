@@ -6,7 +6,7 @@
 //
 //   Error: spawn npx ENOENT
 //
-// after `[mcp-gate] proxy up`. The old `proxy-spawn.test.ts` dodged this
+// after `[chirindo] proxy up`. The old `proxy-spawn.test.ts` dodged this
 // failure mode entirely: it hard-coded the `.cmd` extension AND passed
 // `shell: IS_WIN` explicitly, so it never exercised the actual default
 // spawn behaviour. This test does — bare command name, no shell
