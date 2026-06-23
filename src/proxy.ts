@@ -308,21 +308,35 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
 
 // Adapter for a real spawn()-based downstream.
 //
-// `shell: true` is needed on Windows when the command is a .cmd / .bat
-// shim (e.g. `npx.cmd`) — a recent Node CVE fix made spawning shims
-// without shell:true return EINVAL. Real downstream MCP servers are
-// usually `node <script>` and don't need it, but tests do.
+// On Windows, `npx`, `yarn`, `pnpm`, `tsx` and similar are `.cmd`/`.bat`
+// shims. Since the CVE-2024-27980 hardening Node refuses to spawn a
+// shim without `shell: true` — the bare name resolves to `npx.cmd` only
+// via the shell. MCP configs in the wild routinely pass the bare name,
+// so default `shell: true` on win32 unless the caller explicitly
+// overrides. Linux/macOS spawn behaviour is unchanged.
+//
+// Under shell:true the command line is parsed by cmd.exe, so a single
+// unquoted `&` or `|` in any arg becomes a code-execution surface. Args
+// come from the user's own MCP config (a trust boundary the user
+// crossed deliberately), but we quote defensively anyway — agents that
+// generate MCP configs will paste arg values without thinking about
+// cmd.exe parsing.
 export function spawnRealDownstream(
   command: string,
   args: string[],
   options?: { cwd?: string; env?: NodeJS.ProcessEnv; shell?: boolean },
 ): DownstreamProcess {
-  const child = spawn(command, args, {
+  const isWin = process.platform === "win32";
+  const shell = options?.shell !== undefined ? options.shell : isWin;
+  const spawnArgs = shell === true && isWin ? args.map(quoteForCmdShell) : args;
+
+  const child = spawn(command, spawnArgs, {
     stdio: ["pipe", "pipe", "pipe"],
     ...(options?.cwd !== undefined ? { cwd: options.cwd } : {}),
     ...(options?.env !== undefined ? { env: options.env } : {}),
-    ...(options?.shell !== undefined ? { shell: options.shell } : {}),
+    shell,
   }) as ChildProcessByStdio<Writable, Readable, Readable>;
+
   return {
     stdin: child.stdin,
     stdout: child.stdout,
@@ -335,7 +349,33 @@ export function spawnRealDownstream(
       }
     },
     exited: new Promise((resolve) => {
-      child.on("exit", (code) => resolve(code));
+      let resolved = false;
+      const finish = (code: number | null) => {
+        if (!resolved) {
+          resolved = true;
+          resolve(code);
+        }
+      };
+      child.on("exit", (code) => finish(code));
+      // A spawn-time failure (ENOENT for a missing/unresolvable command)
+      // emits 'error' but may not emit 'exit'. Treat it as exit-with-null
+      // so the proxy can shut down cleanly AND the error event has a
+      // listener (otherwise Node escalates it to an uncaught exception).
+      child.on("error", () => finish(null));
     }),
   };
+}
+
+// Quote a single arg for inclusion in a command line passed via
+// `cmd.exe /d /s /c "<command + args>"`. cmd.exe under /s /c strips the
+// outermost pair of quotes from the whole command line, so individual
+// args wrapped in their own quotes survive intact. Args that are pure
+// allowlist characters (paths, package specifiers, flags) pass bare;
+// anything containing whitespace or shell metacharacters is wrapped.
+// `%` and `!` can still expand inside quotes — out of scope for the
+// spike; a future hardening pass would disable that via setlocal.
+function quoteForCmdShell(arg: string): string {
+  if (arg === "") return '""';
+  if (/^[A-Za-z0-9._+\-=@:/\\,]+$/.test(arg)) return arg;
+  return `"${arg.replace(/"/g, '\\"')}"`;
 }

@@ -229,6 +229,34 @@ Cursor's MCP config lives at `<project>/.cursor/mcp.json` (or
 }
 ```
 
+### Note on `npx` as the downstream command (Windows)
+
+The stock form above — `npx -y @modelcontextprotocol/server-everything`
+as the passthrough — is the **primary** configuration on every
+platform. On Windows it now works without any client-side massaging
+because `spawnRealDownstream` defaults to `shell: true` on `win32`,
+which is the only way Node will resolve a `.cmd` shim (`npx.cmd`,
+`yarn.cmd`, `pnpm.cmd`, `tsx.cmd`) since the CVE-2024-27980 hardening.
+On Linux and macOS `npx` is a real script with a shebang, so the same
+config string also runs directly.
+
+**Fallback**: if `npx` is unavailable in your client's `PATH` (Cursor
+and Claude Desktop launch their MCP servers from a process tree whose
+`PATH` is *not* always your shell's `PATH` — Cursor in particular has
+been observed missing the npm global bin on Windows), pass the
+downstream's installed entry point directly with Node, bypassing
+shim resolution:
+
+```jsonc
+// substitute the absolute path your `npm install` produced under
+// `node_modules/@modelcontextprotocol/server-everything/dist/index.js`
+"--",
+"node", "C:/abs/path/to/mcp-gate-spike/node_modules/@modelcontextprotocol/server-everything/dist/index.js"
+```
+
+This is a workaround for client-PATH problems, not a workaround for
+shim resolution — that's fixed in the proxy itself.
+
 ### Decisive runs
 
 After the client is configured:
