@@ -1,1 +1,3 @@
-{"deny":[{"tool":"get-env","reason":"blocked by policy"}]}
+{
+  "deny": []
+}

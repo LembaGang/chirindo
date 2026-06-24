@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "my-server-gated": {
+      "command": "node",
+      "args": [
+        "<ABSOLUTE-PATH-TO-CHIRINDO>/dist/cli.js",
+        "proxy",
+        "--policy",       "<ABSOLUTE-PATH-TO-CHIRINDO>/policy.json",
+        "--server-label", "my-server",
+        "--dir",          "<ABSOLUTE-PATH-TO-CHIRINDO>/.gate",
+        "--",
+        "npx", "-y", "@your-org/your-mcp-server"
+      ]
+    }
+  }
+}
