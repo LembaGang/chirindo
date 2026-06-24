@@ -18,6 +18,7 @@
 import {
   RECORD_VERSION,
   appendRecordLine,
+  argsHash,
   contentOf,
   entryHashOfCanonical,
   genesisPrevHash,
@@ -47,7 +48,11 @@ export interface ReceiptInputs {
   identity: LoadedFullIdentity;
   server: string;
   toolName: string;
-  toolInputJson: string; // raw JSON-stringified params per MCP spec
+  // Tool-call arguments as the structured value the client sent (already
+  // parsed from JSON-RPC `params.arguments`). Hashed via the recorder's
+  // `argsHash` helper, which canonicalizes with RFC 8785 JCS — see that
+  // function's doc for why this changed from JSON.stringify.
+  toolArgs: unknown;
   resultJson?: string | undefined; // tool response (allow path only)
   decision: GateDecision;
   ts?: string;
@@ -60,6 +65,10 @@ export const GATE_AGENT = {
 
 // Build the mcp_call event matching the recorder's adapter shape. Outcome
 // is derived from the gate decision (allow→executed, deny→denied).
+//
+// args_hash is computed via the recorder's `argsHash` (RFC 8785 JCS over the
+// arguments value). Any recorder/verifier given the same `toolArgs` will
+// derive byte-identical bytes — the recomputability property.
 export function buildEvent(inputs: ReceiptInputs): McpCallEvent {
   const outcome: Outcome =
     inputs.decision.kind === "allow" ? "executed" : "denied";
@@ -68,7 +77,7 @@ export function buildEvent(inputs: ReceiptInputs): McpCallEvent {
     outcome,
     server: inputs.server,
     tool_name: inputs.toolName,
-    args_hash: "sha256:" + sha256OfUtf8(inputs.toolInputJson),
+    args_hash: argsHash(inputs.toolArgs),
     decision: inputs.decision.kind === "allow" ? "allow" : "deny",
     decision_source: "config",
   };

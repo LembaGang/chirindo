@@ -80,7 +80,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
   // forward, so they never appear here.
   interface PendingAllow {
     request: JsonRpcRequest;
-    toolInputJson: string;
+    toolArgs: unknown;
     server: string;
     toolName: string;
   }
@@ -115,9 +115,12 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
 
   function handleToolsCall(req: JsonRpcRequest): void {
     // Extract tool name + arguments per MCP spec §"Calling Tools".
+    // Pass arguments through as the structured value — receipt's args_hash
+    // is RFC 8785 JCS over this object, so we deliberately avoid an
+    // intermediate JSON.stringify whose key order isn't canonical.
     const params = (req.params ?? {}) as { name?: string; arguments?: unknown };
     const toolName = typeof params.name === "string" ? params.name : "";
-    const toolInputJson = JSON.stringify(params.arguments ?? {});
+    const toolArgs = params.arguments ?? {};
     const decision = decide(toolName);
 
     if (decision.kind === "deny") {
@@ -128,7 +131,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
         decisionForReceipt: { kind: "deny", reason: decision.reason },
         server: deps.serverLabel,
         toolName,
-        toolInputJson,
+        toolArgs,
         resultJson: undefined,
       });
       deps.log(
@@ -142,7 +145,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
     if (req.id !== null && req.id !== undefined) {
       pendingAllows.set(req.id, {
         request: req,
-        toolInputJson,
+        toolArgs,
         server: deps.serverLabel,
         toolName,
       });
@@ -181,7 +184,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
     decisionForReceipt: GateDecision;
     server: string;
     toolName: string;
-    toolInputJson: string;
+    toolArgs: unknown;
     resultJson: string | undefined;
   }): boolean {
     try {
@@ -191,7 +194,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
         identity: deps.identity,
         server: args.server,
         toolName: args.toolName,
-        toolInputJson: args.toolInputJson,
+        toolArgs: args.toolArgs,
         resultJson: args.resultJson,
         decision: args.decisionForReceipt,
         ...(deps.now ? { ts: deps.now() } : {}),
@@ -247,7 +250,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
           decisionForReceipt: { kind: "allow" },
           server: pending.server,
           toolName: pending.toolName,
-          toolInputJson: pending.toolInputJson,
+          toolArgs: pending.toolArgs,
           resultJson: line,
         });
         if (!ok) {
