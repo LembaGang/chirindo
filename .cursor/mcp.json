@@ -9,7 +9,7 @@
         "--server-label", "everything",
         "--dir", "C:/Users/User/mcp-gate-spike/.gate",
         "--",
-        "node", "C:/Users/User/mcp-gate-spike/node_modules/@modelcontextprotocol/server-everything/dist/index.js"
+        "npx", "-y", "@modelcontextprotocol/server-everything"
       ]
     }
   }

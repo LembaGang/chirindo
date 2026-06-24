@@ -108,17 +108,21 @@ recorder) — same hash chain, same signature scheme, same canonical
 bytes. Cross-tool interop is the point: the gate's output is evidence
 the recorder's verifier already understands.
 
-## Usage
+## Commands
 
 ```
-chirindo init [--dir <path>]
-chirindo proxy --policy <file> --server-label <name>
-               [--dir <path>] [--chain <file>] [--session-id <id>]
-               -- <downstream-command> [<args>...]
+chirindo init   [--dir <path>]
+chirindo proxy  --policy <file> --server-label <name>
+                [--dir <path>] [--chain <file>] [--session-id <id>]
+                -- <downstream-command> [<args>...]
+chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]
+                [--max-skew-ms <ms>]
 ```
 
 Defaults: `--dir = ./.gate/`, identity at `<dir>/identity.json`, chain
-at `<dir>/sessions/<session-id>.jsonl`.
+at `<dir>/sessions/<session-id>.jsonl`, `--key = <dir>/identity.json`.
+`--jwks` without a value resolves to `$RECORDER_JWKS_URL`, falling back
+to the recorder's published default.
 
 ### Policy file format
 
@@ -133,166 +137,129 @@ at `<dir>/sessions/<session-id>.jsonl`.
 
 A rule matches if `tool` matches the call's `name`, AND `server` (if
 present) matches the proxy's `--server-label`. Anything not matched by
-a deny rule is allowed. **Fail-closed**: a missing, unreadable, or
-malformed policy file denies all calls.
+a deny rule is allowed. The shipped `policy.json` is `{"deny": []}` —
+records everything, blocks nothing, **observe-only by default**.
+Enforcement is opt-in (see step 6 below). **Fail-closed**: an
+unreadable or malformed policy file still denies all calls.
 
-## Running locally (no MCP client required)
+## Getting started
 
-```
-# In the recorder dir, first time:
-cd ../recorder && npm install && npm run build
+The goal of this section: take you from "I use Cursor or Claude Code
+with my own MCP server" to "Chirindo is observing it, and I can
+independently verify a receipt." Six steps, all done locally except
+the verify hop which contacts a public JWKS endpoint.
 
-# In this dir:
-cd ../mcp-gate-spike && npm install
-npm test           # 7 tests, all green
-```
+### 1. Install
 
-The test suite exercises every branch the brief lists:
+<!-- INSTALL: TBD at publish — clone-and-run vs npm install. Until the
+     install mechanism lands, assume you have a local checkout of
+     Chirindo built (`npm install && npm run build`) and a working
+     absolute path to its `dist/cli.js`. The steps below write that
+     path as `<ABSOLUTE-PATH-TO-CHIRINDO>`. -->
 
-- `test/proxy-allow.test.ts` — ALLOW round-trip, ALLOW receipt verifies.
-- `test/proxy-deny.test.ts` — DENY blocks the call, downstream never sees
-  it, isError returned, DENY receipt verifies.
-- `test/proxy-failclosed.test.ts` — null policy and thrown policy both
-  produce DENY.
-- `test/tamper.test.ts` — mutating a recorded receipt is caught by
-  `recorder verify` as `request_commitment mismatch`.
-- `test/proxy-spawn.test.ts` — same ALLOW + DENY, but with the
-  downstream spawned as a real OS subprocess via the production
-  `spawnRealDownstream` path.
+For now: `git clone` Chirindo, `npm install && npm run build`. Note the
+absolute path to the repo — the next step uses it.
 
-## Verifying against a REAL MCP client (the headline question)
-
-The spike's headline question is: **does a real MCP client honor a
-proxy-returned `isError: true` response as a block?** The harness above
-proves the proxy implements the contract correctly; the real-client
-question can only be answered by running it against Claude Desktop or
-Cursor. This requires hand-on-keyboard.
-
-### Setup (one-time)
+Generate the gate's signing identity:
 
 ```
-# From the spike root:
-mkdir -p .gate
-node /abs/path/to/mcp-gate-spike/dist/cli.js init --dir .gate
+node <ABSOLUTE-PATH-TO-CHIRINDO>/dist/cli.js init --dir <ABSOLUTE-PATH-TO-CHIRINDO>/.gate
 # -> initialized chirindo at <abs path>
 #    kid: ed25519/...
-
-# Build first:
-npm run build
-
-# Create policy.json:
-echo '{"deny":[{"tool":"delete","reason":"blocked by policy"}]}' > policy.json
 ```
 
-### Claude Desktop configuration
+### 2. Configure your client
 
-Add to `claude_desktop_config.json` (its location:
-`~/Library/Application Support/Claude/claude_desktop_config.json` on
-macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
+Copy the template that matches your MCP client into the right place:
+
+- **Cursor**: `config-examples/cursor-mcp.json` → `<your-project>/.cursor/mcp.json` (or `~/.cursor/mcp.json`)
+- **Claude Desktop**: `config-examples/claude_desktop_config.json` → `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
+
+Then edit two things — see [`config-examples/README.md`](config-examples/README.md):
+
+1. Replace every `<ABSOLUTE-PATH-TO-CHIRINDO>` with the absolute path to
+   your Chirindo checkout.
+2. Replace the line after `"--"` with **your real downstream MCP
+   server's command** (the template ships with
+   `npx -y @your-org/your-mcp-server` as a deliberately-invalid
+   placeholder so a forgotten edit fails loudly). The documented
+   default is `npx`-form on every platform; a `node` + absolute-path
+   fallback is documented for clients whose `PATH` does not include
+   `npx`.
+
+Restart your client. You should see `my-server-gated` in its MCP
+indicator. Chirindo is now wrapping your server.
+
+### 3. Run
+
+Use your agent as you normally would — anything that calls a tool on
+your downstream server is being observed.
+
+### 4. Observe
+
+Each MCP session writes a chain file:
+
+```
+ls <ABSOLUTE-PATH-TO-CHIRINDO>/.gate/sessions/
+```
+
+One JSONL line per `tools/call`. Each line is a signed receipt covering
+the request and its outcome. Inspect one:
+
+```
+head -n 1 <ABSOLUTE-PATH-TO-CHIRINDO>/.gate/sessions/<session-id>.jsonl
+```
+
+You'll see `event.type:"mcp_call"`, `event.decision:"allow"`,
+`gate.result:"act"`, and an Ed25519 signature in `sig`.
+
+### 5. Verify (the payoff)
+
+```
+node <ABSOLUTE-PATH-TO-CHIRINDO>/dist/cli.js verify \
+  <ABSOLUTE-PATH-TO-CHIRINDO>/.gate/sessions/<session-id>.jsonl \
+  --jwks
+```
+
+The bare `--jwks` form resolves the gate's public key from the
+recorder's published JWKS document over HTTPS, then verifies every
+record's signature and the hash-chain linkage. Expected output:
+
+```
+VALID — N entries, chain intact, all signatures verified, session <id>
+```
+
+You just verified, against a public key over the internet, what your
+gate recorded — no trust in this repo, no trust in the binary you ran,
+no trust in the client you used. The receipts **prove the gate fired
+for each call and that the chain is recomputable from the signed
+records**. They do **not** prove the action was "safe," only that the
+decision is captured, signed, and **tamper-evident** (not tamper-proof:
+any actor with the chain file can rewrite history, but a mutation
+breaks the hash chain and is caught by `chirindo verify`).
+
+Offline alternative (no network): `--key <ABSOLUTE-PATH-TO-CHIRINDO>/.gate/identity.json`.
+
+### 6. Enforce (opt-in)
+
+Enforcement is one line in `policy.json`. Add a deny rule for a tool
+on your downstream server that you'd rather never have happen:
 
 ```json
 {
-  "mcpServers": {
-    "everything-gated": {
-      "command": "node",
-      "args": [
-        "C:/abs/path/to/mcp-gate-spike/dist/cli.js",
-        "proxy",
-        "--policy", "C:/abs/path/to/mcp-gate-spike/policy.json",
-        "--server-label", "everything",
-        "--dir", "C:/abs/path/to/mcp-gate-spike/.gate",
-        "--",
-        "npx", "-y", "@modelcontextprotocol/server-everything"
-      ]
-    }
-  }
+  "deny": [
+    { "tool": "shell_exec", "reason": "blocked by policy" }
+  ]
 }
 ```
 
-Restart Claude Desktop. The `everything-gated` server should appear in
-the MCP indicator.
+Restart your client. Ask the agent to call `shell_exec`. The downstream
+**never receives the call**; the agent sees `isError: true`; a DENY
+receipt with `event.decision:"deny"` and `gate.result:"halt"` is
+appended to the chain. Run `chirindo verify` again — still VALID.
 
-### Cursor configuration
-
-Cursor's MCP config lives at `<project>/.cursor/mcp.json` (or
-`~/.cursor/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "everything-gated": {
-      "command": "node",
-      "args": [
-        "C:/abs/path/to/mcp-gate-spike/dist/cli.js",
-        "proxy",
-        "--policy", "C:/abs/path/to/mcp-gate-spike/policy.json",
-        "--server-label", "everything",
-        "--dir", "C:/abs/path/to/mcp-gate-spike/.gate",
-        "--",
-        "npx", "-y", "@modelcontextprotocol/server-everything"
-      ]
-    }
-  }
-}
-```
-
-### Note on `npx` as the downstream command (Windows)
-
-The stock form above — `npx -y @modelcontextprotocol/server-everything`
-as the passthrough — is the **primary** configuration on every
-platform. On Windows it now works without any client-side massaging
-because `spawnRealDownstream` defaults to `shell: true` on `win32`,
-which is the only way Node will resolve a `.cmd` shim (`npx.cmd`,
-`yarn.cmd`, `pnpm.cmd`, `tsx.cmd`) since the CVE-2024-27980 hardening.
-On Linux and macOS `npx` is a real script with a shebang, so the same
-config string also runs directly.
-
-**Fallback**: if `npx` is unavailable in your client's `PATH` (Cursor
-and Claude Desktop launch their MCP servers from a process tree whose
-`PATH` is *not* always your shell's `PATH` — Cursor in particular has
-been observed missing the npm global bin on Windows), pass the
-downstream's installed entry point directly with Node, bypassing
-shim resolution:
-
-```jsonc
-// substitute the absolute path your `npm install` produced under
-// `node_modules/@modelcontextprotocol/server-everything/dist/index.js`
-"--",
-"node", "C:/abs/path/to/mcp-gate-spike/node_modules/@modelcontextprotocol/server-everything/dist/index.js"
-```
-
-This is a workaround for client-PATH problems, not a workaround for
-shim resolution — that's fixed in the proxy itself.
-
-### Decisive runs
-
-After the client is configured:
-
-1. **ALLOW**: ask the agent to call a non-denied tool (e.g. the
-   `everything` server's `echo` tool). Expect: the agent receives the
-   real result; an ALLOW receipt appears in
-   `.gate/sessions/<session>.jsonl`; `node /abs/path/to/recorder/dist/cli.js verify .gate/sessions/<session>.jsonl --key .gate/identity.json` says VALID.
-
-2. **DENY** (the headline): ask the agent to call the `delete` tool.
-   Expect: the agent sees the tool as failed (`isError: true`); the
-   action is NOT performed by the downstream; a DENY receipt is
-   written; verify says VALID. **Confirm by inspection** that the
-   downstream server's stderr / log does NOT show the deletion.
-
-3. **FAIL-CLOSED**: corrupt or remove `policy.json` while the proxy is
-   running, then ask the agent to call any tool. Expect: every call
-   denied; receipts written with `gate.result: "halt"`.
-
-4. **TAMPER**: with the proxy stopped, edit a receipt in the chain
-   file (change a `tool_name` or `args_hash`). Run
-   `recorder verify .gate/sessions/<session>.jsonl --key .gate/identity.json`.
-   Expect: `TAMPERED — entry K: request_commitment mismatch`, exit 1.
-
-**Report back**: which of (2)'s behaviors the real client exhibits — does
-the LLM treat `isError: true` as the action having failed, does it
-retry with different args, does the user see the failure clearly? This
-is the single most important finding from the spike, and only a real
-client can produce it.
+That's the observe→enforce transition: same gate, same receipts, one
+extra line in `policy.json`.
 
 ## Honesty about what `isError: true` does and doesn't do
 
@@ -311,7 +278,7 @@ after N denials).
 
 ## What the harness proves and what it does NOT
 
-### Proves (from the 7 green tests)
+### Proves (from the test suite)
 
 - The proxy correctly parses and mediates newline-delimited JSON-RPC
   per [MCP stdio transport spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#stdio).
@@ -326,25 +293,25 @@ after N denials).
   catches a tampered receipt with the legible `request_commitment
   mismatch` reason.
 - The OS-pipe path works (spawn integration test).
+- `chirindo verify` (CLI e2e test) reports VALID on a fresh chain,
+  TAMPERED on a mutated chain, and exit 2 on conflicting `--key` +
+  `--jwks` — same vocabulary the recorder uses, because it is the
+  recorder's verify engine wired into the chirindo binary.
 
-### Does NOT prove (hand-on-keyboard required)
+### Does NOT prove
 
 - **The real client honors `isError: true` as a block in the agent
-  loop.** The local harness shows the proxy returns the correct bytes;
-  whether Claude Desktop or Cursor surfaces it to the LLM as a failed
-  call and what the LLM does next can only be observed against the
-  real client.
-- **Cross-machine receipt verifiability.** The verifier still resolves
-  `kid` only via a locally-pinned identity file. A JWKS resolver via
-  `.well-known/` is the next foundational step (carried over from the
-  recorder MVP gap).
+  loop** — for clients other than the ones already tested. Cursor's
+  agent halts cleanly on a deny-shaped result (proven live, see
+  `SPIKE_RESULT.md`); whether Claude Desktop and other MCP clients
+  surface it the same way to the LLM must be confirmed per client.
 - **COSE output mode.** Receipts are currently JSON/Ed25519/base64url.
   A COSE_Sign1 variant is the productization step for ecosystem
   interop.
-- **Argument-level policy.** The spike's policy matches on tool name
+- **Argument-level policy.** The current policy matches on tool name
   (+ optional server label) only. Production needs argument matchers
   (e.g. "deny `shell_exec` whose `command` starts with `rm`").
-- **Per-action UI** — the spike emits stderr logs and writes JSONL;
+- **Per-action UI** — the proxy emits stderr logs and writes JSONL;
   Claude Desktop / Cursor will not surface "this action was gated" in
   any operator-visible way without further integration.
 

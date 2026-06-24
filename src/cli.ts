@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // chirindo — fail-closed cryptographic gate at the MCP tools/call boundary.
 //
-// Two subcommands:
+// Subcommands:
 //   chirindo init [--dir <path>]
 //       Generate the gate's signing identity (reuses recorder's runInit).
 //
@@ -10,6 +10,13 @@
 //       Launch the proxy: spawn the downstream MCP server, mediate every
 //       JSON-RPC frame, enforce policy at tools/call. Run by the MCP client
 //       (e.g. Claude Desktop) as its configured MCP server.
+//
+//   chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]
+//                                [--max-skew-ms <ms>]
+//       Independently verify a chain file. Re-exports the recorder's
+//       verifier — same engine, same VALID/TAMPERED/UNRESOLVED output,
+//       same exit codes. Lets a stranger close the loop with ONLY chirindo
+//       installed.
 //
 // Identity defaults to ./.gate/identity.json + ./.gate/private-key.pem.
 // Chain receipts default to ./.gate/sessions/<session-id>.jsonl.
@@ -22,10 +29,14 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
+  DEFAULT_JWKS_URL,
   IDENTITY_FILENAME,
+  JWKS_URL_ENV_VAR,
   PRIVATE_KEY_FILENAME,
+  formatVerifyResult,
   loadFullIdentity,
   runInit,
+  runVerify,
 } from "recorder";
 import { loadPolicy } from "./policy.js";
 import { runProxy, spawnRealDownstream } from "./proxy.js";
@@ -36,20 +47,27 @@ function helpText(): string {
   return `chirindo — fail-closed cryptographic gate at the MCP tools/call boundary
 
 Usage:
-  chirindo init [--dir <path>]
-  chirindo proxy --policy <file> --server-label <name>
-                 [--dir <path>] [--chain <file>] [--session-id <id>]
-                 -- <downstream-command> [<args>...]
+  chirindo init   [--dir <path>]
+  chirindo proxy  --policy <file> --server-label <name>
+                  [--dir <path>] [--chain <file>] [--session-id <id>]
+                  -- <downstream-command> [<args>...]
+  chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]
+                  [--max-skew-ms <ms>]
 
 Defaults:
   data dir = ./${DATA_DIR}/
   identity = <data-dir>/${IDENTITY_FILENAME}
   chain    = <data-dir>/sessions/<session-id>.jsonl
   session-id = random UUID v4
+  --key    = <data-dir>/${IDENTITY_FILENAME}
+  --jwks   = $${JWKS_URL_ENV_VAR} or ${DEFAULT_JWKS_URL}
+
+Key sources for verify: --key (local, offline) and --jwks (remote, HTTPS)
+are alternatives — pass at most one. Without either, --key is used.
 
 Exit codes:
-  0  proxy ran to clean shutdown / init succeeded
-  1  proxy startup error (missing identity, unevaluable policy at boot, ...)
+  0  proxy ran to clean shutdown / init succeeded / VALID
+  1  proxy startup error / TAMPERED / UNRESOLVED
   2  usage error
 `;
 }
@@ -255,7 +273,64 @@ function cmdProxy(args: ParsedArgs): number {
   return 0;
 }
 
-function main(argv: string[]): number {
+// `chirindo verify` — independently verify a chain file. Pure wiring around
+// the recorder's exported runVerify + formatVerifyResult. The crypto, the
+// JWKS fetcher, and the VALID / TAMPERED / UNRESOLVED vocabulary all come
+// from the recorder library — chirindo just dispatches argv. Same
+// alternatives, same exit codes, same default JWKS URL fallback. This is
+// what lets a stranger run the full getting-started loop with ONLY
+// chirindo installed.
+async function cmdVerify(args: ParsedArgs): Promise<number> {
+  const chainArg = args.positional[0];
+  if (chainArg === undefined) {
+    process.stderr.write(
+      "usage: chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]\n",
+    );
+    return 2;
+  }
+  const chainPath = resolvePath(chainArg);
+  const keyFlag = args.flags.get("key");
+  const jwksFlag = args.flags.get("jwks");
+  if (typeof keyFlag === "string" && typeof jwksFlag === "string") {
+    process.stderr.write(
+      "chirindo verify: --key and --jwks are alternative key sources; pass at most one\n",
+    );
+    return 2;
+  }
+  const maxSkewFlag = args.flags.get("max-skew-ms");
+  const skewOpt =
+    typeof maxSkewFlag === "string"
+      ? { maxSkewMs: Number.parseInt(maxSkewFlag, 10) }
+      : {};
+
+  // JWKS resolution precedence: --jwks <url> > $RECORDER_JWKS_URL > default.
+  // Bare `--jwks` (no value) opts into the env-or-default URL — the form the
+  // README's getting-started step 5 uses to keep the payoff command short.
+  const envJwksUrl = process.env[JWKS_URL_ENV_VAR];
+  const wantsJwks =
+    jwksFlag !== undefined ||
+    (typeof keyFlag !== "string" && envJwksUrl !== undefined);
+  let result;
+  if (wantsJwks) {
+    const jwksUrl =
+      typeof jwksFlag === "string"
+        ? jwksFlag
+        : (envJwksUrl ?? DEFAULT_JWKS_URL);
+    result = await runVerify({ chainPath, jwksUrl, ...skewOpt });
+  } else {
+    const identityPath =
+      typeof keyFlag === "string"
+        ? resolvePath(keyFlag)
+        : join(resolvePath(DATA_DIR), IDENTITY_FILENAME);
+    result = runVerify({ chainPath, identityPath, ...skewOpt });
+  }
+
+  const formatted = formatVerifyResult(result);
+  process.stdout.write(formatted.line + "\n");
+  return formatted.exitCode;
+}
+
+async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   if (
     args.command === undefined ||
@@ -271,6 +346,8 @@ function main(argv: string[]): number {
       return cmdInit(args);
     case "proxy":
       return cmdProxy(args);
+    case "verify":
+      return await cmdVerify(args);
     default:
       process.stderr.write(`unknown command: ${args.command}\n`);
       process.stderr.write(helpText());
@@ -278,4 +355,12 @@ function main(argv: string[]): number {
   }
 }
 
-process.exitCode = main(process.argv.slice(2));
+main(process.argv.slice(2)).then(
+  (code) => {
+    process.exitCode = code;
+  },
+  (e) => {
+    process.stderr.write(`fatal: ${(e as Error).message}\n`);
+    process.exitCode = 1;
+  },
+);
