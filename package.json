@@ -11,7 +11,7 @@
     "access": "public"
   },
   "bin": {
-    "chirindo": "./dist/cli.js"
+    "chirindo": "dist/cli.js"
   },
   "files": [
     "dist",
