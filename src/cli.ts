@@ -37,7 +37,7 @@ import {
   loadFullIdentity,
   runInit,
   runVerify,
-} from "recorder";
+} from "./vendor/recorder/index.js";
 import { loadPolicy } from "./policy.js";
 import { runProxy, spawnRealDownstream } from "./proxy.js";
 

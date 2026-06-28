@@ -10,7 +10,7 @@ import {
   parseChainJsonl,
   runVerify,
   serializeChainJsonl,
-} from "recorder";
+} from "../src/vendor/recorder/index.js";
 import { loadPolicy } from "../src/policy.js";
 import { runProxy } from "../src/proxy.js";
 import {

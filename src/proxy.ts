@@ -24,7 +24,7 @@
 
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
-import type { LoadedFullIdentity } from "recorder";
+import type { LoadedFullIdentity } from "./vendor/recorder/index.js";
 import { type Policy, type PolicyDecision, evaluate } from "./policy.js";
 import { appendReceipt, type GateDecision } from "./receipt.js";
 import {

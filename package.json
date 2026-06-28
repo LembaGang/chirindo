@@ -1,6 +1,6 @@
 {
   "name": "@headlessoracle/chirindo",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "description": "Chirindo — a fail-closed cryptographic gate for the MCP tool-call boundary. The watchtower for your AI agents. By Headless Oracle.",
   "license": "Apache-2.0",
@@ -11,6 +11,12 @@
   "bin": {
     "chirindo": "./dist/cli.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
@@ -18,7 +24,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server-everything": "^2026.1.26",
-    "recorder": "file:../recorder"
+    "canonicalize": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.12.0",

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { PassThrough, type Readable, type Writable } from "node:stream";
-import { runInit, loadFullIdentity } from "recorder";
+import { runInit, loadFullIdentity } from "../src/vendor/recorder/index.js";
 import type { DownstreamProcess } from "../src/proxy.js";
 import type { Policy } from "../src/policy.js";
 
