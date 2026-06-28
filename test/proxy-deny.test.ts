@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseChainJsonl, runVerify } from "recorder";
+import { parseChainJsonl, runVerify } from "../src/vendor/recorder/index.js";
 import { loadPolicy } from "../src/policy.js";
 import { runProxy } from "../src/proxy.js";
 import {

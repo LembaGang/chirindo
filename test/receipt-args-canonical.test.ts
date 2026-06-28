@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { argsHash, parseChainJsonl } from "recorder";
+import { argsHash, parseChainJsonl } from "../src/vendor/recorder/index.js";
 import { appendReceipt, buildEvent } from "../src/receipt.js";
 import {
   cleanupTmpDir,

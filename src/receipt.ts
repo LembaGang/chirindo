@@ -31,7 +31,7 @@ import {
   type Outcome,
   type RecordContent,
   type SignedRecord,
-} from "recorder";
+} from "./vendor/recorder/index.js";
 
 export interface GateDecisionAllow {
   kind: "allow";

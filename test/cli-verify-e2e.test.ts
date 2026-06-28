@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseChainJsonl, serializeChainJsonl } from "recorder";
+import { parseChainJsonl, serializeChainJsonl } from "../src/vendor/recorder/index.js";
 import { loadPolicy } from "../src/policy.js";
 import { runProxy } from "../src/proxy.js";
 import {
