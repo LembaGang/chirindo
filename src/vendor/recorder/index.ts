@@ -30,6 +30,8 @@ export {
   entryHashOfCanonical,
   genesisInput,
   genesisPrevHash,
+  resultHash,
+  resultHashFromJsonString,
   sha256Hex,
 } from "./hash.js";
 export type { GenesisInput } from "./hash.js";

@@ -41,6 +41,32 @@ export function argsHashFromJsonString(toolInputJson: string): string {
   }
 }
 
+// result_hash for the MCP tool result (the `result` field of a JSON-RPC
+// response — typically `{ content, isError }`).
+//
+// Same canonicalization-bug class as args_hash: a verifier given the same
+// result value must derive byte-identical bytes regardless of how the
+// downstream server happened to serialize it. JSON.stringify is non-canonical
+// (key order, whitespace, number formatting all vary by serializer). JCS
+// yields one canonical byte sequence, so result_hash recomputes byte-for-byte
+// from the parsed value. Versioned change, no backwards compatibility needed
+// — there are no external consumers of the prior format.
+export function resultHash(result: unknown): string {
+  return "sha256:" + sha256Hex(jcsBytes(result));
+}
+
+// Convenience for callers whose payload is a JSON-encoded result string
+// (e.g. Cursor's afterMCPExecution `result_json` field). Parses, then JCS-
+// canonicalizes. Falls back to raw UTF-8 bytes only if parsing fails — the
+// observe-only-with-best-effort posture mirroring argsHashFromJsonString.
+export function resultHashFromJsonString(resultJson: string): string {
+  try {
+    return resultHash(JSON.parse(resultJson));
+  } catch {
+    return "sha256:" + sha256Hex(Buffer.from(resultJson, "utf8"));
+  }
+}
+
 // entry_hash = "sha256:" + lowercase hex of SHA-256 over the JCS canonical
 // bytes of the record content (everything except `sig`).
 export function entryHashOfCanonical(canonicalBytes: Buffer): string {

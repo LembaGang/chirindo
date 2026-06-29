@@ -25,6 +25,7 @@ import {
   jcsBytes,
   readChainFileOrEmpty,
   requestCommitment,
+  resultHash,
   signEd25519,
   type LoadedFullIdentity,
   type McpCallEvent,
@@ -53,7 +54,13 @@ export interface ReceiptInputs {
   // `argsHash` helper, which canonicalizes with RFC 8785 JCS — see that
   // function's doc for why this changed from JSON.stringify.
   toolArgs: unknown;
-  resultJson?: string | undefined; // tool response (allow path only)
+  // The MCP tool result — the `result` field of the JSON-RPC response from
+  // the downstream (typically `{ content, isError }`). Hashed via the
+  // recorder's `resultHash` helper (RFC 8785 JCS over the value) so an
+  // independent verifier given the same result derives byte-identical
+  // bytes — recomputability, same as args_hash. Undefined on the deny
+  // path (no downstream response was generated).
+  toolResult?: unknown;
   decision: GateDecision;
   ts?: string;
 }
@@ -81,8 +88,8 @@ export function buildEvent(inputs: ReceiptInputs): McpCallEvent {
     decision: inputs.decision.kind === "allow" ? "allow" : "deny",
     decision_source: "config",
   };
-  if (inputs.resultJson !== undefined) {
-    event.result_hash = "sha256:" + sha256OfUtf8(inputs.resultJson);
+  if (inputs.toolResult !== undefined) {
+    event.result_hash = resultHash(inputs.toolResult);
   }
   return event;
 }
@@ -138,9 +145,4 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
   const record: SignedRecord = { ...content, sig };
   appendRecordLine(inputs.chainPath, record);
   return record;
-}
-
-import { createHash } from "node:crypto";
-function sha256OfUtf8(s: string): string {
-  return createHash("sha256").update(Buffer.from(s, "utf8")).digest("hex");
 }
