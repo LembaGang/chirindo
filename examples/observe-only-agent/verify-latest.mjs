@@ -1,22 +1,18 @@
 #!/usr/bin/env node
-// Verify the most recent session's chain file against the live JWKS.
+// Verify the most recent session's chain file OFFLINE against the
+// adopter's local identity. This is the no-network path — useful when
+// the chain has no `jwks_uri` OR when the adopter wants to confirm
+// signature integrity without trusting any external publication.
 //
-// Equivalent to running, by hand:
-//   npx chirindo verify ./.gate/sessions/<id>.jsonl --jwks
-//
-// The bare `--jwks` form resolves the verifier's public key over HTTPS
-// from $RECORDER_JWKS_URL (or the recorder's published default). On
-// success, prints VALID and exits 0. On a tampered chain, exits 1. The
-// example assumes you've just run `npm run harness`.
+// For the self-describing-receipt path (chain has `jwks_uri`, resolve
+// from THAT URL over HTTPS), see `prove-self-describing.mjs`.
 
 import { readdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
 
 const sessionsDir = join(__dirname, ".gate", "sessions");
 const files = readdirSync(sessionsDir).filter((f) => f.endsWith(".jsonl")).sort();
@@ -26,10 +22,12 @@ if (files.length === 0) {
 }
 const latest = join(sessionsDir, files[files.length - 1]);
 
-const chirindoPkg = require.resolve("@headlessoracle/chirindo/package.json");
-const chirindoCli = join(dirname(chirindoPkg), "dist", "cli.js");
+const chirindoCli = resolve(__dirname, "..", "..", "dist", "cli.js");
+const identity = join(__dirname, ".gate", "identity.json");
 
-const r = spawnSync(process.execPath, [chirindoCli, "verify", latest, "--jwks"], {
-  stdio: "inherit",
-});
+const r = spawnSync(
+  process.execPath,
+  [chirindoCli, "verify", latest, "--key", identity],
+  { stdio: "inherit" },
+);
 process.exit(r.status ?? 1);

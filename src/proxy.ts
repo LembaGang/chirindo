@@ -48,6 +48,11 @@ export interface ProxyDeps {
   sessionId: string;
   serverLabel: string;
   chainPath: string;
+  // OPTIONAL — HTTPS URL where this gate's JWKS is published. When set,
+  // every emitted receipt carries this URL in `jwks_uri` inside the signed
+  // bytes, telling verifiers where to fetch the public key for `kid`. The
+  // signer commits to a specific location; HO is not in the trust path.
+  jwksUri?: string;
   log: (msg: string) => void; // writes to stderr in production
   now?: () => string;
 }
@@ -197,6 +202,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
         toolArgs: args.toolArgs,
         toolResult: args.toolResult,
         decision: args.decisionForReceipt,
+        ...(deps.jwksUri !== undefined ? { jwksUri: deps.jwksUri } : {}),
         ...(deps.now ? { ts: deps.now() } : {}),
       });
       receiptCount += 1;

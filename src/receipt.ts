@@ -61,6 +61,13 @@ export interface ReceiptInputs {
   // bytes — recomputability, same as args_hash. Undefined on the deny
   // path (no downstream response was generated).
   toolResult?: unknown;
+  // OPTIONAL HTTPS URL where this gate's JWKS is published. When set, every
+  // emitted receipt carries it in `jwks_uri` inside the signed bytes —
+  // committing the signer to the location where verifiers can fetch this
+  // receipt's signing key, with no Headless Oracle / Chirindo-hosted JWKS
+  // in the trust path. Omitted ⇒ existing fallback behavior (verifier uses
+  // its configured JWKS URL or local identity).
+  jwksUri?: string;
   decision: GateDecision;
   ts?: string;
 }
@@ -114,6 +121,14 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
   // the spike, the receipt's own entry_hash, which a verifier can recompute.
   // Productization: gate_receipt becomes a hash of an external pre-action
   // attestation bundle (resolved via the JWKS path), not the record itself.
+  //
+  // jwks_uri is added conditionally via spread — NOT as `jwks_uri: undefined`.
+  // The canonicalize lib elides undefined properties at runtime, but spreading
+  // an absent key keeps the produced object byte-identical to a pre-jwks_uri
+  // receipt under JCS (the key simply doesn't appear in the canonical form).
+  // That's the backward-compatibility guarantee: a verifier given an old
+  // receipt and a new verifier given the same old receipt compute the same
+  // canonical bytes, so signatures keep verifying.
   const partial: RecordContent = {
     v: RECORD_VERSION,
     seq,
@@ -128,6 +143,7 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
       gate_family: "permit",
       result: inputs.decision.kind === "allow" ? "act" : "halt",
     },
+    ...(inputs.jwksUri !== undefined ? { jwks_uri: inputs.jwksUri } : {}),
     prev_hash,
     kid: inputs.identity.kid,
   };

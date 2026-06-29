@@ -1,15 +1,22 @@
 # Observe-only MCP agent + Chirindo (end-to-end example)
 
 A complete, runnable example showing how to wire **Chirindo** in front of
-a stdio MCP server as an **observe-only sidecar**: every consequential
-tool call still executes against the downstream as before, and each one
+a stdio MCP server as an **observe-only sidecar**. Every consequential
+tool call still executes against the downstream as before; each one
 emits a signed, hash-chained receipt you can independently verify.
 
-This example uses the published [`@headlessoracle/chirindo`][npm] package
-from npm — no local Chirindo checkout required. If `npm install` in this
-directory succeeds, you have everything you need.
+This iteration of the example demonstrates **self-describing receipts**:
+the gate stamps the URL of its own published JWKS into every receipt's
+signed bytes, so a stranger holding only the chain file can fetch the
+gate's public key from a location *the adopter controls* and verify —
+with Headless Oracle **not in the trust path**.
 
-[npm]: https://www.npmjs.com/package/@headlessoracle/chirindo
+> Build dependency: this example references the in-repo `dist/cli.js`
+> directly (`node ../../dist/cli.js ...`) — `jwks_uri`, `--jwks-uri`,
+> and `export-jwks` are post-0.1.0 features that aren't in the
+> published `@headlessoracle/chirindo@0.1.0` yet. After a tagged release
+> ships them, the example will swap to a normal `npm install
+> @headlessoracle/chirindo@^x.y.z` dep.
 
 ---
 
@@ -17,26 +24,27 @@ directory succeeds, you have everything you need.
 
 | File | Role |
 |---|---|
-| `package.json` | Pins `@headlessoracle/chirindo`. Defines the three npm scripts you'll run. |
+| `package.json` | Defines the npm scripts you'll run. No dependencies — the example shells out to `../../dist/cli.js`. |
 | `downstream-mcp-server.mjs` | A minimal stdio MCP server exposing three tools: `get_quote` (safe), `mock_swap`, `mock_send` (both "consequential" — in production they'd move money). |
 | `policy.json` | `{ "deny": [] }` — observe-only. No tool calls are blocked; every call is recorded. |
-| `harness.mjs` | Drives the gate as if it were Claude Desktop / Cursor: spawns `chirindo proxy`, talks MCP to it, calls `mock_swap`, closes the session. |
-| `verify-latest.mjs` | Convenience: verifies the newest chain file against the live JWKS. |
+| `harness.mjs` | Drives the gate as if it were Claude Desktop / Cursor: spawns `chirindo proxy`, talks MCP to it, calls `mock_swap`, closes the session. Honors `JWKS_URI` env var to stamp self-describing receipts. |
+| `verify-latest.mjs` | Verifies the newest chain file. With `jwks_uri` stamped, the bare `chirindo verify` form resolves automatically. |
+| `prove-self-describing.mjs` | Demonstrates the self-describing path on the adopter's OWN chain, with the JWKS pre-seeded in-process (a stand-in for the network fetch — same crypto path). |
 | `cursor-mcp.json` | Drop-in Cursor config template (replace `<ABSOLUTE-PATH-TO-EXAMPLE>`). |
 | `claude_desktop_config.json` | Same shape, for Claude Desktop. |
-| `sample-chain/sample.jsonl` | A pre-recorded chain signed by a key already published on Headless Oracle's live JWKS — used in §5 below to demonstrate the `--jwks` verify path returning `VALID` end-to-end. |
+| `sample-chain/sample.jsonl` | A pre-recorded chain signed by a key already published on Headless Oracle's live JWKS — used in §5 to demonstrate the legacy fallback path returning `VALID`. |
 
 ---
 
-## 1. Install
+## 1. Build the parent repo
 
 ```
-npm install
+( cd ../.. && npm install && npm run build )
 ```
 
-Pulls `@headlessoracle/chirindo` (and its single non-dev dependency,
-`canonicalize`, for RFC 8785 JCS) from npm. The CLI lands at
-`node_modules/.bin/chirindo`.
+This example shells out to `../../dist/cli.js` rather than installing
+Chirindo as an npm dep (see the build-dependency note above). There's
+no `npm install` step inside the example directory.
 
 ## 2. Initialize the gate's signing identity
 
@@ -55,195 +63,140 @@ initialized chirindo at <abs>/examples/observe-only-agent/.gate
 
 `.gate/` is gitignored. The private key never leaves your machine.
 
-## 3. Run the example agent
+## 3. Export your JWKS
 
 ```
-npm run harness
+npm run export-jwks
 ```
 
-This spawns `chirindo proxy` with `downstream-mcp-server.mjs` as the
-mediated child, then drives MCP over the proxy:
-
-1. `initialize` → handshake
-2. `tools/list` → returns `get_quote`, `mock_swap`, `mock_send`
-3. `tools/call mock_swap` with `{ pair: "ETH/USDC", amount_in: 0.25, slippage_bps: 50 }`
-4. close stdin → proxy shuts down
-
-Real output (captured from this directory):
+Writes `./jwks.json` containing the gate's public key as a JWK with the
+correct `kid`, `kty:OKP`, `crv:Ed25519`, `use:sig`, `alg:EdDSA` — the
+exact shape Headless Oracle's own JWKS uses (the formats are
+interchangeable from the verifier's perspective). Real output:
 
 ```
-[chirindo] boot: cwd=<abs>/examples/observe-only-agent dir=<abs>/.gate chain=<abs>/.gate/sessions/<session-id>.jsonl
-[chirindo] proxy up: server-label='observe-only-example' session=<session-id> chain=<abs>/.gate/sessions/<session-id>.jsonl
+exported chirindo JWKS
+  kid:  ed25519/<id>
+  file: <abs>/.../jwks.json
+
+Host this file at an https:// URL you control, then pass that URL
+to 'chirindo proxy --jwks-uri <url>' so every receipt names where
+verifiers should fetch its signing key.
+```
+
+**Hosting**: upload `jwks.json` anywhere that serves it over HTTPS — your
+domain, GitHub Pages, S3 + CloudFront, an existing nginx config, an
+edge worker, anywhere. Chirindo provides the file; you provide the URL.
+The published URL is what goes into `--jwks-uri` in step 4.
+
+## 4. Run the example with self-describing receipts
+
+Point the harness at the URL you hosted `jwks.json` at in step 3:
+
+```
+JWKS_URI=https://your-domain.example/path/jwks.json npm run harness
+```
+
+The proxy launches with `--jwks-uri <url>` and stamps that URL into
+every receipt's `jwks_uri` field — **inside the signed bytes**, so any
+post-sign mutation breaks the signature. A stranger holding only the
+resulting chain file now sees, in the first record, where to fetch the
+public key. Real output (with `JWKS_URI=https://adopter.example/.well-known/jwks.json`):
+
+```
+[chirindo] boot: cwd=<abs>/examples/observe-only-agent dir=<abs>/.gate chain=<abs>/.gate/sessions/<sid>.jsonl
+[chirindo] proxy up: server-label='observe-only-example' session=<sid> chain=<abs>/.gate/sessions/<sid>.jsonl jwks_uri=https://adopter.example/.well-known/jwks.json
 [harness] downstream exposes tools: get_quote, mock_swap, mock_send
 [proxy] ALLOW tool='mock_swap' forwarded id=3
 [downstream] CONSEQUENTIAL mock_swap executed: pair='ETH/USDC' amount_in=0.25
 [harness] mock_swap response: swap submitted (mock): 0.25 of ETH/USDC — tx 0xMOCK<hex>
-[harness] session_id=<session-id>
-[harness] chain file: <abs>/.gate/sessions/<session-id>.jsonl
 [chirindo] proxy exiting (1 receipts written)
 ```
 
-The `CONSEQUENTIAL mock_swap executed` line comes from the downstream
-itself — proof the proxy is **observing**, not blocking. Switching to
-enforcement is one rule in `policy.json` (see §6).
+## 5. Verify — the legacy HO-hosted demo (pre-jwks_uri receipts)
 
-## 4. Inspect the receipt
-
-```
-ls .gate/sessions/
-cat .gate/sessions/<session-id>.jsonl
-```
-
-One JSONL line per `tools/call`. Pretty-printed, an `ALLOW` receipt for
-the `mock_swap` call looks like this (this is the actual `sample.jsonl`
-shipped in `sample-chain/`):
-
-```json
-{
-  "v": "evidence.action/0",
-  "seq": 0,
-  "session_id": "jwks-demo-00000000-0000-0000-0000-000000000001",
-  "ts": "2026-06-29T13:32:06.545Z",
-  "agent": { "vendor": "chirindo", "version": "0.0.1" },
-  "event": {
-    "type": "mcp_call",
-    "outcome": "executed",
-    "server": "observe-only-example",
-    "tool_name": "mock_swap",
-    "args_hash": "sha256:7abf24ca72b407e2510f88c812b28f00845a4700f1263024cd0408a57732a659",
-    "decision": "allow",
-    "decision_source": "config",
-    "result_hash": "sha256:39b5f73204e256bc13f077545967661ae1688a66125173723131989c7dc7aa2b"
-  },
-  "request_commitment": "sha256:cd50d3db0fb418c1db8883064759c6d795320b904260a063209ee7f2de0730a3",
-  "gate": {
-    "request_commitment": "sha256:cd50d3db0fb418c1db8883064759c6d795320b904260a063209ee7f2de0730a3",
-    "gate_receipt": "sha256:d23e6d4737bb2a85ebcb6e7a55e10b8db001d8b1c7190df764039bde15c64927",
-    "gate_family": "permit",
-    "result": "act"
-  },
-  "prev_hash": "sha256:0f5ca40c5b98d9e883f8ec82a1cd68a018cd2515b92cbc3ba61e2e335668bb10",
-  "kid": "ed25519/nQgjxdLXI3wJ",
-  "sig": "FeKs3gJlCb1lGjJEl1b2LY4wMrFb5qpP2lZn0llbi4WO0VXaUPsF-6_zjRVo0xHrCwdg6BGxB9LzV6XitbzoBA"
-}
-```
-
-Notes on the shape:
-- `args_hash` is SHA-256 over **RFC 8785 JCS** of the tool arguments —
-  meaning a verifier given the same arguments value derives byte-identical
-  bytes regardless of key order, whitespace, or number formatting.
-- `request_commitment` is mirrored into `gate.request_commitment` — the
-  *continuity invariant*. The gate's decision is bound to the exact
-  request it saw.
-- `gate.gate_receipt` is self-anchored: the receipt's own `entry_hash`,
-  recomputable by the verifier.
-- `prev_hash` chains this entry to the previous one (or a deterministic
-  genesis derived from `session_id` for `seq:0`).
-- `sig` is Ed25519 over the canonical JCS bytes.
-
-## 5. Verify the chain — `VALID` against the live JWKS
-
-The interesting verification is the **public, network-resolved** one:
-fetch the gate's public key from
-`https://headlessoracle.com/.well-known/jwks.json` over HTTPS, then
-verify every signature and chain link.
-
-A chain verifies against the live JWKS only if its `kid` is on that
-JWKS. The shipped `sample-chain/sample.jsonl` is signed by
-`ed25519/nQgjxdLXI3wJ`, which is published — so the JWKS path returns
-`VALID` for it without any setup on your part. Run:
+A receipt without `jwks_uri` falls back to the verifier's configured
+JWKS URL (the existing `--jwks` flag and its `$RECORDER_JWKS_URL` /
+default). The shipped `sample-chain/sample.jsonl` is signed by a key
+that's *already* on Headless Oracle's published JWKS, so it verifies
+end-to-end with no setup:
 
 ```
-node node_modules/@headlessoracle/chirindo/dist/cli.js verify \
-  sample-chain/sample.jsonl --jwks
+node ../../dist/cli.js verify sample-chain/sample.jsonl --jwks
 ```
 
-Real output (captured 2026-06-29):
+Real output (captured against the live HO JWKS):
 
 ```
 VALID — 1 entries, chain intact, all signatures verified, session jwks-demo-00000000-0000-0000-0000-000000000001
 ```
 
-This is the payoff. **Without trusting this repo, the example code, the
-binary you ran, or the network path between you and the downstream MCP
-server**, a third party with only the chain file and an internet
-connection has confirmed:
+This is the v0.1.0 demo from the previous iteration. It still works
+because the record has no `jwks_uri` and the verifier falls back to
+HO's URL. The interesting demo today is §6.
 
-- Every entry is signed by a key the JWKS publishes.
-- The chain's hash linkage is intact end-to-end.
-- The `gate.request_commitment` matches the entry's `request_commitment`
-  (the gate saw and decided exactly the request that's in the receipt).
-
-### Your own chain: offline verify
-
-The chain produced by **your** `npm run harness` run is signed by the
-freshly-generated key under `./.gate/identity.json`. That key isn't on
-Headless Oracle's JWKS — and shouldn't be, until *you* publish it (see
-the main repo's `docs/JWKS-OPS.md` for how a gate's key gets onto a
-hosted JWKS, including the add-and-retain invariant). For now, verify
-your own chain **offline** against your local public key:
+## 6. Verify your OWN chain via the embedded jwks_uri — the new payoff
 
 ```
-npm run verify
+npm run prove-self-describing
 ```
 
-That script wraps:
+What it does: reads your harness chain, extracts `jwks_uri` from the
+first record (the URL you set in step 4), pre-seeds the in-process JWKS
+cache with the contents of `./jwks.json` as if it had just been fetched
+from that URL, then calls the production verification path. Real
+output (captured 2026-06-29):
 
 ```
-node node_modules/@headlessoracle/chirindo/dist/cli.js verify \
-  .gate/sessions/<newest>.jsonl --key .gate/identity.json
+proving self-describing verification:
+  chain:    <abs>/.gate/sessions/self-describing-demo-000.jsonl
+  jwks_uri: https://adopter.example/.well-known/jwks.json  (from inside signed bytes)
+  kid:      ed25519/ZP8V_XzL2rAk
+  JWKS:     <abs>/jwks.json (pre-seeded as if fetched from jwks_uri)
+
+VALID — 1 entries, chain intact, all signatures verified, session self-describing-demo-000
 ```
 
-Real output (captured running this example with a freshly-init'd
-`.gate/`):
+The cryptographic verification path (signature, chain linkage, JCS
+recompute) is the production code path. The cache seam short-circuits
+*only* the HTTPS GET. In production the verifier issues that GET to
+your hosted URL and receives the same JWKS bytes. Once you've hosted
+`jwks.json` at a real URL, the equivalent command is just:
 
 ```
-VALID — 1 entries, chain intact, all signatures verified, session 00000000-0000-0000-0000-000000000001
+chirindo verify .gate/sessions/<session>.jsonl
 ```
 
-Same engine, same vocabulary; just a different public-key source.
+— with no flag. The verifier reads `jwks_uri` from inside the signed
+bytes, fetches over HTTPS, finds the JWK matching `kid`, verifies.
+Headless Oracle is never consulted.
 
-### What the receipts prove (and don't)
+### What this proves (calibrated)
 
-**Prove**:
-- The gate fired for each `tools/call` that produced a line.
-- The chain is recomputable from the signed records: given any prefix,
-  the next entry's `prev_hash` is the previous entry's canonical hash.
-- The signing key matches the `kid` published in the verifier's key
-  source (live JWKS or local identity.json).
+- The gate fired for each `tools/call` and produced a signed receipt.
+- The chain is recomputable from the signed records.
+- The signature matches the key at the **signer's own published
+  location**, with **Headless Oracle not in the trust path**.
 
 **Tamper-evident, not tamper-proof**: any actor with the chain file can
 rewrite history, but a mutation breaks the hash chain and is caught by
-`chirindo verify` (which will print `TAMPERED — <reason>` and exit 1).
+`chirindo verify`. The `jwks_uri` field is inside the signed bytes:
+rewriting it to point at an attacker-controlled JWKS does NOT bypass
+the signature — the signature is over the original bytes, so the
+verifier reports `TAMPERED — signature invalid` (covered by the
+`tampering jwks_uri after signing trips the signature check` test in
+the suite).
 
 **Do NOT prove**: that an action was "safe," "correct," or "approved by
 a human" — only that the decision was captured, signed, and tamper-
-evident. The gate's `decision: "allow"` here just means policy.json had
-no matching deny rule; an `ALLOW` receipt is *evidence the gate evaluated
-this call*, not a stamp of safety.
+evident. The gate's `decision: "allow"` here just means `policy.json`
+had no matching deny rule.
 
-## 6. Wire it into a real MCP client (Cursor / Claude Desktop)
+## 7. Wire it into a real MCP client (Cursor / Claude Desktop)
 
-The harness is a stand-in for a real MCP client. For the actual product
-experience, drop the gate in front of the downstream by editing your
-client's MCP server config. Templates ship in this directory.
-
-### Cursor
-
-Copy `cursor-mcp.json` to `<your-project>/.cursor/mcp.json` (or
-`~/.cursor/mcp.json` for a user-global config). Replace every
-`<ABSOLUTE-PATH-TO-EXAMPLE>` with the absolute path to this example
-directory.
-
-### Claude Desktop
-
-Copy `claude_desktop_config.json` to:
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-
-Same substitution.
-
-### What's in the template
+Drop-in templates in `cursor-mcp.json` / `claude_desktop_config.json`.
+Replace `<ABSOLUTE-PATH-TO-EXAMPLE>` and add `--jwks-uri` to the args
+array if you want self-describing receipts:
 
 ```json
 {
@@ -255,6 +208,7 @@ Same substitution.
         "--policy",       "<ABSOLUTE-PATH-TO-EXAMPLE>/policy.json",
         "--server-label", "observe-only-example",
         "--dir",          "<ABSOLUTE-PATH-TO-EXAMPLE>/.gate",
+        "--jwks-uri",     "https://your-domain.example/path/jwks.json",
         "--",
         "node", "<ABSOLUTE-PATH-TO-EXAMPLE>/downstream-mcp-server.mjs"
       ]
@@ -263,15 +217,12 @@ Same substitution.
 }
 ```
 
-`npx -y @headlessoracle/chirindo` is the same launch path that worked in
-this README — what the agent invokes is exactly what you tested. After
-saving the config and restarting your client, `observe-only-example-gated`
-appears as an MCP server. Any `tools/call` it routes will produce a new
-line in `<example>/.gate/sessions/<session-id>.jsonl`.
+Restart the client. Any `tools/call` it routes produces a new line in
+`<example>/.gate/sessions/<session-id>.jsonl` with `jwks_uri` stamped.
 
-## 7. Enforcement is one rule away
+## 8. Enforcement is one rule away
 
-To convert observe-only into a real gate, edit `policy.json`:
+Same as before: edit `policy.json`:
 
 ```json
 {
@@ -281,28 +232,27 @@ To convert observe-only into a real gate, edit `policy.json`:
 }
 ```
 
-Restart your MCP client (or re-run the harness). Now if the agent calls
-`mock_send`, the downstream **never sees the call** — the proxy
-synthesizes a tool-execution-error response (`isError: true`), and the
-chain gets a `DENY` receipt with `event.decision: "deny"`,
-`event.outcome: "denied"`, and `gate.result: "halt"`. `chirindo verify`
-still returns `VALID` — the same shape, signed, chain-linked.
-
-That's the entire observe → enforce transition. Same gate, same
-receipts, one extra line.
+The downstream never sees a `mock_send` call; the chain gets a `DENY`
+receipt with `event.decision: "deny"` and `gate.result: "halt"`.
+`chirindo verify` still returns `VALID`.
 
 ---
 
 ## Gap (per the standing instruction)
 
-The example demonstrates the JWKS verification path using a chain
-**signed by a key already on the published JWKS**. A real integrator's
-own gate cannot get an `--jwks VALID` until their public key is
-published (manually, today, via the v5 Worker per
-`docs/JWKS-OPS.md`). The publication step is a human-in-the-loop edit
-of a different repo — that's the next thing to automate before this
-example scales to a self-serve adopter flow. A hosted "bring your own
-JWKS" path (point `RECORDER_JWKS_URL` at *your* domain) is the
-agent-consumable answer; today it works at the protocol level (the env
-var is honored end-to-end) but there's no tooling to help an integrator
-stand up that endpoint.
+The example uses an HTTPS URL the adopter promises to host, but
+**publishes nothing on its own**. A self-serve hosting story would
+shrink the time-to-first-verify further: e.g. a `chirindo serve-jwks
+--port 443 --cert ...` to stand up a minimal Workers-style endpoint
+from the gate dir directly, or first-class integration with common
+hosts (GitHub Pages, R2 + Workers, S3 + CloudFront) that takes
+`jwks.json` and a domain and gives back the live URL. Today the
+adopter is on the hook for that last hop — they can do it in any
+number of ways, but Chirindo doesn't carry them.
+
+Closely related: agents discovering an MCP gate's `jwks_uri` ahead of
+time (e.g. via a `.well-known/agent-attestation` document at the
+gate's domain) would let a verifying agent decide whether to trust a
+new tool call BEFORE seeing the receipt — the agent-consumable
+direction of the same problem. Out of scope for this iteration, but
+worth naming.

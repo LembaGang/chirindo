@@ -33,8 +33,12 @@ import {
   IDENTITY_FILENAME,
   JWKS_URL_ENV_VAR,
   PRIVATE_KEY_FILENAME,
+  buildJwk,
+  buildJwks,
   formatVerifyResult,
   loadFullIdentity,
+  readChainFile,
+  readIdentityFile,
   runInit,
   runVerify,
 } from "./vendor/recorder/index.js";
@@ -47,12 +51,14 @@ function helpText(): string {
   return `chirindo — fail-closed cryptographic gate at the MCP tools/call boundary
 
 Usage:
-  chirindo init   [--dir <path>]
-  chirindo proxy  --policy <file> --server-label <name>
-                  [--dir <path>] [--chain <file>] [--session-id <id>]
-                  -- <downstream-command> [<args>...]
-  chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]
-                  [--max-skew-ms <ms>]
+  chirindo init        [--dir <path>]
+  chirindo export-jwks [--dir <path>] [--out <file>]
+  chirindo proxy       --policy <file> --server-label <name>
+                       [--dir <path>] [--chain <file>] [--session-id <id>]
+                       [--jwks-uri <https-url>]
+                       -- <downstream-command> [<args>...]
+  chirindo verify      <chain-file> [--key <identity.json> | --jwks [<url>]]
+                       [--max-skew-ms <ms>]
 
 Defaults:
   data dir = ./${DATA_DIR}/
@@ -61,12 +67,24 @@ Defaults:
   session-id = random UUID v4
   --key    = <data-dir>/${IDENTITY_FILENAME}
   --jwks   = $${JWKS_URL_ENV_VAR} or ${DEFAULT_JWKS_URL}
+  --out    (export-jwks) = <data-dir>/jwks.json
 
-Key sources for verify: --key (local, offline) and --jwks (remote, HTTPS)
-are alternatives — pass at most one. Without either, --key is used.
+Self-describing receipts:
+  --jwks-uri <https-url> on \`proxy\` stamps the operator's published JWKS
+  location into every receipt's signed bytes. Verifiers given the chain
+  resolve the key from that URL — Headless Oracle is not in the trust
+  path. Use \`chirindo export-jwks\` to produce the file you host there.
+
+verify key resolution (in precedence order):
+  --key <file>                            local identity, no network
+  --jwks <url>                            explicit URL, overrides embedded jwks_uri
+  --jwks (no value), record has jwks_uri  use the embedded URL (self-describing)
+  --jwks (no value), no embedded URL      $${JWKS_URL_ENV_VAR} or ${DEFAULT_JWKS_URL}
+  no flag, record has jwks_uri            use the embedded URL (self-describing)
+  no flag, no embedded URL                local <data-dir>/${IDENTITY_FILENAME}
 
 Exit codes:
-  0  proxy ran to clean shutdown / init succeeded / VALID
+  0  proxy ran to clean shutdown / init / export-jwks succeeded / VALID
   1  proxy startup error / TAMPERED / UNRESOLVED
   2  usage error
 `;
@@ -155,6 +173,61 @@ function probeChainDirOrFatal(chainPath: string): void {
   }
 }
 
+// `chirindo export-jwks` — write a hostable jwks.json from the local
+// gate identity. The output is exactly what an adopter uploads to their
+// own HTTPS-served URL so that `chirindo verify --jwks <their-url>` (or
+// the embedded-jwks_uri path) can resolve the signing key. The JWK
+// shape mirrors the format Headless Oracle's own JWKS serves — same
+// kty/crv/use/alg, same kid string — so adopter-hosted and HO-hosted
+// JWKS documents are interchangeable from the verifier's perspective.
+function cmdExportJwks(args: ParsedArgs): number {
+  const dir = resolvePath((args.flags.get("dir") as string) ?? DATA_DIR);
+  const identityPath = join(dir, IDENTITY_FILENAME);
+  let identity;
+  try {
+    identity = readIdentityFile(identityPath);
+  } catch (e) {
+    process.stderr.write(
+      `[chirindo] cannot read identity at ${identityPath}: ${(e as Error).message}\n` +
+        `[chirindo] run 'chirindo init' first.\n`,
+    );
+    return 1;
+  }
+  const jwks = buildJwks([
+    buildJwk({
+      kid: identity.kid,
+      publicKeyBase64Url: identity.public_key_b64url,
+    }),
+  ]);
+  const outFlag = args.flags.get("out");
+  const outPath =
+    typeof outFlag === "string" ? resolvePath(outFlag) : join(dir, "jwks.json");
+  try {
+    mkdirSync(dirname(outPath), { recursive: true });
+    // Pretty-print with newline: a hosted jwks.json is meant to be read by
+    // humans and edge proxies; nothing here is byte-sensitive (the verifier
+    // re-parses the JSON anyway). Trailing newline by convention.
+    writeFileSync(outPath, JSON.stringify(jwks, null, 2) + "\n", "utf8");
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    process.stderr.write(
+      `[chirindo] cannot write JWKS to ${outPath} ` +
+        `(code=${err.code ?? "?"} syscall=${err.syscall ?? "?"}): ${err.message}\n`,
+    );
+    return 1;
+  }
+  process.stdout.write(
+    `exported chirindo JWKS\n` +
+      `  kid:  ${identity.kid}\n` +
+      `  file: ${outPath}\n` +
+      `\n` +
+      `Host this file at an https:// URL you control, then pass that URL\n` +
+      `to 'chirindo proxy --jwks-uri <url>' so every receipt names where\n` +
+      `verifiers should fetch its signing key.\n`,
+  );
+  return 0;
+}
+
 function cmdInit(args: ParsedArgs): number {
   const dir = resolvePath((args.flags.get("dir") as string) ?? DATA_DIR);
   const result = runInit({ dir });
@@ -195,6 +268,33 @@ function cmdProxy(args: ParsedArgs): number {
     (args.flags.get("chain") as string | undefined) !== undefined
       ? resolvePath(args.flags.get("chain") as string)
       : join(dir, "sessions", `${sessionId}.jsonl`);
+
+  // --jwks-uri stamps the operator's published-JWKS URL into every emitted
+  // receipt's signed bytes. Verifiers given the chain see where to fetch
+  // this gate's public key — no Headless Oracle hosting required. We
+  // refuse non-HTTPS to keep the trust-root property explicit at the
+  // signing side (the verifier also enforces this, but failing early at
+  // the gate avoids producing receipts that name an insecure publication
+  // URL the verifier will then refuse).
+  const jwksUriFlag = args.flags.get("jwks-uri");
+  let jwksUri: string | undefined;
+  if (typeof jwksUriFlag === "string") {
+    try {
+      const u = new URL(jwksUriFlag);
+      if (u.protocol !== "https:") {
+        process.stderr.write(
+          `[chirindo] --jwks-uri must be an https:// URL (got ${u.protocol}//...)\n`,
+        );
+        return 2;
+      }
+      jwksUri = jwksUriFlag;
+    } catch {
+      process.stderr.write(
+        `[chirindo] --jwks-uri is not a valid URL: ${jwksUriFlag}\n`,
+      );
+      return 2;
+    }
+  }
 
   // Log the resolved absolute paths and the cwd we were spawned with. This
   // is the single most useful diagnostic when a host (Cursor / Claude
@@ -254,11 +354,15 @@ function cmdProxy(args: ParsedArgs): number {
     sessionId,
     serverLabel,
     chainPath,
+    ...(jwksUri !== undefined ? { jwksUri } : {}),
     log: (m) => process.stderr.write(m + "\n"),
   });
 
   process.stderr.write(
-    `[chirindo] proxy up: server-label='${serverLabel}' session=${sessionId} chain=${chainPath}\n`,
+    `[chirindo] proxy up: server-label='${serverLabel}' session=${sessionId} ` +
+      `chain=${chainPath}` +
+      (jwksUri !== undefined ? ` jwks_uri=${jwksUri}` : "") +
+      `\n`,
   );
 
   handle.done.then(() => {
@@ -303,25 +407,47 @@ async function cmdVerify(args: ParsedArgs): Promise<number> {
       ? { maxSkewMs: Number.parseInt(maxSkewFlag, 10) }
       : {};
 
-  // JWKS resolution precedence: --jwks <url> > $RECORDER_JWKS_URL > default.
-  // Bare `--jwks` (no value) opts into the env-or-default URL — the form the
-  // README's getting-started step 5 uses to keep the payoff command short.
+  // Key-source resolution precedence (documented in helpText()):
+  //
+  //   --key <file>                            local identity, no network
+  //   --jwks <url>                            explicit URL, overrides embedded jwks_uri
+  //   --jwks (bare), record has jwks_uri      use the embedded URL
+  //   --jwks (bare), no embedded URL          $RECORDER_JWKS_URL or DEFAULT_JWKS_URL
+  //   no flag, record has jwks_uri            use the embedded URL
+  //   no flag, no embedded URL                local <data-dir>/identity.json
+  //
+  // The embedded URL is read from the FIRST record's `jwks_uri` field. That
+  // field is inside the signed bytes — a post-sign mutation breaks the
+  // signature, so a verifier following it is trusting the signer's
+  // committed location, not a rewritable hint. The "no flag" default
+  // honoring the embedded URL is what gives the self-describing receipt
+  // its zero-config verification property.
+  let embeddedJwksUri: string | undefined;
+  try {
+    const chainFile = readChainFile(chainPath);
+    embeddedJwksUri = chainFile.records[0]?.jwks_uri;
+  } catch {
+    // Reading errors are surfaced by runVerify with a richer reason; we just
+    // skip the peek and let the normal path report.
+  }
   const envJwksUrl = process.env[JWKS_URL_ENV_VAR];
+  const useLocalKey = typeof keyFlag === "string";
   const wantsJwks =
-    jwksFlag !== undefined ||
-    (typeof keyFlag !== "string" && envJwksUrl !== undefined);
+    !useLocalKey &&
+    (jwksFlag !== undefined ||
+      embeddedJwksUri !== undefined ||
+      envJwksUrl !== undefined);
   let result;
   if (wantsJwks) {
     const jwksUrl =
       typeof jwksFlag === "string"
         ? jwksFlag
-        : (envJwksUrl ?? DEFAULT_JWKS_URL);
+        : (embeddedJwksUri ?? envJwksUrl ?? DEFAULT_JWKS_URL);
     result = await runVerify({ chainPath, jwksUrl, ...skewOpt });
   } else {
-    const identityPath =
-      typeof keyFlag === "string"
-        ? resolvePath(keyFlag)
-        : join(resolvePath(DATA_DIR), IDENTITY_FILENAME);
+    const identityPath = useLocalKey
+      ? resolvePath(keyFlag as string)
+      : join(resolvePath(DATA_DIR), IDENTITY_FILENAME);
     result = runVerify({ chainPath, identityPath, ...skewOpt });
   }
 
@@ -344,6 +470,8 @@ async function main(argv: string[]): Promise<number> {
   switch (args.command) {
     case "init":
       return cmdInit(args);
+    case "export-jwks":
+      return cmdExportJwks(args);
     case "proxy":
       return cmdProxy(args);
     case "verify":

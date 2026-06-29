@@ -106,6 +106,8 @@ export type {
 export {
   DEFAULT_JWKS_URL,
   JWKS_URL_ENV_VAR,
+  _clearJwksCache,
+  _setJwksCacheEntry,
   buildJwk,
   buildJwks,
   ed25519PublicKeyFromJwk,
