@@ -141,6 +141,19 @@ export interface RecordContent {
   // present on every record. In gated mode, must equal gate.request_commitment.
   request_commitment: string;
   gate: GateBlock | null;
+  // OPTIONAL — HTTPS URL of the JWKS document where this receipt's signing
+  // key (matching `kid`) is published. When present, the verifier uses it as
+  // the preferred key source ("self-describing receipt"). Inside the signed
+  // bytes — a post-sign mutation breaks the signature, so this is the signer
+  // committing to a specific publication location, not a rewritable hint.
+  //
+  // Backward compatibility: absent on receipts produced before this field was
+  // introduced. Verifiers MUST treat absence as "fall back to the configured
+  // JWKS / identity key source." Same RECORD_VERSION; no schema bump (an
+  // additive optional field is a wire-compatible extension under JCS — the
+  // canonical bytes of a pre-existing receipt are unchanged when the
+  // canonicalizer encounters no `jwks_uri` key).
+  jwks_uri?: string;
   prev_hash: string;
   kid: string;
 }

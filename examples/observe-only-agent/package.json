@@ -2,17 +2,16 @@
   "name": "chirindo-observe-only-example",
   "private": true,
   "version": "0.0.0",
-  "description": "Minimal MCP agent + Chirindo observe-only sidecar, from the published @headlessoracle/chirindo package.",
+  "description": "Minimal MCP agent + Chirindo observe-only sidecar. Demonstrates self-describing receipts (jwks_uri) so the adopter's own chain verifies against the adopter's own published JWKS — Headless Oracle not in the trust path.",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "init": "chirindo init --dir ./.gate",
+    "init": "node ../../dist/cli.js init --dir ./.gate",
+    "export-jwks": "node ../../dist/cli.js export-jwks --dir ./.gate --out ./jwks.json",
     "harness": "node ./harness.mjs",
-    "verify": "node ./verify-latest.mjs"
-  },
-  "dependencies": {
-    "@headlessoracle/chirindo": "0.1.0"
+    "verify": "node ./verify-latest.mjs",
+    "prove-self-describing": "node ./prove-self-describing.mjs"
   }
 }

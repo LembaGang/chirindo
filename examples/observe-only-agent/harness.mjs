@@ -21,17 +21,20 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
-// Resolve the published CLI through node_modules so we never depend on
-// the host's PATH (the same reason the main README uses absolute paths
-// in client config snippets).
-const chirindoPkg = require.resolve("@headlessoracle/chirindo/package.json");
-const chirindoCli = join(dirname(chirindoPkg), "dist", "cli.js");
+// Resolve the in-repo CLI build. This example demonstrates jwks_uri /
+// export-jwks features that are post-0.1.0 — they're not in the
+// published @headlessoracle/chirindo yet, so we reference the local
+// build directly. After a tagged release ships these features, swap
+// to a normal `npm install @headlessoracle/chirindo@^x.y.z` dep and
+// `require.resolve('@headlessoracle/chirindo/package.json')` for the
+// CLI path.
+const chirindoCli = resolve(__dirname, "..", "..", "dist", "cli.js");
 
 const downstream = join(__dirname, "downstream-mcp-server.mjs");
 const policy = join(__dirname, "policy.json");
@@ -44,6 +47,14 @@ const gateDir = process.env.GATE_DIR ?? join(__dirname, ".gate");
 
 const sessionId = process.env.SESSION_ID ?? cryptoRandomUuid();
 
+// Optional self-describing-receipt mode: when JWKS_URI is set in the env,
+// the proxy stamps it into every receipt's signed bytes. The verifier
+// then resolves the gate's public key from that URL — no Headless Oracle
+// hosting required. README §6 walks through how to host the JWKS file
+// produced by `npm run export-jwks` at any HTTPS URL you control.
+const jwksUri = process.env.JWKS_URI;
+const jwksUriArgs = jwksUri ? ["--jwks-uri", jwksUri] : [];
+
 const proxy = spawn(
   process.execPath,
   [
@@ -53,6 +64,7 @@ const proxy = spawn(
     "--server-label", "observe-only-example",
     "--dir", gateDir,
     "--session-id", sessionId,
+    ...jwksUriArgs,
     "--",
     // Pass bare "node" rather than process.execPath. On Windows the proxy
     // spawns the downstream via `shell: true` to handle `.cmd` shims (the

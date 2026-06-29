@@ -282,3 +282,12 @@ export async function resolveKeyFromJwks(opts: {
 export function _clearJwksCache(): void {
   jwksCache.clear();
 }
+
+// Test-only: pre-seed the in-process cache for a URL so `resolveKeyFromJwks`
+// returns this JWKS without performing a network fetch. Production never
+// calls this — it exists so tests can exercise the jwks_uri-driven
+// resolution path without standing up an HTTPS server. Underscore prefix
+// + `_setJwksCacheEntry` name signal "internal test seam, not API."
+export function _setJwksCacheEntry(url: string, jwks: Jwks): void {
+  jwksCache.set(url, jwks);
+}
