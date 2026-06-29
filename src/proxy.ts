@@ -132,7 +132,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
         server: deps.serverLabel,
         toolName,
         toolArgs,
-        resultJson: undefined,
+        toolResult: undefined,
       });
       deps.log(
         `[proxy] DENY tool='${toolName}' reason='${decision.reason}' id=${String(req.id)}`,
@@ -185,7 +185,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
     server: string;
     toolName: string;
     toolArgs: unknown;
-    resultJson: string | undefined;
+    toolResult: unknown;
   }): boolean {
     try {
       appendReceipt({
@@ -195,7 +195,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
         server: args.server,
         toolName: args.toolName,
         toolArgs: args.toolArgs,
-        resultJson: args.resultJson,
+        toolResult: args.toolResult,
         decision: args.decisionForReceipt,
         ...(deps.now ? { ts: deps.now() } : {}),
       });
@@ -246,12 +246,19 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
       if (id !== undefined && id !== null && pendingAllows.has(id)) {
         const pending = pendingAllows.get(id)!;
         pendingAllows.delete(id);
+        // Pass the parsed `result` field — the MCP tool result object — to
+        // the receipt builder. The recorder's resultHash applies JCS to it,
+        // so an independent verifier given the same result derives byte-
+        // identical bytes. Hashing the raw JSON-RPC envelope line would
+        // re-introduce the same canonicalization bug class as args_hash
+        // had (key order / whitespace dependence breaking recomputability).
+        const toolResult = (parsed as Record<string, unknown>)["result"];
         const ok = writeReceiptSafely({
           decisionForReceipt: { kind: "allow" },
           server: pending.server,
           toolName: pending.toolName,
           toolArgs: pending.toolArgs,
-          resultJson: line,
+          toolResult,
         });
         if (!ok) {
           // Fail-closed: receipt couldn't be written for an action that

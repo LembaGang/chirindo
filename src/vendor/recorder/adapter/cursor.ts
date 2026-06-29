@@ -20,7 +20,11 @@
 //   - afterMCPExecution:    { tool_name, tool_input, result_json, duration, url|command } -> {}
 
 import { createHash } from "node:crypto";
-import { argsHashFromJsonString, sha256Hex } from "../hash.js";
+import {
+  argsHashFromJsonString,
+  resultHashFromJsonString,
+  sha256Hex,
+} from "../hash.js";
 import type { RecordEvent } from "../record.js";
 import { shellSplit } from "./shell-split.js";
 import type {
@@ -197,8 +201,7 @@ function mcpEventFromAfter(input: AfterMCPExecutionInput): RecordEvent {
     server: mcpServerOf(input),
     tool_name: input.tool_name,
     args_hash: argsHashFromJsonString(input.tool_input),
-    result_hash:
-      "sha256:" + sha256Hex(Buffer.from(input.result_json, "utf8")),
+    result_hash: resultHashFromJsonString(input.result_json),
     decision: "observed",
     decision_source: "n/a",
   };
