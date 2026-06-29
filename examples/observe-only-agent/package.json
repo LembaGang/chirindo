@@ -1,0 +1,18 @@
+{
+  "name": "chirindo-observe-only-example",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Minimal MCP agent + Chirindo observe-only sidecar, from the published @headlessoracle/chirindo package.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "init": "chirindo init --dir ./.gate",
+    "harness": "node ./harness.mjs",
+    "verify": "node ./verify-latest.mjs"
+  },
+  "dependencies": {
+    "@headlessoracle/chirindo": "0.1.0"
+  }
+}
