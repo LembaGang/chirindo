@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "observe-only-example-gated": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@headlessoracle/chirindo",
+        "proxy",
+        "--policy",       "<ABSOLUTE-PATH-TO-EXAMPLE>/policy.json",
+        "--server-label", "observe-only-example",
+        "--dir",          "<ABSOLUTE-PATH-TO-EXAMPLE>/.gate",
+        "--",
+        "node", "<ABSOLUTE-PATH-TO-EXAMPLE>/downstream-mcp-server.mjs"
+      ]
+    }
+  }
+}
