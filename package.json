@@ -1,6 +1,6 @@
 {
   "name": "@headlessoracle/chirindo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Chirindo — a fail-closed cryptographic gate for the MCP tool-call boundary. The watchtower for your AI agents. By Headless Oracle.",
   "license": "Apache-2.0",
   "type": "module",
