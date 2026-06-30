@@ -8,10 +8,13 @@
     "node": ">=20"
   },
   "scripts": {
-    "init": "node ../../dist/cli.js init --dir ./.gate",
-    "export-jwks": "node ../../dist/cli.js export-jwks --dir ./.gate --out ./jwks.json",
+    "init": "chirindo init --dir ./.gate",
+    "export-jwks": "chirindo export-jwks --dir ./.gate --out ./jwks.json",
     "harness": "node ./harness.mjs",
     "verify": "node ./verify-latest.mjs",
     "prove-self-describing": "node ./prove-self-describing.mjs"
+  },
+  "dependencies": {
+    "@headlessoracle/chirindo": "^0.2.0"
   }
 }
