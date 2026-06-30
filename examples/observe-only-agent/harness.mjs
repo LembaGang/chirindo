@@ -27,14 +27,13 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
-// Resolve the in-repo CLI build. This example demonstrates jwks_uri /
-// export-jwks features that are post-0.1.0 — they're not in the
-// published @headlessoracle/chirindo yet, so we reference the local
-// build directly. After a tagged release ships these features, swap
-// to a normal `npm install @headlessoracle/chirindo@^x.y.z` dep and
-// `require.resolve('@headlessoracle/chirindo/package.json')` for the
-// CLI path.
-const chirindoCli = resolve(__dirname, "..", "..", "dist", "cli.js");
+// Resolve the CLI inside the installed @headlessoracle/chirindo package.
+// We invoke it via process.execPath so the example runs identically on
+// any platform (Windows .cmd shims, POSIX symlinks) without depending on
+// PATH being set up by an npm script.
+const chirindoPkgJson = require.resolve("@headlessoracle/chirindo/package.json");
+const chirindoPkgDir = dirname(chirindoPkgJson);
+const chirindoCli = resolve(chirindoPkgDir, require(chirindoPkgJson).bin.chirindo);
 
 const downstream = join(__dirname, "downstream-mcp-server.mjs");
 const policy = join(__dirname, "policy.json");

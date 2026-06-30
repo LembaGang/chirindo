@@ -27,18 +27,22 @@
 
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 
-// Import library API from the in-repo build. The recorder primitives
-// (_setJwksCacheEntry, runVerify, formatVerifyResult) aren't yet
-// re-exported by a published @headlessoracle/chirindo (it's CLI-only at
-// 0.1.0, and these helpers post-date 0.1.0 anyway). file:// is required
-// for ESM import() on Windows paths.
-const recorderIndex = resolve(__dirname, "..", "..", "dist", "vendor", "recorder", "index.js");
+// Import the recorder primitives (_setJwksCacheEntry, runVerify,
+// formatVerifyResult) from the installed @headlessoracle/chirindo
+// package. They ship at dist/vendor/recorder/index.js but aren't yet
+// surfaced as a stable package export, so we resolve the package root
+// and walk into dist/. pathToFileURL handles the Windows-path quoting
+// that ESM import() requires.
+const chirindoPkgJson = require.resolve("@headlessoracle/chirindo/package.json");
+const recorderIndex = resolve(dirname(chirindoPkgJson), "dist", "vendor", "recorder", "index.js");
 const { _setJwksCacheEntry, runVerify, formatVerifyResult } = await import(
-  new URL("file:///" + recorderIndex.replace(/\\/g, "/")).href
+  pathToFileURL(recorderIndex).href
 );
 
 const sessionsDir = join(__dirname, ".gate", "sessions");

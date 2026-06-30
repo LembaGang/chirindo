@@ -11,20 +11,13 @@ signed bytes, so a stranger holding only the chain file can fetch the
 gate's public key from a location *the adopter controls* and verify —
 with Headless Oracle **not in the trust path**.
 
-> Build dependency: this example references the in-repo `dist/cli.js`
-> directly (`node ../../dist/cli.js ...`) — `jwks_uri`, `--jwks-uri`,
-> and `export-jwks` are post-0.1.0 features that aren't in the
-> published `@headlessoracle/chirindo@0.1.0` yet. After a tagged release
-> ships them, the example will swap to a normal `npm install
-> @headlessoracle/chirindo@^x.y.z` dep.
-
 ---
 
 ## What's in this directory
 
 | File | Role |
 |---|---|
-| `package.json` | Defines the npm scripts you'll run. No dependencies — the example shells out to `../../dist/cli.js`. |
+| `package.json` | Defines the npm scripts you'll run. Depends on `@headlessoracle/chirindo@^0.2.0` from npm. |
 | `downstream-mcp-server.mjs` | A minimal stdio MCP server exposing three tools: `get_quote` (safe), `mock_swap`, `mock_send` (both "consequential" — in production they'd move money). |
 | `policy.json` | `{ "deny": [] }` — observe-only. No tool calls are blocked; every call is recorded. |
 | `harness.mjs` | Drives the gate as if it were Claude Desktop / Cursor: spawns `chirindo proxy`, talks MCP to it, calls `mock_swap`, closes the session. Honors `JWKS_URI` env var to stamp self-describing receipts. |
@@ -36,15 +29,15 @@ with Headless Oracle **not in the trust path**.
 
 ---
 
-## 1. Build the parent repo
+## 1. Install
 
 ```
-( cd ../.. && npm install && npm run build )
+npm install
 ```
 
-This example shells out to `../../dist/cli.js` rather than installing
-Chirindo as an npm dep (see the build-dependency note above). There's
-no `npm install` step inside the example directory.
+Pulls `@headlessoracle/chirindo@^0.2.0` from npm. The `init`,
+`export-jwks`, and `verify` scripts all run against the installed
+package's `chirindo` binary; there is no in-repo build step.
 
 ## 2. Initialize the gate's signing identity
 
@@ -122,7 +115,7 @@ that's *already* on Headless Oracle's published JWKS, so it verifies
 end-to-end with no setup:
 
 ```
-node ../../dist/cli.js verify sample-chain/sample.jsonl --jwks
+npx chirindo verify sample-chain/sample.jsonl --jwks
 ```
 
 Real output (captured against the live HO JWKS):
