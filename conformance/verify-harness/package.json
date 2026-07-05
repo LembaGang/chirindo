@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "name": "chirindo-conformance-verify-harness",
+  "version": "0.0.0",
+  "description": "Dev-only harness for cross-checking conformance vectors against an independent RFC 8785 (JCS) implementation. NOT published; not part of the Chirindo package.",
+  "type": "module",
+  "devDependencies": {
+    "@truestamp/canonify": "2.1.0"
+  }
+}
