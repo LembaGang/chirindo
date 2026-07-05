@@ -25,7 +25,7 @@ const { jcs: ourJcs, jcsBytes: ourJcsBytes } = await import(
 );
 
 const fixture = JSON.parse(
-  readFileSync(resolve(REPO, "conformance", "vectors-v1.candidate.json"), "utf8"),
+  readFileSync(resolve(REPO, "conformance", "vectors-v1.json"), "utf8"),
 );
 
 function sha256Hex(bytes) {

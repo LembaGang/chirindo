@@ -29,7 +29,7 @@ const { jcs: ourJcs, jcsBytes: ourJcsBytes } = await import(fileUrl(resolve(DIST
 const { contentOf: chirindoContentOf } = await import(fileUrl(resolve(DIST, "record.js")));
 
 const fixture = JSON.parse(
-  readFileSync(resolve(REPO, "conformance", "vectors-v1.candidate.json"), "utf8"),
+  readFileSync(resolve(REPO, "conformance", "vectors-v1.json"), "utf8"),
 );
 const chain = fixture.receipt_chain;
 

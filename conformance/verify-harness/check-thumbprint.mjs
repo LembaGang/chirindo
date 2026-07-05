@@ -24,7 +24,7 @@ const { jcs: ourJcs } = await import(
 );
 
 const fixture = JSON.parse(
-  readFileSync(resolve(REPO, "conformance", "vectors-v1.candidate.json"), "utf8"),
+  readFileSync(resolve(REPO, "conformance", "vectors-v1.json"), "utf8"),
 );
 const kb = fixture.key_binding;
 const jwk = kb.jwk;

@@ -13,6 +13,7 @@ Chirindo is the fail-closed cryptographic gate for the MCP tool-call boundary.
 
 ## Conformance corpus (external Fable-authored vectors)
 
-The candidate vector set is `conformance/vectors-v1.candidate.json` — kept
-`.candidate` (not `vectors-v1.json`) until human sign-off. Verification runs
-under `conformance/verify-harness/` (dev-only, `private:true`, not shipped).
+The promoted, frozen vector set is `conformance/vectors-v1.json`. Verification
+runs under `conformance/verify-harness/` (dev-only, `private:true`, not shipped).
+See `conformance/VERIFICATION-REPORT.md` for the three-way agreement record and
+the open hardening findings (F2/F3/F4).

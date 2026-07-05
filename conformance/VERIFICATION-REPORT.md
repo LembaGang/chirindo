@@ -1,14 +1,14 @@
 # Conformance Vector Verification — Chirindo v0.2.0
 
-**Fixture under review:** `conformance/vectors-v1.candidate.json`
-**Fixture author:** Fable (external model), by reasoning about RFC 8785, RFC 8032, RFC 7638 — **not** by executing Chirindo code.
+**Fixture (frozen v1):** `conformance/vectors-v1.json` — promoted 2026-07-05 from `vectors-v1.candidate.json` after three-way verification below.
+**Fixture author:** Fable (external model), by reasoning about RFC 8785, RFC 8032, RFC 7638 — **not** by executing Chirindo code. The receipt-chain `entry_hash` fields were subsequently rederived at fixture-build time from Chirindo's own code path; see §4a.
 **Verification harness:** `conformance/verify-harness/` (dev-only, `private: true`, not in the parent package's `files` list).
 
 ---
 
 ## Top-line verdict
 
-**All canonicalization vectors + RFC 7638 thumbprint three-way confirmed. Chain is now self-consistent under Chirindo's (correct) sig-stripped `entry_hash` convention. F1 divergence resolved in favor of the implementation. Corpus is NOT yet promoted — human decision on `candidate` → `vectors-v1.json` still pending. F2/F3/F4 remain open as hardening items for the next sprint.**
+**PROMOTED (2026-07-05).** All canonicalization vectors + RFC 7638 thumbprint three-way confirmed. Chain is self-consistent under Chirindo's (correct) sig-stripped `entry_hash` convention, with all three `entry_hash` values reproducing three-way (Chirindo JCS + `@truestamp/canonify` + fixture-claimed). F1 resolved in favor of the implementation. F2/F3/F4 remain open as hardening items for the next sprint. The fixture is frozen at `conformance/vectors-v1.json`.
 
 - **JCS PRODUCE (V1–V7b, V10):** three-way byte-and-hash agreement between Chirindo (via `canonicalize`), `@truestamp/canonify` (independent RFC 8785 reference), and the fixture. ✔
 - **RFC 7638 thumbprint:** two independent JCS paths produce the same canonical input string AND the same b64url thumbprint; matches `jwks.keys[0].kid`. ✔
@@ -192,17 +192,17 @@ node check-chain.mjs        # chain structure check (surfaces F1)
 
 ---
 
-## 7. Decision requested
+## 7. Promotion + open items for the hardening sprint
 
-Do not promote `conformance/vectors-v1.candidate.json` to `conformance/vectors-v1.json` yet. The candidate is now self-consistent under Chirindo's convention and byte-verified end-to-end, but promotion is a human decision after this report is read.
+`conformance/vectors-v1.candidate.json` → `conformance/vectors-v1.json`. Frozen. The fixture generator (`conformance/verify-harness/build-fixture.mjs`) is deterministic — anyone can rebuild from source and confirm byte-equality against the frozen file.
 
-Outstanding items requiring a decision (all deferred to the hardening sprint; none affect the candidate's math):
+The following remain open, deferred to the hardening sprint (none affect the frozen corpus math; each touches `src/` and belongs under proper test coverage):
 
-1. **F2 — `makeKid` → RFC 7638.** Change Chirindo's `kid` scheme so consumers can cross-check `kid` against the JWK thumbprint by construction. Cross-cutting: JWKS `kid`, identity file, existing receipts. Needs migration plan for any receipts already emitted under the old scheme.
+1. **F2 — `makeKid` → RFC 7638.** Change Chirindo's `kid` scheme so consumers can cross-check `kid` against the JWK thumbprint by construction. Cross-cutting: JWKS `kid`, identity file, existing receipts. Needs a migration plan for any receipts already emitted under the old scheme.
 2. **F3 / F4 — strict JSON parse layer.** Add pre-canonicalization rejection with structured errors (`unsafe_number`, `duplicate_member`) at `argsHashFromJsonString`, `resultHashFromJsonString`, and any receipt-parsing verifier path. These are gate-policy requirements the fixture makes explicit.
 3. **N1 / N2 / N4 — real-verifier unit tests.** Author a verifier test suite that:
    - Signs each of the three receipt payloads with a real Ed25519 key, then confirms N1's tampered version returns `INVALID_SIGNATURE`.
    - Feeds a hand-crafted high-S signature at N2 and confirms the verifier rejects per RFC 8032 §5.1.7.
    - Runs the N4 flow (JWKS serves a different key under the same `kid`) and confirms `INVALID_KEY_BINDING` fires BEFORE any Ed25519 verify attempt.
 
-When the human is ready, rename `vectors-v1.candidate.json` → `vectors-v1.json` and freeze. The fixture generator (`conformance/verify-harness/build-fixture.mjs`) is deterministic, so anyone can rebuild and check byte-equality after the fact.
+Future changes to the corpus itself go through a new `.candidate` → promotion cycle — do not edit `vectors-v1.json` in place.

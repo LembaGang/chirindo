@@ -1,4 +1,4 @@
-// Build conformance/vectors-v1.candidate.json byte-exactly from code points.
+// Build conformance/vectors-v1.json byte-exactly from code points.
 //
 // The whole point of several vectors (V2 UTF-16 sort with astral 💩, V7a/V7b
 // NFC vs NFD é, V4 minimal escaping) is exact bytes. Hand-typing non-ASCII
@@ -29,7 +29,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURE = resolve(HERE, "..", "vectors-v1.candidate.json");
+const FIXTURE = resolve(HERE, "..", "vectors-v1.json");
 mkdirSync(dirname(FIXTURE), { recursive: true });
 
 // Chirindo's own JCS + entry-hash + content-stripping — loaded from the built
