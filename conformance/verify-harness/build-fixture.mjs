@@ -9,15 +9,37 @@
 //
 // canonical_utf8 is derived from canonical_hex (Buffer.from(hex,'hex').toString('utf8'))
 // so the two fields cannot drift apart in the fixture: the hex is the ground truth
-// of what Fable claims the canonical bytes should be.
+// of what a compliant RFC 8785 implementation must produce.
+//
+// The receipt_chain block's entry_hashes, prev_hash linkage, checkpoint head_hash,
+// and the N1 tampered receipt's prev_hash are DERIVED at build time from
+// Chirindo's own canonicalize.ts / hash.ts / record.ts functions (via dist/).
+// This locks the fixture to Chirindo's sig-stripped entry_hash convention:
+//   entry_hash = "sha256:" + hex(sha256(jcs(contentOf(record))))
+// where contentOf(record) removes the sig field before canonicalization.
+// This convention is DELIBERATE: it makes entry_hash insensitive to Ed25519
+// signature malleability (see negative vector N2). If we hashed over the
+// sig too, a re-encoded signature with equivalent-but-non-canonical bytes
+// would produce a different entry_hash and break cross-verifier
+// recomputability at the exact point malleability makes verifiability hard.
 
 import { writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(HERE, "..", "vectors-v1.candidate.json");
 mkdirSync(dirname(FIXTURE), { recursive: true });
+
+// Chirindo's own JCS + entry-hash + content-stripping — loaded from the built
+// dist so this build script fails loudly (module resolution error) if `npm run
+// build` hasn't been run.
+const DIST = resolve(HERE, "..", "..", "dist", "vendor", "recorder");
+const fileUrl = (p) => "file:///" + p.replace(/\\/g, "/");
+const { jcsBytes: chirindoJcsBytes } = await import(fileUrl(resolve(DIST, "canonicalize.js")));
+const { entryHashOfCanonical: chirindoEntryHash } = await import(fileUrl(resolve(DIST, "hash.js")));
+const { contentOf: chirindoContentOf } = await import(fileUrl(resolve(DIST, "record.js")));
 
 // --- special characters, built from code points ---
 const EURO = String.fromCodePoint(0x20ac);          // €    UTF-8: E2 82 AC (3 bytes)
@@ -179,6 +201,18 @@ const fixture = {
       "verifier MUST check thumbprint(fetched key) == payload.key_thumbprint before signature verification.",
   },
   receipt_chain: {
+    _note:
+      "SIG VALUES BELOW ARE ILLUSTRATIVE, NOT AUTHENTIC. The corpus author had " +
+      "the Ed25519 PUBLIC key only, so the sig fields were fabricated and will " +
+      "not verify under any real key. Authenticity is NOT covered by this " +
+      "fixture. entry_hash and prev_hash are computed over contentOf(record), " +
+      "which strips sig, so entry_hash is DELIBERATELY insensitive to signature " +
+      "malleability (see negative vector N2) — verifiers check the sig " +
+      "separately against a resolved key, and check the sig-stripped content " +
+      "hash as a chain-linking commitment. entry_hashes / receipts[i].prev_hash / " +
+      "checkpoint_example.head_hash / negative[N1].receipt.prev_hash below are " +
+      "DERIVED at fixture-build time from Chirindo's own canonicalize.ts + " +
+      "hash.ts + record.ts (via dist/), not hand-authored.",
     signing_jwk_public: {
       kty: "OKP",
       crv: "Ed25519",
@@ -277,10 +311,20 @@ const fixture = {
         "sign with same key; publish head_hash to an external witness (Rekor / RFC3161 TSA / on-chain anchor)",
     },
     verification_algorithm:
-      "1) parse JSONL strictly (reject dup keys, unsafe numbers) 2) per entry: recompute canon(payload-without-sig), " +
-      "verify Ed25519 (RFC 8032 strict: reject S>=L, non-canonical encodings) against key resolved by kid+thumbprint " +
-      "3) recompute entry_hash=sha256(canon(envelope)) 4) check prev_hash linkage, seq strictly +1 from 0, iat non-decreasing " +
-      "5) result VALID|INVALID|UNVERIFIABLE",
+      "1) parse JSONL strictly (reject duplicate member names, unsafe numbers) " +
+      "2) per entry: let content = record with sig field REMOVED; recompute " +
+      "canon = jcs(content); verify Ed25519 (RFC 8032 strict: reject S>=L, " +
+      "non-canonical encodings) over `canon` using the key resolved by " +
+      "kid+thumbprint. " +
+      "3) recompute entry_hash = 'sha256:' + hex(sha256(canon)). Note: entry_hash " +
+      "hashes the SIG-STRIPPED content, NOT the envelope-with-sig — this is " +
+      "deliberate so entry_hash is insensitive to Ed25519 signature malleability " +
+      "(see N2). " +
+      "4) check prev_hash linkage (entry_hash[i-1] == receipt[i].prev_hash; " +
+      "receipt[0].prev_hash == all-zero sentinel), seq strictly +1 from 0, " +
+      "iat non-decreasing. " +
+      "5) result VALID | INVALID_SIGNATURE | INVALID_KEY_BINDING | " +
+      "CHAIN_BREAK | UNVERIFIABLE.",
   },
   negative: [
     {
@@ -337,6 +381,45 @@ const fixture = {
   ],
 };
 
+// --- derive chain hashes from Chirindo's own code ---
+//
+// Anything hand-authored above for entry_hash / prev_hash / head_hash /
+// N1.prev_hash gets OVERWRITTEN here with values computed by Chirindo's own
+// canonicalize.ts + hash.ts + record.ts. The fixture is therefore
+// self-consistent by construction under Chirindo's sig-stripped convention:
+//   entry_hash[i] = "sha256:" + hex(sha256(jcs(contentOf(receipts[i]))))
+//   receipts[0].prev_hash = all-zero sentinel
+//   receipts[i].prev_hash = entry_hash[i-1]  for i > 0
+//   checkpoint.head_hash = entry_hash[last]
+//   negative[N1].receipt.prev_hash = entry_hash[0] (it's a tampered seq=1)
+
+const genesisSentinel =
+  "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
+const derivedEntryHashes = [];
+for (let i = 0; i < fixture.receipt_chain.receipts.length; i++) {
+  const r = fixture.receipt_chain.receipts[i];
+  r.prev_hash = i === 0 ? genesisSentinel : derivedEntryHashes[i - 1];
+  const canon = chirindoJcsBytes(chirindoContentOf(r));
+  derivedEntryHashes.push(chirindoEntryHash(canon));
+}
+fixture.receipt_chain.entry_hashes = derivedEntryHashes;
+fixture.receipt_chain.checkpoint_example.head_hash =
+  derivedEntryHashes[derivedEntryHashes.length - 1];
+
+// N1: tampered version of seq=1 — its prev_hash should point at the (untampered)
+// entry_hash of seq=0. The tampering is on the event.decision field, not on the
+// linkage. Verifiers reject via INVALID_SIGNATURE once sig verify runs.
+const n1 = fixture.negative.find((n) => n.name === "N1_tampered_decision");
+if (n1) n1.receipt.prev_hash = derivedEntryHashes[0];
+
+console.log("derived entry_hashes (Chirindo sig-stripped convention):");
+for (let i = 0; i < derivedEntryHashes.length; i++) {
+  console.log(`  [${i}] ${derivedEntryHashes[i]}`);
+}
+console.log(`  checkpoint head_hash = ${fixture.receipt_chain.checkpoint_example.head_hash}`);
+console.log(`  N1.receipt.prev_hash = ${n1 ? n1.receipt.prev_hash : "(N1 not present)"}`);
+
 // --- write file: UTF-8, no BOM ---
 const json = JSON.stringify(fixture, null, 2) + "\n";
 writeFileSync(FIXTURE, json, { encoding: "utf8" });
@@ -380,5 +463,34 @@ console.log(`  V4 "s" input length (expect 6): ${v4.length}`);
 const v2 = parsed.jcs_canonicalization.find((v) => v.name === "V2_key_sort_utf16_astral").input;
 const v2Keys = Object.keys(v2);
 console.log(`  V2 keys (as parsed): ${v2Keys.map((k) => `U+${k.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`).join(", ")}`);
+
+// --- self-consistency of the derived chain after write ---
+const chain = parsed.receipt_chain;
+const recomputed = [];
+for (let i = 0; i < chain.receipts.length; i++) {
+  const r = chain.receipts[i];
+  const expectPrev = i === 0 ? genesisSentinel : recomputed[i - 1];
+  if (r.prev_hash !== expectPrev) {
+    throw new Error(
+      `chain: receipts[${i}].prev_hash != expected (got ${r.prev_hash}, want ${expectPrev})`,
+    );
+  }
+  const canon = chirindoJcsBytes(chirindoContentOf(r));
+  const eh = chirindoEntryHash(canon);
+  if (chain.entry_hashes[i] !== eh) {
+    throw new Error(
+      `chain: entry_hashes[${i}] != recomputed (fixture ${chain.entry_hashes[i]}, computed ${eh})`,
+    );
+  }
+  recomputed.push(eh);
+}
+if (chain.checkpoint_example.head_hash !== recomputed[recomputed.length - 1]) {
+  throw new Error("chain: checkpoint head_hash != last entry_hash");
+}
+const n1r = parsed.negative.find((n) => n.name === "N1_tampered_decision");
+if (n1r && n1r.receipt.prev_hash !== recomputed[0]) {
+  throw new Error("chain: N1 receipt.prev_hash != entry_hash[0]");
+}
+console.log("  chain self-consistency: entry_hashes recompute, prev_hash linked, head_hash matches");
 
 console.log("OK — fixture byte-shape invariants hold");

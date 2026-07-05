@@ -8,13 +8,14 @@
 
 ## Top-line verdict
 
-**MISMATCHES FOUND — corpus NOT publishable as-is until resolved.**
+**All canonicalization vectors + RFC 7638 thumbprint three-way confirmed. Chain is now self-consistent under Chirindo's (correct) sig-stripped `entry_hash` convention. F1 divergence resolved in favor of the implementation. Corpus is NOT yet promoted — human decision on `candidate` → `vectors-v1.json` still pending. F2/F3/F4 remain open as hardening items for the next sprint.**
 
-- **Publishable segment:** all ten JCS PRODUCE vectors (V1–V7b, V10). Three-way byte-and-hash agreement between Chirindo, the independent RFC 8785 reference, and Fable's claims.
-- **Blocking mismatch:** `entry_hash` in the receipt chain uses a *different definition* from Chirindo's implementation. Under Fable's convention the chain is self-consistent; under Chirindo's convention none of the three `entry_hash` values recompute. The corpus cannot be consumed by Chirindo's own verifier without a convention change on one side.
-- **Related findings** (do not block corpus publication but are real gaps in Chirindo): unsafe-integer and duplicate-key rejection are absent at the input-parse boundary; `makeKid` does not implement RFC 7638.
-
-The specific mismatches are listed in section 4.
+- **JCS PRODUCE (V1–V7b, V10):** three-way byte-and-hash agreement between Chirindo (via `canonicalize`), `@truestamp/canonify` (independent RFC 8785 reference), and the fixture. ✔
+- **RFC 7638 thumbprint:** two independent JCS paths produce the same canonical input string AND the same b64url thumbprint; matches `jwks.keys[0].kid`. ✔
+- **Receipt chain:** `entry_hashes`, `receipts[i].prev_hash`, `checkpoint_example.head_hash`, and `negative[N1].receipt.prev_hash` are DERIVED at fixture-build time from Chirindo's own `canonicalize.ts` + `hash.ts` + `record.ts` (via `dist/`). The chain recomputes byte-for-byte from Chirindo's own code path. ✔
+- **`entry_hash` convention (F1) — resolved in code's favor.** Chirindo defines `entry_hash = sha256(jcs(contentOf(record)))` (sig field REMOVED). This is deliberate: it makes `entry_hash` insensitive to Ed25519 signature malleability (the exact issue N2 describes). Hashing over the sig would break cross-verifier recomputability at the moment malleability makes verifiability hard. The candidate fixture now matches this convention. See §4.
+- **Non-blocking findings still open** (do not affect corpus math; belong in the hardening sprint under proper test coverage): F2 `makeKid` is proprietary, not RFC 7638; F3 no unsafe-integer rejection at input-parse boundary; F4 no duplicate-key detection at input-parse boundary. See §5.
+- **Explicitly NOT verified in this task:** signature authenticity for any of the three receipts (Fable had public key only; sigs are illustrative). N1, N2, N4 remain "structurally described, pending real-verifier unit tests in a later sprint." Unchanged.
 
 ---
 
@@ -105,34 +106,45 @@ Command: `node conformance/verify-harness/check-thumbprint.mjs`
 
 Command: `node conformance/verify-harness/check-chain.mjs`
 
-Important limitation acknowledged upfront: Fable produced the `sig` fields with the **public key only**. They will not verify under any real Ed25519 key and MUST NOT be treated as authentic. Signature authenticity is not tested in this task.
+Important limitation acknowledged upfront: the `sig` fields were fabricated with the **public key only**. They will not verify under any real Ed25519 key and MUST NOT be treated as authentic. Signature authenticity is not tested in this task. The fixture carries a top-level `_note` on `receipt_chain` documenting this.
 
-### 4a. **BLOCKING mismatch — `entry_hash` definition**
+### 4a. **F1 resolved — Chirindo's sig-stripped `entry_hash` convention retained; fixture regenerated**
 
-Fable's fixture computes `entry_hash` **including** the `sig` field in the JCS preimage. Chirindo's implementation (`src/vendor/recorder/chain.ts`, `src/vendor/recorder/hash.ts`, `src/vendor/recorder/cli/verify.ts`) uses `contentOf(record)`, which **strips** the `sig` field before hashing.
+Chirindo's implementation is intentional:
 
-Three-column diff, per receipt:
+```
+entry_hash = "sha256:" + hex(sha256(jcs(contentOf(record))))
+                                        ^^^^^^^^^^^^^^^^^^^
+                                        sig field REMOVED before canonicalization
+```
 
-| seq | Fable's `entry_hash` | Chirindo (sig-STRIPPED) | with-sig recompute |
-|---|---|---|---|
-| 0 | `sha256:0af4025a9ad55c9f7389c50e5be281abe2e328233ab42a6a69aa0e61bad7e83f` | `sha256:6b8f2464ff5a5200b77bf1ffc9e80aa0dedad74a71005922cd00976436d0d2f4` | `sha256:0af4025a9ad55c9f7389c50e5be281abe2e328233ab42a6a69aa0e61bad7e83f` |
-| 1 | `sha256:015f925f85d96efeb8ee87a3a9c28e5bf8a4317c3acea6e293fcb757d1a0f601` | `sha256:9aad48172bae241813ca1f9b3d04a7157d51f65ab044eb352545824d13c407ac` | `sha256:015f925f85d96efeb8ee87a3a9c28e5bf8a4317c3acea6e293fcb757d1a0f601` |
-| 2 | `sha256:bd1c7ce31d0bc74f455564e72a79c69c40728cb85c2c3d15a076557e00cd5149` | `sha256:f378f4491e71f0044e71aa5f5fac6d7267796fa53ef9a2643d01e08436172754` | `sha256:bd1c7ce31d0bc74f455564e72a79c69c40728cb85c2c3d15a076557e00cd5149` |
+References: `src/vendor/recorder/chain.ts` (lines 48, 89), `src/vendor/recorder/hash.ts` (line 72), `src/vendor/recorder/cli/verify.ts` (line 191), `src/vendor/recorder/record.ts` (line 181, `contentOf`).
 
-**Interpretation:** this is a definitional divergence, not a hash-math error. Both conventions are internally consistent and defensible:
+**Why this convention is load-bearing:** it makes `entry_hash` insensitive to Ed25519 signature malleability. Vector N2 describes exactly this risk — a high-S or non-canonical Ed25519 encoding produces a different byte sequence for the same underlying signature. If `entry_hash` folded the sig into its preimage, a re-encoded receipt (same content, malleated sig) would produce a different `entry_hash` and break cross-verifier recomputability at the exact point where malleability makes verifiability hard. Chirindo's convention keeps `entry_hash` a stable commitment to the CONTENT, with sig verification a separate, independent check against a resolved key.
 
-- *Sig-excluded (Chirindo)*: entry_hash is stable across resignings; a chain can be re-signed by a new key without invalidating the linkage. Trust boundary lives entirely in the thumbprint-before-verify check.
-- *Sig-included (Fable)*: entry_hash uniquely identifies the (content, signature) pair; any resigning creates a new entry_hash and thus a new chain-position identity.
+**Fixture change (this pass):** the receipt-chain block was regenerated. `entry_hashes`, `receipts[i].prev_hash`, `checkpoint_example.head_hash`, and `negative[N1].receipt.prev_hash` are now DERIVED at fixture-build time by importing Chirindo's own `jcsBytes`, `contentOf`, and `entryHashOfCanonical` from the built `dist/`. The candidate fixture is therefore self-consistent by construction under the sig-stripped convention. See `conformance/verify-harness/build-fixture.mjs`.
 
-**Consequence for corpus publication:** as-is, a Chirindo verifier reading this fixture would compute entirely different `entry_hash` values and would report the chain as TAMPERED. The corpus is not ingest-compatible with the current implementation. The human decides which convention wins before this becomes a normative artifact.
+Recomputed `entry_hash` values from Chirindo's code (single-column table — three-way column no longer meaningful because Fable's sig-included values were incorrect and have been overwritten):
 
-### 4b. Other chain structure checks (evaluated under Fable's convention)
+| seq | `entry_hash` (Chirindo sig-stripped, recomputes byte-for-byte) |
+|---|---|
+| 0 | `sha256:6b8f2464ff5a5200b77bf1ffc9e80aa0dedad74a71005922cd00976436d0d2f4` |
+| 1 | `sha256:82f8c644d1d347f75a5961de93331e6400fd8c3ba5e8459b0289efff6d3852d3` |
+| 2 | `sha256:37cf65da9b5230ba5b664a4e73c5fa6a2710da4cd7e83e6ee917ed90258a6080` |
+
+`checkpoint_example.head_hash = entry_hashes[2]`. `N1.receipt.prev_hash = entry_hashes[0]` (the tampered receipt is a mutation of seq=1, so it links to entry_hash of seq=0). Verifiers reject N1 via `INVALID_SIGNATURE` after sig verification, not via linkage break.
+
+The fixture also carries `receipt_chain.verification_algorithm` (rewritten this pass) documenting the sig-stripped rule explicitly, and a top-level `receipt_chain._note` documenting the illustrative-sig limitation.
+
+### 4b. Structural checks under Chirindo's (correct) convention
 
 | Check | Result |
 |---|---|
 | genesis `prev_hash` = all-zero sentinel and equals `receipts[0].prev_hash` | **OK** |
 | `entry_hashes[0]` == `receipts[1].prev_hash` | **OK** |
 | `entry_hashes[1]` == `receipts[2].prev_hash` | **OK** |
+| `entry_hashes[2]` == `checkpoint_example.head_hash` | **OK** |
+| `N1.receipt.prev_hash` == `entry_hashes[0]` | **OK** |
 | `seq` strictly `[0, 1, 2]` | **OK** |
 | `iat` non-decreasing (`09:00:00Z` → `09:00:02Z` → `09:00:05Z`) | **OK** |
 | N3 (drop seq=1): breaks both linkage AND seq contiguity, as designed | **OK** |
@@ -149,16 +161,16 @@ Status for N1, N2, N4: **structurally described in the corpus, pending real-veri
 
 ---
 
-## 5. Findings summary (open items, not blocking the JCS PRODUCE segment)
+## 5. Findings summary
 
-Each of these is a real gap in Chirindo v0.2.0 surfaced by the vector corpus. None is a bug in the fixture; each is a design decision the fixture makes explicit.
+| # | Finding | Where | Status |
+|---|---|---|---|
+| F1 | `entry_hash` convention divergence between authored fixture and code. | `src/vendor/recorder/chain.ts:48,89`, `src/vendor/recorder/hash.ts:72`, `src/vendor/recorder/cli/verify.ts:191` | **RESOLVED** — code's sig-stripped convention retained (deliberately protects against N2 malleability); fixture regenerated to match. See §4a. |
+| F2 | `makeKid` produces proprietary `ed25519/<12-char>`, not RFC 7638 thumbprint. Consumers cannot cross-check `kid` against JWK thumbprint by construction. | `src/vendor/recorder/identity.ts:55` (`makeKid`) | **Open — hardening sprint.** Touches `src/`; needs test coverage before change. |
+| F3 | No unsafe-integer rejection at the input-parse boundary. JS `Number` silently truncates `2^53+1` to `2^53`; JCS canonicalizes the truncated value with no protest. Reference lib has the same limitation. | `argsHashFromJsonString`, `resultHashFromJsonString`, any caller feeding raw JSON strings | **Open — hardening sprint.** Mitigation is a strict JSON parse layer above hashing that rejects with `unsafe_number`. |
+| F4 | No duplicate-key detection at parse time. `JSON.parse` silently keeps last occurrence before JCS sees the collision. | Same call sites as F3 | **Open — hardening sprint.** Mitigation is a strict JSON parse layer that rejects with `duplicate_member` at any depth. |
 
-| # | Finding | Where |
-|---|---|---|
-| F1 | `entry_hash` convention: Fable includes `sig`, Chirindo excludes `sig`. Corpus not ingest-compatible with Chirindo verifier as-is. | `src/vendor/recorder/chain.ts` (line 48, 89), `src/vendor/recorder/hash.ts` (line 72), `src/vendor/recorder/cli/verify.ts` (line 191) |
-| F2 | `makeKid` produces proprietary `ed25519/<12-char>`, not RFC 7638 thumbprint. Consumers cannot cross-check `kid` against JWK thumbprint. | `src/vendor/recorder/identity.ts` (`makeKid`, line 55) |
-| F3 | No unsafe-integer rejection at the input-parse boundary. JCS canonicalizes silently-truncated `2^53+1` as if it were `2^53`. | `argsHashFromJsonString`, `resultHashFromJsonString`, any caller feeding raw JSON strings |
-| F4 | No duplicate-key detection at parse time. `JSON.parse` silently drops earlier duplicates before JCS sees them. | Same call sites as F3 |
+F2/F3/F4 are pre-existing implementation gaps in Chirindo v0.2.0 surfaced by the fixture. They do NOT block corpus math (all three-way checks pass) but should be closed in the next hardening sprint under proper test coverage. They are not fixed in this task because they touch `src/` behavior.
 
 ---
 
@@ -180,12 +192,15 @@ node check-chain.mjs        # chain structure check (surfaces F1)
 
 ## 7. Decision requested
 
-Do not promote `conformance/vectors-v1.candidate.json` to `conformance/vectors-v1.json` yet.
+Do not promote `conformance/vectors-v1.candidate.json` to `conformance/vectors-v1.json` yet. The candidate is now self-consistent under Chirindo's convention and byte-verified end-to-end, but promotion is a human decision after this report is read.
 
-The human must decide:
+Outstanding items requiring a decision (all deferred to the hardening sprint; none affect the candidate's math):
 
-1. **`entry_hash` convention (F1).** Adopt Fable's sig-inclusive definition (change Chirindo), or keep Chirindo's sig-exclusive definition (regenerate the fixture's `entry_hashes` and `prev_hash` links)? Both are defensible; the choice affects re-signing semantics.
-2. **`makeKid` → RFC 7638 (F2).** Change Chirindo's `kid` scheme to RFC 7638 thumbprint? This is a cross-cutting change (JWKS `kid`, identity file, existing receipts).
-3. **Unsafe-integer / duplicate-key rejection (F3, F4).** Add a strict JSON parse layer above `argsHashFromJsonString` / `resultHashFromJsonString` that rejects with `unsafe_number` / `duplicate_member` errors? These are gate-policy requirements the fixture makes explicit.
+1. **F2 — `makeKid` → RFC 7638.** Change Chirindo's `kid` scheme so consumers can cross-check `kid` against the JWK thumbprint by construction. Cross-cutting: JWKS `kid`, identity file, existing receipts. Needs migration plan for any receipts already emitted under the old scheme.
+2. **F3 / F4 — strict JSON parse layer.** Add pre-canonicalization rejection with structured errors (`unsafe_number`, `duplicate_member`) at `argsHashFromJsonString`, `resultHashFromJsonString`, and any receipt-parsing verifier path. These are gate-policy requirements the fixture makes explicit.
+3. **N1 / N2 / N4 — real-verifier unit tests.** Author a verifier test suite that:
+   - Signs each of the three receipt payloads with a real Ed25519 key, then confirms N1's tampered version returns `INVALID_SIGNATURE`.
+   - Feeds a hand-crafted high-S signature at N2 and confirms the verifier rejects per RFC 8032 §5.1.7.
+   - Runs the N4 flow (JWKS serves a different key under the same `kid`) and confirms `INVALID_KEY_BINDING` fires BEFORE any Ed25519 verify attempt.
 
-Once (1) is decided, either update the fixture or the code so the entry_hash column reconciles. Then the corpus is publishable.
+When the human is ready, rename `vectors-v1.candidate.json` → `vectors-v1.json` and freeze. The fixture generator (`conformance/verify-harness/build-fixture.mjs`) is deterministic, so anyone can rebuild and check byte-equality after the fact.

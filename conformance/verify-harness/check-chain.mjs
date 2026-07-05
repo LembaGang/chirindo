@@ -159,32 +159,31 @@ console.log("=".repeat(80));
 
 console.log();
 console.log("=".repeat(80));
-console.log("ENTRY_HASH CONVENTION FINDING (surfaced by the (A)/(B) comparison above)");
+console.log("ENTRY_HASH CONVENTION — Chirindo's sig-stripped convention wins");
 console.log("=".repeat(80));
-console.log("Chirindo's entry_hash convention (src/vendor/recorder/chain.ts,");
-console.log("hash.ts, cli/verify.ts): entry_hash = sha256(jcs(contentOf(record)))");
-console.log("where contentOf() STRIPS the sig field. This is interpretation (A).");
+console.log("Chirindo defines: entry_hash = sha256(jcs(contentOf(record)))");
+console.log("where contentOf() STRIPS the sig field before canonicalization.");
+console.log("This is interpretation (A) above.");
 console.log();
-console.log("Fable's fixture computes entry_hash INCLUDING the sig field. This is");
-console.log("interpretation (B), and it is the one that produces all three of the");
-console.log("claimed entry_hashes above.");
+console.log("This is DELIBERATE: entry_hash is insensitive to Ed25519 signature");
+console.log("malleability (see N2). If entry_hash included sig, a re-encoded");
+console.log("but semantically equivalent sig would produce a different entry_hash,");
+console.log("breaking cross-verifier recomputability at exactly the point where");
+console.log("malleability makes verifiability hard.");
 console.log();
-console.log("Consequences:");
-console.log("  - Under Fable's convention: chain linkage is internally consistent.");
-console.log("  - Under Chirindo's convention: a Chirindo verifier reading this");
-console.log("    fixture would produce entirely different entry_hashes and the");
-console.log("    chain would appear TAMPERED.");
-console.log("  - This is a DEFINITIONAL divergence, not a hash-math error — but");
-console.log("    it means the corpus is NOT ingest-compatible with Chirindo's own");
-console.log("    verifier without a convention change on one side or the other.");
-console.log();
-console.log("This is a FINDING (interpretation mismatch), not a MATH mismatch. The");
-console.log("human decides which convention wins before this corpus can be");
-console.log("published as normative.");
+console.log("The fixture's entry_hashes are DERIVED at build time from Chirindo's");
+console.log("own canonicalize.ts + hash.ts + record.ts (see build-fixture.mjs). All");
+console.log("three receipts reproduce under (A). Interpretation (B) is shown only as");
+console.log("a diagnostic sanity check — it is NOT the correct definition.");
 
 if (anyFail) {
   console.error("\n!! CHAIN STRUCTURE CHECK FAILED — see above");
   process.exit(2);
 }
-console.log("\nChain linkage/seq/iat/genesis/N3/N4 verified under Fable's convention;");
-console.log("entry_hash CONVENTION does not match Chirindo's own code (see finding).");
+console.log(
+  "\nCHAIN STRUCTURE VERIFIED under Chirindo's sig-stripped entry_hash convention:",
+);
+console.log("  - all three entry_hashes recompute byte-for-byte");
+console.log("  - prev_hash linkage self-consistent");
+console.log("  - genesis all-zero sentinel matches");
+console.log("  - seq [0,1,2], iat non-decreasing, N3/N4 structural claims hold");

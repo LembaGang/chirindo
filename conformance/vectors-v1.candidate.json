@@ -168,6 +168,7 @@
     "rule": "kid MUST equal the RFC 7638 thumbprint; receipts carry key_thumbprint inside the signed payload; verifier MUST check thumbprint(fetched key) == payload.key_thumbprint before signature verification."
   },
   "receipt_chain": {
+    "_note": "SIG VALUES BELOW ARE ILLUSTRATIVE, NOT AUTHENTIC. The corpus author had the Ed25519 PUBLIC key only, so the sig fields were fabricated and will not verify under any real key. Authenticity is NOT covered by this fixture. entry_hash and prev_hash are computed over contentOf(record), which strips sig, so entry_hash is DELIBERATELY insensitive to signature malleability (see negative vector N2) — verifiers check the sig separately against a resolved key, and check the sig-stripped content hash as a chain-linking commitment. entry_hashes / receipts[i].prev_hash / checkpoint_example.head_hash / negative[N1].receipt.prev_hash below are DERIVED at fixture-build time from Chirindo's own canonicalize.ts + hash.ts + record.ts (via dist/), not hand-authored.",
     "signing_jwk_public": {
       "kty": "OKP",
       "crv": "Ed25519",
@@ -204,7 +205,7 @@
         "v": "evidence.action/1",
         "seq": 1,
         "chain_id": "3f2c6d0e-8b7a-4c11-9e2d-5a1b0c9d8e7f",
-        "prev_hash": "sha256:0af4025a9ad55c9f7389c50e5be281abe2e328233ab42a6a69aa0e61bad7e83f",
+        "prev_hash": "sha256:6b8f2464ff5a5200b77bf1ffc9e80aa0dedad74a71005922cd00976436d0d2f4",
         "iat": "2026-07-01T09:00:02Z",
         "iss": "https://headlessoracle.com",
         "kid": "NvrZE4rGdm3rW7l4aFU_Y4r_KGtb8s-b6BAxEdC-vT0",
@@ -230,7 +231,7 @@
         "v": "evidence.action/1",
         "seq": 2,
         "chain_id": "3f2c6d0e-8b7a-4c11-9e2d-5a1b0c9d8e7f",
-        "prev_hash": "sha256:015f925f85d96efeb8ee87a3a9c28e5bf8a4317c3acea6e293fcb757d1a0f601",
+        "prev_hash": "sha256:82f8c644d1d347f75a5961de93331e6400fd8c3ba5e8459b0289efff6d3852d3",
         "iat": "2026-07-01T09:00:05Z",
         "iss": "https://headlessoracle.com",
         "kid": "NvrZE4rGdm3rW7l4aFU_Y4r_KGtb8s-b6BAxEdC-vT0",
@@ -253,19 +254,19 @@
       }
     ],
     "entry_hashes": [
-      "sha256:0af4025a9ad55c9f7389c50e5be281abe2e328233ab42a6a69aa0e61bad7e83f",
-      "sha256:015f925f85d96efeb8ee87a3a9c28e5bf8a4317c3acea6e293fcb757d1a0f601",
-      "sha256:bd1c7ce31d0bc74f455564e72a79c69c40728cb85c2c3d15a076557e00cd5149"
+      "sha256:6b8f2464ff5a5200b77bf1ffc9e80aa0dedad74a71005922cd00976436d0d2f4",
+      "sha256:82f8c644d1d347f75a5961de93331e6400fd8c3ba5e8459b0289efff6d3852d3",
+      "sha256:37cf65da9b5230ba5b664a4e73c5fa6a2710da4cd7e83e6ee917ed90258a6080"
     ],
     "checkpoint_example": {
       "v": "evidence.checkpoint/1",
       "chain_id": "3f2c6d0e-8b7a-4c11-9e2d-5a1b0c9d8e7f",
       "seq_head": 2,
-      "head_hash": "sha256:bd1c7ce31d0bc74f455564e72a79c69c40728cb85c2c3d15a076557e00cd5149",
+      "head_hash": "sha256:37cf65da9b5230ba5b664a4e73c5fa6a2710da4cd7e83e6ee917ed90258a6080",
       "iat": "2026-07-01T09:00:06Z",
       "note": "sign with same key; publish head_hash to an external witness (Rekor / RFC3161 TSA / on-chain anchor)"
     },
-    "verification_algorithm": "1) parse JSONL strictly (reject dup keys, unsafe numbers) 2) per entry: recompute canon(payload-without-sig), verify Ed25519 (RFC 8032 strict: reject S>=L, non-canonical encodings) against key resolved by kid+thumbprint 3) recompute entry_hash=sha256(canon(envelope)) 4) check prev_hash linkage, seq strictly +1 from 0, iat non-decreasing 5) result VALID|INVALID|UNVERIFIABLE"
+    "verification_algorithm": "1) parse JSONL strictly (reject duplicate member names, unsafe numbers) 2) per entry: let content = record with sig field REMOVED; recompute canon = jcs(content); verify Ed25519 (RFC 8032 strict: reject S>=L, non-canonical encodings) over `canon` using the key resolved by kid+thumbprint. 3) recompute entry_hash = 'sha256:' + hex(sha256(canon)). Note: entry_hash hashes the SIG-STRIPPED content, NOT the envelope-with-sig — this is deliberate so entry_hash is insensitive to Ed25519 signature malleability (see N2). 4) check prev_hash linkage (entry_hash[i-1] == receipt[i].prev_hash; receipt[0].prev_hash == all-zero sentinel), seq strictly +1 from 0, iat non-decreasing. 5) result VALID | INVALID_SIGNATURE | INVALID_KEY_BINDING | CHAIN_BREAK | UNVERIFIABLE."
   },
   "negative": [
     {
@@ -274,7 +275,7 @@
         "v": "evidence.action/1",
         "seq": 1,
         "chain_id": "3f2c6d0e-8b7a-4c11-9e2d-5a1b0c9d8e7f",
-        "prev_hash": "sha256:0af4025a9ad55c9f7389c50e5be281abe2e328233ab42a6a69aa0e61bad7e83f",
+        "prev_hash": "sha256:6b8f2464ff5a5200b77bf1ffc9e80aa0dedad74a71005922cd00976436d0d2f4",
         "iat": "2026-07-01T09:00:02Z",
         "iss": "https://headlessoracle.com",
         "kid": "NvrZE4rGdm3rW7l4aFU_Y4r_KGtb8s-b6BAxEdC-vT0",
