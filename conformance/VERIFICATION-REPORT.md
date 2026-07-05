@@ -12,7 +12,7 @@
 
 - **JCS PRODUCE (V1–V7b, V10):** three-way byte-and-hash agreement between Chirindo (via `canonicalize`), `@truestamp/canonify` (independent RFC 8785 reference), and the fixture. ✔
 - **RFC 7638 thumbprint:** two independent JCS paths produce the same canonical input string AND the same b64url thumbprint; matches `jwks.keys[0].kid`. ✔
-- **Receipt chain:** `entry_hashes`, `receipts[i].prev_hash`, `checkpoint_example.head_hash`, and `negative[N1].receipt.prev_hash` are DERIVED at fixture-build time from Chirindo's own `canonicalize.ts` + `hash.ts` + `record.ts` (via `dist/`). The chain recomputes byte-for-byte from Chirindo's own code path. ✔
+- **Receipt chain:** `entry_hashes`, `receipts[i].prev_hash`, `checkpoint_example.head_hash`, and `negative[N1].receipt.prev_hash` are DERIVED at fixture-build time from Chirindo's own `canonicalize.ts` + `hash.ts` + `record.ts` (via `dist/`). All three `entry_hash` values also recompute byte-for-byte through the independent RFC 8785 reference (`@truestamp/canonify`) applied to a harness-side sig-strip — three-way agreement matches the assurance already held by the canonicalization vectors. ✔
 - **`entry_hash` convention (F1) — resolved in code's favor.** Chirindo defines `entry_hash = sha256(jcs(contentOf(record)))` (sig field REMOVED). This is deliberate: it makes `entry_hash` insensitive to Ed25519 signature malleability (the exact issue N2 describes). Hashing over the sig would break cross-verifier recomputability at the moment malleability makes verifiability hard. The candidate fixture now matches this convention. See §4.
 - **Non-blocking findings still open** (do not affect corpus math; belong in the hardening sprint under proper test coverage): F2 `makeKid` is proprietary, not RFC 7638; F3 no unsafe-integer rejection at input-parse boundary; F4 no duplicate-key detection at input-parse boundary. See §5.
 - **Explicitly NOT verified in this task:** signature authenticity for any of the three receipts (Fable had public key only; sigs are illustrative). N1, N2, N4 remain "structurally described, pending real-verifier unit tests in a later sprint." Unchanged.
@@ -124,13 +124,15 @@ References: `src/vendor/recorder/chain.ts` (lines 48, 89), `src/vendor/recorder/
 
 **Fixture change (this pass):** the receipt-chain block was regenerated. `entry_hashes`, `receipts[i].prev_hash`, `checkpoint_example.head_hash`, and `negative[N1].receipt.prev_hash` are now DERIVED at fixture-build time by importing Chirindo's own `jcsBytes`, `contentOf`, and `entryHashOfCanonical` from the built `dist/`. The candidate fixture is therefore self-consistent by construction under the sig-stripped convention. See `conformance/verify-harness/build-fixture.mjs`.
 
-Recomputed `entry_hash` values from Chirindo's code (single-column table — three-way column no longer meaningful because Fable's sig-included values were incorrect and have been overwritten):
+Recomputed `entry_hash` values under the sig-stripped convention:
 
-| seq | `entry_hash` (Chirindo sig-stripped, recomputes byte-for-byte) |
-|---|---|
-| 0 | `sha256:6b8f2464ff5a5200b77bf1ffc9e80aa0dedad74a71005922cd00976436d0d2f4` |
-| 1 | `sha256:82f8c644d1d347f75a5961de93331e6400fd8c3ba5e8459b0289efff6d3852d3` |
-| 2 | `sha256:37cf65da9b5230ba5b664a4e73c5fa6a2710da4cd7e83e6ee917ed90258a6080` |
+| seq | `entry_hash` — Chirindo JCS | `entry_hash` — reference (`@truestamp/canonify`) | three-way |
+|---|---|---|---|
+| 0 | `sha256:6b8f2464ff5a5200b77bf1ffc9e80aa0dedad74a71005922cd00976436d0d2f4` | `sha256:6b8f2464ff5a5200b77bf1ffc9e80aa0dedad74a71005922cd00976436d0d2f4` | **AGREE** |
+| 1 | `sha256:82f8c644d1d347f75a5961de93331e6400fd8c3ba5e8459b0289efff6d3852d3` | `sha256:82f8c644d1d347f75a5961de93331e6400fd8c3ba5e8459b0289efff6d3852d3` | **AGREE** |
+| 2 | `sha256:37cf65da9b5230ba5b664a4e73c5fa6a2710da4cd7e83e6ee917ed90258a6080` | `sha256:37cf65da9b5230ba5b664a4e73c5fa6a2710da4cd7e83e6ee917ed90258a6080` | **AGREE** |
+
+**Chain entry_hashes independently confirmed via `@truestamp/canonify` (sig-stripped content), three-way agreement.** The check-chain harness also verifies that Chirindo's `contentOf(record)` produces a byte-identical content object to an independent `{sig, ...rest}` destructure — so the sig-strip step itself agrees between the two independent paths, and the matching hashes are not an artifact of feeding the same object to both canonicalizers.
 
 `checkpoint_example.head_hash = entry_hashes[2]`. `N1.receipt.prev_hash = entry_hashes[0]` (the tampered receipt is a mutation of seq=1, so it links to entry_hash of seq=0). Verifiers reject N1 via `INVALID_SIGNATURE` after sig verification, not via linkage break.
 

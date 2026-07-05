@@ -11,6 +11,7 @@
 // about verifier behavior — flagged as "structurally described, pending
 // real-verifier unit tests," NOT verified here.
 
+import { canonify as refCanonify } from "@truestamp/canonify";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
@@ -19,9 +20,13 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
 
-const { jcs: ourJcs, jcsBytes: ourJcsBytes } = await import(
-  "file:///" + resolve(REPO, "dist", "vendor", "recorder", "canonicalize.js").replace(/\\/g, "/")
-);
+const fileUrl = (p) => "file:///" + p.replace(/\\/g, "/");
+const DIST = resolve(REPO, "dist", "vendor", "recorder");
+const { jcs: ourJcs, jcsBytes: ourJcsBytes } = await import(fileUrl(resolve(DIST, "canonicalize.js")));
+// contentOf is imported from Chirindo so we can compare against an independent
+// destructuring in the reference path — proving the two agree on what
+// "content" (sig-stripped record) actually is.
+const { contentOf: chirindoContentOf } = await import(fileUrl(resolve(DIST, "record.js")));
 
 const fixture = JSON.parse(
   readFileSync(resolve(REPO, "conformance", "vectors-v1.candidate.json"), "utf8"),
@@ -40,6 +45,9 @@ console.log();
 function sha256Hex(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
+// Independent sig-strip: destructure in this file, do NOT call Chirindo's
+// contentOf. If this diverges from Chirindo's contentOf (see check below),
+// that's a real finding.
 function contentOfNoSig(r) {
   const { sig: _sig, ...rest } = r;
   return rest;
@@ -48,24 +56,66 @@ function contentOfNoSig(r) {
 // Two candidate interpretations of "entry_hash":
 //   (A) sha256(canon(payload-without-sig))  <- what Chirindo's own code does
 //   (B) sha256(canon(entire receipt including sig))
-// We compute both and see which matches Fable's claimed values.
+// For each receipt we also compute (A) via the INDEPENDENT reference
+// (@truestamp/canonify) so the chain gets the same three-way assurance the
+// canonicalization vectors already have.
 let anyFail = false;
 for (let i = 0; i < chain.receipts.length; i++) {
   const r = chain.receipts[i];
-  const canonNoSig = ourJcsBytes(contentOfNoSig(r));
-  const canonWithSig = ourJcsBytes(r);
-  const hashA = "sha256:" + sha256Hex(canonNoSig);
-  const hashB = "sha256:" + sha256Hex(canonWithSig);
-  const claimed = chain.entry_hashes[i];
 
-  const matchA = hashA === claimed;
-  const matchB = hashB === claimed;
+  // Independent sig-strip (harness-side destructure).
+  const contentHarness = contentOfNoSig(r);
+  // Chirindo's own sig-strip.
+  const contentChirindo = chirindoContentOf(r);
+
+  // Confirm the two sig-strippings agree on what "content" is. This is the
+  // "same content object" requirement — if we fed different objects to the
+  // two canonicalizers, matching hashes would be an accident.
+  const jsonHarness = JSON.stringify(contentHarness);
+  const jsonChirindo = JSON.stringify(contentChirindo);
+  const contentStripAgrees = jsonHarness === jsonChirindo;
+
+  // Chirindo path: jcs(contentOf(r)) via canonicalize npm package (wrapped).
+  const canonChirindo = ourJcsBytes(contentChirindo);
+  const hashA_chirindo = "sha256:" + sha256Hex(canonChirindo);
+
+  // Reference path: @truestamp/canonify(contentOfNoSig(r)) — the harness-side
+  // strip, then the INDEPENDENT canonicalizer, then sha256.
+  const canonRefStr = refCanonify(contentHarness);
+  if (canonRefStr === undefined) {
+    console.error(`  !! @truestamp/canonify returned undefined for seq=${r.seq} content`);
+    anyFail = true;
+    continue;
+  }
+  const canonRef = Buffer.from(canonRefStr, "utf8");
+  const hashA_ref = "sha256:" + sha256Hex(canonRef);
+
+  // (B) diagnostic — sig-INCLUDED path via Chirindo's canonicalizer (not the
+  // correct definition; shown for the same reason we've always shown it: it's
+  // the wrong answer, and demonstrating it's wrong is part of the story).
+  const canonWithSig = ourJcsBytes(r);
+  const hashB = "sha256:" + sha256Hex(canonWithSig);
+
+  const claimed = chain.entry_hashes[i];
+  const matchA_chirindo = hashA_chirindo === claimed;
+  const matchA_ref = hashA_ref === claimed;
+  const canonBytesAgree = canonChirindo.equals(canonRef);
+
   console.log(`--- receipt seq=${r.seq} ---`);
   console.log(`  claimed entry_hash             : ${claimed}`);
-  console.log(`  (A) sha256(canon(no-sig))      : ${hashA}   ${matchA ? "MATCH" : ""}`);
-  console.log(`  (B) sha256(canon(with sig))    : ${hashB}   ${matchB ? "MATCH" : ""}`);
-  if (!matchA && !matchB) {
-    console.error(`  !! neither interpretation matches — Fable's entry_hash may be wrong`);
+  console.log(`  (A) ours    (Chirindo JCS)     : ${hashA_chirindo}   ${matchA_chirindo ? "MATCH" : ""}`);
+  console.log(`  (A) ref     (@truestamp/canonify): ${hashA_ref}   ${matchA_ref ? "MATCH" : ""}`);
+  console.log(`  (B) with sig (diagnostic only) : ${hashB}`);
+  console.log(`  sig-strip agrees (Chirindo vs harness destructure): ${contentStripAgrees}`);
+  console.log(`  canonical BYTES agree (Chirindo JCS vs reference) : ${canonBytesAgree}`);
+
+  if (!contentStripAgrees) {
+    console.error(`  !! FINDING: Chirindo's contentOf produces a different object than an ` +
+                  `independent { sig, ...rest } destructure at seq=${r.seq}`);
+    anyFail = true;
+  }
+  if (!matchA_chirindo || !matchA_ref) {
+    console.error(`  !! MISMATCH at seq=${r.seq}: three-way agreement broken`);
     anyFail = true;
   }
   console.log();
@@ -183,7 +233,11 @@ if (anyFail) {
 console.log(
   "\nCHAIN STRUCTURE VERIFIED under Chirindo's sig-stripped entry_hash convention:",
 );
-console.log("  - all three entry_hashes recompute byte-for-byte");
+console.log("  - all three entry_hashes recompute byte-for-byte via Chirindo's JCS");
+console.log("  - all three entry_hashes ALSO recompute via the independent");
+console.log("    reference (@truestamp/canonify) — three-way agreement");
+console.log("  - sig-strip step confirmed identical between Chirindo's contentOf");
+console.log("    and an independent { sig, ...rest } destructure");
 console.log("  - prev_hash linkage self-consistent");
 console.log("  - genesis all-zero sentinel matches");
 console.log("  - seq [0,1,2], iat non-decreasing, N3/N4 structural claims hold");
