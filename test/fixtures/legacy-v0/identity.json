@@ -1,0 +1,6 @@
+{
+  "kid": "ed25519/52YEsjvPWF21",
+  "alg": "ed25519",
+  "public_key_b64url": "PM0kHP_Js2GARLl9A22GFFk9iwF8NA8d7odzOFUXZUs",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAPM0kHP/Js2GARLl9A22GFFk9iwF8NA8d7odzOFUXZUs=\n-----END PUBLIC KEY-----\n"
+}

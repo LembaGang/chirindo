@@ -1,6 +1,10 @@
 export { PRODUCT_NAME } from "./brand.js";
 export {
   RECORD_VERSION,
+  RECORD_VERSION_V0,
+  RECORD_VERSION_V1,
+  SUPPORTED_RECORD_VERSIONS,
+  isSupportedRecordVersion,
   contentOf,
   checkpointContentOf,
 } from "./record.js";
@@ -68,10 +72,12 @@ export {
   IDENTITY_FILENAME,
   PRIVATE_KEY_FILENAME,
   buildIdentityFile,
+  defaultIssuer,
   loadFullIdentity,
   loadIdentity,
   makeKid,
   readIdentityFile,
+  rfc7638Thumbprint,
   writeIdentity,
 } from "./identity.js";
 export type {
@@ -97,6 +103,7 @@ export {
   runVerify,
 } from "./cli/verify.js";
 export type {
+  InvalidReason,
   TamperReason,
   VerifyOptions,
   VerifyOptionsJwks,

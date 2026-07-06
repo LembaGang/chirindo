@@ -17,10 +17,12 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import {
+  createHash,
   createPrivateKey,
   createPublicKey,
   type KeyObject,
 } from "node:crypto";
+import { jcsBytes } from "./canonicalize.js";
 import {
   publicKeyBase64Url,
   rawPublicKeyBytes,
@@ -56,6 +58,43 @@ export function makeKid(publicKey: KeyObject): string {
   const raw = rawPublicKeyBytes(publicKey);
   const digest = Buffer.from(sha256Hex(raw), "hex");
   return "ed25519/" + base64UrlNoPad(digest).slice(0, 12);
+}
+
+// RFC 7638 JWK thumbprint of an Ed25519 (OKP) public key.
+//
+// Per RFC 7638 the thumbprint is computed over a JSON object containing ONLY
+// the JWK's required members, in lexicographic order, with no whitespace —
+// i.e. exactly what JCS (RFC 8785) produces for `{crv, kty, x}`. For OKP the
+// required members are `crv`, `kty`, `x` (which sort in that order). The
+// thumbprint is `base64url-nopad(sha256(that canonical input))`.
+//
+// This is the value stamped into a v1 receipt's `key_thumbprint` and the value
+// a verifier recomputes for the key it resolves. We reuse the SAME JCS routine
+// used for record signing — one canonicalization path, no second impl that
+// could drift. Cross-checked against the conformance corpus
+// (conformance/vectors-v1.json key_binding.rfc7638_thumbprint).
+export function rfc7638Thumbprint(publicKey: KeyObject): string {
+  const x = publicKeyBase64Url(publicKey);
+  const canonicalInput = jcsBytes({ crv: "Ed25519", kty: "OKP", x });
+  const digest = createHash("sha256").update(canonicalInput).digest();
+  return base64UrlNoPad(digest);
+}
+
+// Default issuer identifier for a v1 receipt. When the operator publishes a
+// `jwks_uri`, the issuer is that URL's origin — the operator's own domain, so
+// Headless Oracle is NOT named as the issuer of an adopter's receipts (the
+// neutral / operator-out-of-trust-path property). Absent a jwks_uri there is
+// no published issuer location, so we fall back to a key-scoped URN that is
+// still globally unambiguous and agent-parseable.
+export function defaultIssuer(thumbprint: string, jwksUri?: string): string {
+  if (jwksUri !== undefined) {
+    try {
+      return new URL(jwksUri).origin;
+    } catch {
+      /* malformed URL — fall through to the URN form */
+    }
+  }
+  return `urn:chirindo:key:${thumbprint}`;
 }
 
 export function buildIdentityFile(publicKey: KeyObject): IdentityFile {

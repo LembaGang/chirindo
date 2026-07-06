@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { jcsBytes } from "./canonicalize.js";
-import { RECORD_VERSION } from "./record.js";
+import { RECORD_VERSION, type RecordVersion } from "./record.js";
 
 export function sha256Hex(bytes: Buffer | Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -76,7 +76,7 @@ export function entryHashOfCanonical(canonicalBytes: Buffer): string {
 // The JCS-canonical object hashed to produce the genesis prev_hash.
 // Domain-separated, unambiguous: field boundaries are explicit in JSON.
 export interface GenesisInput {
-  v: typeof RECORD_VERSION;
+  v: RecordVersion;
   session_id: string;
   marker: "genesis";
 }
@@ -87,10 +87,23 @@ export interface GenesisInput {
 // cannot collide across (v, session_id) pairs — the earlier separator-less
 // concatenation permitted splicing (e.g. v="x/0" + sid="123" colliding with
 // v="x/01" + sid="23").
-export function genesisInput(sessionId: string): GenesisInput {
-  return { v: RECORD_VERSION, session_id: sessionId, marker: "genesis" };
+//
+// `version` is part of the preimage, so a genesis hash is tied to the record
+// version that opened the chain. This is load-bearing for backward compat: a
+// pre-existing /0 chain baked its seq=0 prev_hash over v="evidence.action/0";
+// the verifier MUST recompute genesis with that same version (read from the
+// record) or the linkage check would spuriously break when the write version
+// advances. New chains default to RECORD_VERSION (v1).
+export function genesisInput(
+  sessionId: string,
+  version: RecordVersion = RECORD_VERSION,
+): GenesisInput {
+  return { v: version, session_id: sessionId, marker: "genesis" };
 }
 
-export function genesisPrevHash(sessionId: string): string {
-  return "sha256:" + sha256Hex(jcsBytes(genesisInput(sessionId)));
+export function genesisPrevHash(
+  sessionId: string,
+  version: RecordVersion = RECORD_VERSION,
+): string {
+  return "sha256:" + sha256Hex(jcsBytes(genesisInput(sessionId, version)));
 }

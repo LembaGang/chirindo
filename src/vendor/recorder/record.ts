@@ -2,10 +2,35 @@
 //
 // Version token is intentionally name-independent — it comes from the
 // Internet-Draft (draft-msebenzi-evidence-state-00), not the product name.
-// See README "Renaming" for why this constant is NOT a placeholder.
+// See README "Renaming" for why these constants are NOT placeholders.
+//
+// Two versions are live:
+//   evidence.action/0 — original. No key binding in the signed payload.
+//   evidence.action/1 — adds `iss` + `key_thumbprint` (RFC 7638 thumbprint of
+//     the signing key's JWK) to the signed bytes. The thumbprint turns
+//     `jwks_uri` from untrusted transport into a key-identity binding the
+//     verifier checks BEFORE the signature (see cli/verify.ts).
+// NEW receipts are written at v1 (RECORD_VERSION). Verifiers accept BOTH — a
+// pre-existing /0 receipt must still verify unchanged.
+export const RECORD_VERSION_V0 = "evidence.action/0" as const;
+export const RECORD_VERSION_V1 = "evidence.action/1" as const;
 
-export const RECORD_VERSION = "evidence.action/0" as const;
-export type RecordVersion = typeof RECORD_VERSION;
+// The version NEW receipts are stamped with. Writers (Chain, appendReceipt)
+// use this; verifiers accept any member of SUPPORTED_RECORD_VERSIONS.
+export const RECORD_VERSION = RECORD_VERSION_V1;
+
+export type RecordVersion =
+  | typeof RECORD_VERSION_V0
+  | typeof RECORD_VERSION_V1;
+
+export const SUPPORTED_RECORD_VERSIONS = [
+  RECORD_VERSION_V0,
+  RECORD_VERSION_V1,
+] as const;
+
+export function isSupportedRecordVersion(v: string): v is RecordVersion {
+  return v === RECORD_VERSION_V0 || v === RECORD_VERSION_V1;
+}
 
 export type EventType =
   | "shell"
@@ -154,6 +179,22 @@ export interface RecordContent {
   // canonical bytes of a pre-existing receipt are unchanged when the
   // canonicalizer encounters no `jwks_uri` key).
   jwks_uri?: string;
+  // v1+ ONLY (evidence.action/1). RFC 7638 JWK thumbprint of the signing key.
+  // This is the key binding: a verifier recomputes the thumbprint of whatever
+  // key it resolves (from jwks_uri, a flag, env, or the local identity) and
+  // compares it to THIS value BEFORE checking the signature. Without it,
+  // jwks_uri binds the signer to a URL, not to a key identity — the
+  // jku-injection shape where a substituted key at the resolved URL would
+  // "pass." With it, the URL is untrusted transport. Absent on v0 receipts;
+  // a v1 receipt missing this field is malformed and verifies INVALID.
+  key_thumbprint?: string;
+  // v1+ ONLY. Issuer identifier — who signed this receipt. Informational (the
+  // cryptographic binding is `key_thumbprint`), but inside the signed bytes so
+  // it cannot be rewritten post-hoc. Defaults to the origin of `jwks_uri`
+  // (the operator's domain — Headless Oracle is deliberately NOT the issuer of
+  // an adopter's receipts), falling back to `urn:chirindo:key:<thumbprint>`
+  // when no jwks_uri is published. Absent on v0 receipts.
+  iss?: string;
   prev_hash: string;
   kid: string;
 }

@@ -29,16 +29,17 @@
 import type { KeyObject } from "node:crypto";
 import { jcsBytes } from "../canonicalize.js";
 import { entryHashOfCanonical, genesisPrevHash } from "../hash.js";
-import { loadIdentity } from "../identity.js";
+import { loadIdentity, rfc7638Thumbprint } from "../identity.js";
 import { readChainFile } from "../io.js";
 import {
   resolveKeyFromJwks,
   type JwksResolveError,
 } from "../jwks.js";
 import {
-  RECORD_VERSION,
+  RECORD_VERSION_V1,
   contentOf,
   checkpointContentOf,
+  isSupportedRecordVersion,
   type SignedCheckpoint,
   type SignedRecord,
 } from "../record.js";
@@ -67,6 +68,19 @@ export type VerifyResult =
       entry: number | "checkpoint";
       reason: TamperReason;
     }
+  | {
+      // INVALID is distinct from TAMPERED: TAMPERED means the chain's own
+      // integrity is broken (linkage, signature, sequence). INVALID means the
+      // chain is internally intact but fails a KEY / TRUST check — the
+      // verifier resolved a key that does not match the identity the receipt
+      // committed to (key_binding_mismatch), or a key the caller did not
+      // pin/trust (untrusted_key, Task 2). Separate verdict so an agent
+      // consumer can tell "someone rewrote the log" from "this is not the key
+      // you think it is." Fail-closed: both exit non-zero.
+      kind: "invalid";
+      entry: number | "checkpoint";
+      reason: InvalidReason;
+    }
   | { kind: "empty" }
   | { kind: "unresolved"; reason: string };
 
@@ -80,6 +94,13 @@ export type TamperReason =
   | "request_commitment mismatch"
   | "count mismatch"
   | "last_entry_hash mismatch";
+
+export type InvalidReason =
+  // The resolved key's RFC 7638 thumbprint does not match the receipt's
+  // committed `key_thumbprint` — or a v1 receipt omitted `key_thumbprint`
+  // entirely (malformed / fail-closed). Checked BEFORE the signature so a
+  // substituted key cannot "pass" by verifying under itself.
+  | "key_binding_mismatch";
 
 const DEFAULT_MAX_SKEW_MS = 5_000;
 
@@ -168,8 +189,17 @@ function verifyChain(
   }
 
   const sessionId = file.records[0]!.session_id;
-  let lastEntryHash = genesisPrevHash(sessionId);
+  // Genesis is version-tied (see hash.ts): a /0 chain baked its seq=0
+  // prev_hash over v="evidence.action/0". Recompute genesis with the version
+  // that actually opened the chain so a legacy /0 chain still links — the
+  // mandatory backward-compat property.
+  let lastEntryHash = genesisPrevHash(sessionId, file.records[0]!.v);
   let lastTs: number | null = null;
+
+  // The RFC 7638 thumbprint of the key we resolved. For v1 receipts this must
+  // equal the receipt's committed `key_thumbprint` (the key binding), checked
+  // BEFORE the signature. Computed once — it is constant across the chain.
+  const resolvedKeyThumbprint = rfc7638Thumbprint(key.publicKey);
 
   for (let i = 0; i < file.records.length; i++) {
     const r = file.records[i]!;
@@ -177,7 +207,7 @@ function verifyChain(
     if (r.seq !== i) {
       return { kind: "tampered", entry: i, reason: "sequence gap" };
     }
-    if (r.v !== RECORD_VERSION) {
+    if (!isSupportedRecordVersion(r.v)) {
       return {
         kind: "tampered",
         entry: i,
@@ -186,6 +216,19 @@ function verifyChain(
     }
     if (r.kid !== key.kid) {
       return { kind: "tampered", entry: i, reason: "kid mismatch" };
+    }
+
+    // Key binding (v1+). The receipt committed to a specific key identity via
+    // its RFC 7638 `key_thumbprint`. The verifier compares the thumbprint of
+    // the key it ACTUALLY resolved (from jwks_uri / flag / env / local
+    // identity) to that committed value — and does so BEFORE verifying the
+    // signature. Order is the whole point: verify-then-bind would let a
+    // substituted key pass by verifying under itself. A v1 receipt that omits
+    // `key_thumbprint` is malformed and fails closed here too.
+    if (r.v === RECORD_VERSION_V1) {
+      if (r.key_thumbprint !== resolvedKeyThumbprint) {
+        return { kind: "invalid", entry: i, reason: "key_binding_mismatch" };
+      }
     }
 
     const canon = jcsBytes(contentOf(r));
@@ -292,6 +335,11 @@ export function formatVerifyResult(r: VerifyResult): {
     case "tampered":
       return {
         line: `TAMPERED — entry ${r.entry}: ${r.reason}`,
+        exitCode: 1,
+      };
+    case "invalid":
+      return {
+        line: `INVALID — entry ${r.entry}: ${r.reason}`,
         exitCode: 1,
       };
     case "empty":

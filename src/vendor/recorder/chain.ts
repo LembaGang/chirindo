@@ -1,6 +1,8 @@
-import type { KeyObject } from "node:crypto";
+import { type KeyObject } from "node:crypto";
 import { jcsBytes } from "./canonicalize.js";
 import { entryHashOfCanonical, genesisPrevHash } from "./hash.js";
+import { defaultIssuer, rfc7638Thumbprint } from "./identity.js";
+import { publicKeyFromPrivate } from "./key.js";
 import { requestCommitment } from "./request.js";
 import { signEd25519 } from "./sign.js";
 import {
@@ -19,6 +21,9 @@ export interface ChainOptions {
   agent: AgentInfo;
   kid: string;
   privateKey: KeyObject;
+  // Optional issuer identifier for the v1 `iss` field. Defaults to a
+  // key-scoped URN derived from the signing key's thumbprint.
+  iss?: string;
   // Optional deterministic clock for tests/fixtures.
   now?: () => string;
 }
@@ -27,10 +32,15 @@ export class Chain {
   private readonly opts: ChainOptions;
   private readonly records: SignedRecord[] = [];
   private lastEntryHash: string;
+  // Derived once from the signing key: the RFC 7638 thumbprint stamped into
+  // every v1 record's `key_thumbprint` (the key binding the verifier checks
+  // before the signature).
+  private readonly keyThumbprint: string;
 
   constructor(opts: ChainOptions) {
     this.opts = opts;
     this.lastEntryHash = genesisPrevHash(opts.sessionId);
+    this.keyThumbprint = rfc7638Thumbprint(publicKeyFromPrivate(opts.privateKey));
   }
 
   // Reconstruct a chain from existing records (read from disk) so that an
@@ -79,6 +89,10 @@ export class Chain {
       event,
       request_commitment: requestCommitment(event),
       gate: null,
+      // v1 key binding — see record.ts. Stamped unconditionally because
+      // RECORD_VERSION is v1; a v1 record without these is malformed.
+      key_thumbprint: this.keyThumbprint,
+      iss: this.opts.iss ?? defaultIssuer(this.keyThumbprint),
       prev_hash: this.lastEntryHash,
       kid: this.opts.kid,
     };

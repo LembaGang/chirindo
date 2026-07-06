@@ -20,12 +20,14 @@ import {
   appendRecordLine,
   argsHash,
   contentOf,
+  defaultIssuer,
   entryHashOfCanonical,
   genesisPrevHash,
   jcsBytes,
   readChainFileOrEmpty,
   requestCommitment,
   resultHash,
+  rfc7638Thumbprint,
   signEd25519,
   type LoadedFullIdentity,
   type McpCallEvent,
@@ -68,6 +70,11 @@ export interface ReceiptInputs {
   // in the trust path. Omitted ⇒ existing fallback behavior (verifier uses
   // its configured JWKS URL or local identity).
   jwksUri?: string;
+  // OPTIONAL issuer identifier for the v1 `iss` field. When omitted it defaults
+  // to the origin of `jwksUri` (the operator's own domain), falling back to a
+  // key-scoped URN. Explicit override lets an operator name a stable issuer
+  // identity independent of where the JWKS happens to be hosted.
+  iss?: string;
   decision: GateDecision;
   ts?: string;
 }
@@ -115,6 +122,16 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
   const commitment = requestCommitment(event);
   const ts = inputs.ts ?? new Date().toISOString();
 
+  // v1 key binding (evidence.action/1). The RFC 7638 thumbprint of THIS
+  // gate's signing key goes into the signed bytes so a verifier can bind the
+  // resolved key to this receipt's declared key identity BEFORE checking the
+  // signature. `iss` names the issuer — the operator's jwks_uri origin by
+  // default (never Headless Oracle), so the receipt is self-describing and
+  // neutral. Both fields are stamped unconditionally because RECORD_VERSION
+  // is v1; a v1 receipt without them is malformed.
+  const keyThumbprint = rfc7638Thumbprint(inputs.identity.publicKey);
+  const iss = inputs.iss ?? defaultIssuer(keyThumbprint, inputs.jwksUri);
+
   // We build the gate block such that:
   //   gate.request_commitment == record.request_commitment
   // (the continuity invariant). The gate_receipt is a self-reference — for
@@ -144,6 +161,8 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
       result: inputs.decision.kind === "allow" ? "act" : "halt",
     },
     ...(inputs.jwksUri !== undefined ? { jwks_uri: inputs.jwksUri } : {}),
+    key_thumbprint: keyThumbprint,
+    iss,
     prev_hash,
     kid: inputs.identity.kid,
   };
