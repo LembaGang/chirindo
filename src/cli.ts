@@ -77,13 +77,15 @@ Self-describing receipts:
   resolve the key from that URL — Headless Oracle is not in the trust
   path. Use \`chirindo export-jwks\` to produce the file you host there.
 
-verify key resolution (in precedence order):
+verify key resolution (spec F precedence, highest first):
   --key <file>                            local identity, no network
   --jwks <url>                            explicit URL, overrides embedded jwks_uri
-  --jwks (no value), record has jwks_uri  use the embedded URL (self-describing)
-  --jwks (no value), no embedded URL      $${JWKS_URL_ENV_VAR} or ${DEFAULT_JWKS_URL}
-  no flag, record has jwks_uri            use the embedded URL (self-describing)
-  no flag, no embedded URL                local <data-dir>/${IDENTITY_FILENAME}
+  receipt jwks_uri                        the self-describing URL (signed bytes)
+  $${JWKS_URL_ENV_VAR}                   operator env override
+  published default                       ${DEFAULT_JWKS_URL}
+  Fallback only when the higher source is ABSENT. A receipt whose jwks_uri is
+  present but cannot be fetched is UNVERIFIABLE — it never silently drops to a
+  default. Use --key for the offline path (there is no implicit local default).
 
 Trust / pinning (what VALID means):
   --expect-thumbprint <tp>   Accept only these RFC 7638 key thumbprints
@@ -100,7 +102,7 @@ Trust / pinning (what VALID means):
 
 Exit codes:
   0  proxy ran to clean shutdown / init / export-jwks succeeded / VALID
-  1  proxy startup error / TAMPERED / UNRESOLVED
+  1  proxy startup error / TAMPERED / INVALID / UNVERIFIABLE
   2  usage error
 `;
 }
@@ -447,21 +449,27 @@ async function cmdVerify(args: ParsedArgs): Promise<number> {
     expectThumbprints.push(...loaded);
   }
 
-  // Key-source resolution precedence (documented in helpText()):
+  // Key-source resolution precedence (spec F), highest first:
   //
-  //   --key <file>                            local identity, no network
-  //   --jwks <url>                            explicit URL, overrides embedded jwks_uri
-  //   --jwks (bare), record has jwks_uri      use the embedded URL
-  //   --jwks (bare), no embedded URL          $RECORDER_JWKS_URL or DEFAULT_JWKS_URL
-  //   no flag, record has jwks_uri            use the embedded URL
-  //   no flag, no embedded URL                local <data-dir>/identity.json
+  //   --key <file>            explicit local identity, no network (flag)
+  //   --jwks <url>            explicit URL, overrides embedded jwks_uri (flag)
+  //   receipt jwks_uri        the self-describing URL in the signed bytes
+  //   $RECORDER_JWKS_URL      operator env override
+  //   published default       DEFAULT_JWKS_URL
   //
-  // The embedded URL is read from the FIRST record's `jwks_uri` field. That
-  // field is inside the signed bytes — a post-sign mutation breaks the
-  // signature, so a verifier following it is trusting the signer's
-  // committed location, not a rewritable hint. The "no flag" default
-  // honoring the embedded URL is what gives the self-describing receipt
-  // its zero-config verification property.
+  // Fallback happens ONLY when the higher source is ABSENT — never when it is
+  // present-but-down. In particular, if a receipt carries a jwks_uri and that
+  // fetch fails, the verdict is UNVERIFIABLE (from runVerify); we do NOT drop
+  // to env or the published default, because silently verifying a
+  // self-describing receipt under a DIFFERENT key would defeat the whole
+  // point. The published default is reachable only for a legacy receipt with
+  // no embedded jwks_uri (and no flag/env). There is no implicit local-
+  // identity default — use --key for the offline path.
+  //
+  // The embedded URL is read from the FIRST record's `jwks_uri` field, which is
+  // inside the signed bytes: a post-sign mutation breaks the signature, so a
+  // verifier following it trusts the signer's committed location, not a
+  // rewritable hint.
   let embeddedJwksUri: string | undefined;
   try {
     const chainFile = readChainFile(chainPath);
@@ -472,14 +480,20 @@ async function cmdVerify(args: ParsedArgs): Promise<number> {
   }
   const envJwksUrl = process.env[JWKS_URL_ENV_VAR];
   const useLocalKey = typeof keyFlag === "string";
-  const wantsJwks =
-    !useLocalKey &&
-    (jwksFlag !== undefined ||
-      embeddedJwksUri !== undefined ||
-      envJwksUrl !== undefined);
   let result;
-  if (wantsJwks) {
-    // Classify the source so the honest-output line names it precisely.
+  if (useLocalKey) {
+    const identityPath = resolvePath(keyFlag as string);
+    result = runVerify({
+      chainPath,
+      identityPath,
+      expectThumbprints,
+      keySource: "flag",
+      keyOrigin: identityPath,
+      ...skewOpt,
+    });
+  } else {
+    // No --key ⇒ a JWKS source is always chosen; the published default is the
+    // terminal fallback. Classify precisely so the output names the source.
     let jwksUrl: string;
     let keySource: "flag" | "receipt-jwks" | "env" | "default";
     if (typeof jwksFlag === "string") {
@@ -501,20 +515,6 @@ async function cmdVerify(args: ParsedArgs): Promise<number> {
       expectThumbprints,
       keySource,
       keyOrigin: jwksUrl,
-      ...skewOpt,
-    });
-  } else {
-    const identityPath = useLocalKey
-      ? resolvePath(keyFlag as string)
-      : join(resolvePath(DATA_DIR), IDENTITY_FILENAME);
-    result = runVerify({
-      chainPath,
-      identityPath,
-      expectThumbprints,
-      // An explicit --key is a flag selection; the implicit local-identity
-      // fallback (no flag, no embedded URL, no env) is the default source.
-      keySource: useLocalKey ? "flag" : "default",
-      keyOrigin: identityPath,
       ...skewOpt,
     });
   }

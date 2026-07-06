@@ -117,7 +117,16 @@ export type VerifyResult =
       key: ResolvedKey;
     }
   | { kind: "empty" }
-  | { kind: "unresolved"; reason: string };
+  | {
+      // UNVERIFIABLE (spec E): the receipt is well-formed but we could not
+      // obtain the key it points to — the jwks_uri is present-but-down, or the
+      // hardened fetch profile refused the target. Distinct from INVALID (we
+      // reached a key and it failed a check) and from VALID. Fail-closed: a
+      // present jwks_uri that cannot be resolved MUST NOT silently fall back to
+      // a default JWKS, so this can never masquerade as VALID.
+      kind: "unverifiable";
+      reason: string;
+    };
 
 export type TamperReason =
   | "prev_hash linkage broken"
@@ -139,9 +148,23 @@ export type InvalidReason =
   // The resolved key's thumbprint is not in the caller's pinned set
   // (--expect-thumbprint / trust file). The chain may be internally
   // consistent, but it was not signed by a key the caller trusts.
-  | "untrusted_key";
+  | "untrusted_key"
+  // A receipt's own jwks_uri is not an https:// URL (or is unparseable). The
+  // signer committed to an insecure publication location — the receipt is
+  // malformed, per spec D, regardless of which key we verify under.
+  | "insecure_jwks_uri";
 
 const DEFAULT_MAX_SKEW_MS = 5_000;
+
+// True only for a parseable https:// URL. Used to reject a receipt whose
+// committed jwks_uri is insecure or malformed.
+function isHttpsUrl(u: string): boolean {
+  try {
+    return new URL(u).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 // Internal: everything verifyChain needs beyond the key itself.
 interface VerifyControls {
@@ -165,6 +188,18 @@ function formatJwksError(err: JwksResolveError): string {
   switch (err.kind) {
     case "non_https":
       return `JWKS URL must use HTTPS: ${err.url}`;
+    case "forbidden_port":
+      return `JWKS URL must use port 443 (got :${err.port}): ${err.url}`;
+    case "ip_literal_host":
+      return `JWKS URL host must be a name, not an IP literal (${err.host}): ${err.url}`;
+    case "private_address":
+      return `JWKS host ${err.host} resolved to a non-public address ${err.address}: ${err.url}`;
+    case "too_many_redirects":
+      return `JWKS fetch exceeded the redirect limit: ${err.url}`;
+    case "cross_origin_redirect":
+      return `JWKS fetch refused a cross-origin redirect to ${err.location}: ${err.url}`;
+    case "bad_content_type":
+      return `JWKS served an unacceptable content-type "${err.contentType}": ${err.url}`;
     case "fetch_failed":
       return `could not fetch JWKS at ${err.url}: ${err.message}`;
     case "malformed_jwks":
@@ -207,7 +242,7 @@ async function runVerifyJwks(opts: VerifyOptionsJwks): Promise<VerifyResult> {
   const resolved = await resolveKeyFromJwks({ url: opts.jwksUrl, kid });
   if (!resolved.ok) {
     return {
-      kind: "unresolved",
+      kind: "unverifiable",
       reason: formatJwksError(resolved.error),
     };
   }
@@ -302,6 +337,20 @@ function verifyChain(
     }
     if (r.kid !== key.kid) {
       return { kind: "tampered", entry: i, reason: "kid mismatch" };
+    }
+
+    // A self-describing receipt that names an insecure jwks_uri is malformed
+    // (spec D): the signer committed, inside the signed bytes, to a publication
+    // location a verifier must refuse to fetch. Reject the chain rather than
+    // ever following it. Checked independently of which key source we actually
+    // used, so an offline --key verify still surfaces the defect.
+    if (r.jwks_uri !== undefined && !isHttpsUrl(r.jwks_uri)) {
+      return {
+        kind: "invalid",
+        entry: i,
+        reason: "insecure_jwks_uri",
+        key: resolvedKey,
+      };
     }
 
     // Key binding (v1+). The receipt committed to a specific key identity via
@@ -446,9 +495,9 @@ export function formatVerifyResult(r: VerifyResult): {
       };
     case "empty":
       return { line: "TAMPERED — chain: empty", exitCode: 1 };
-    case "unresolved":
+    case "unverifiable":
       return {
-        line: `UNRESOLVED — ${r.reason}`,
+        line: `UNVERIFIABLE — ${r.reason}`,
         exitCode: 1,
       };
   }

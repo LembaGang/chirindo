@@ -121,9 +121,21 @@ chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]
 ```
 
 Defaults: `--dir = ./.gate/`, identity at `<dir>/identity.json`, chain
-at `<dir>/sessions/<session-id>.jsonl`, `--key = <dir>/identity.json`.
-`--jwks` without a value resolves to `$RECORDER_JWKS_URL`, falling back
-to the recorder's published default.
+at `<dir>/sessions/<session-id>.jsonl`.
+
+**verify key resolution (precedence, highest first):** `--key <file>` >
+`--jwks <url>` > the receipt's own `jwks_uri` > `$RECORDER_JWKS_URL` >
+the published default. Fallback happens **only when the higher source is
+absent** — a receipt whose `jwks_uri` is present but unreachable is
+`UNVERIFIABLE`, never silently re-resolved to a default key. There is no
+implicit local-identity default; pass `--key` for the offline path.
+
+**Hardened fetch.** Every `jwks_uri` fetch is `https://` + port 443 only,
+rejects IP-literal hosts and any hostname that resolves to a
+private/loopback/link-local address (checked after DNS, so a rebind can't
+slip through), follows at most one same-origin redirect, caps the body at
+64 KiB, times out at 5 s, and requires a JSON content-type. A receipt that
+names an `http://` `jwks_uri` is malformed → `INVALID`.
 
 ### Policy file format
 

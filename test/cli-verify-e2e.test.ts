@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseChainJsonl, serializeChainJsonl } from "../src/vendor/recorder/index.js";
+import { appendReceipt } from "../src/receipt.js";
 import { loadPolicy } from "../src/policy.js";
 import { runProxy } from "../src/proxy.js";
 import {
@@ -180,6 +181,29 @@ describe("chirindo verify (CLI end-to-end)", () => {
     ]);
     expect(fail.status).toBe(1);
     expect(fail.stdout).toMatch(/^INVALID — entry chain: untrusted_key/);
+  });
+
+  it("present-but-down embedded jwks_uri → UNVERIFIABLE, no fallback (spec E/F)", async () => {
+    // A self-describing receipt whose jwks_uri resolves inward. Run verify with
+    // NO flags: the CLI must use the embedded URL (receipt-jwks), fail closed,
+    // and NOT quietly drop to any default/local key that would say VALID.
+    const identity = await initIdentity(tmp);
+    const chainPath = join(tmp, "chain.jsonl");
+    appendReceipt({
+      chainPath,
+      sessionId: "sess-e2e-down",
+      identity,
+      server: "files",
+      toolName: "echo",
+      toolArgs: { text: "hi" },
+      toolResult: { content: [{ type: "text", text: "hi" }], isError: false },
+      jwksUri: "https://localhost/.well-known/jwks.json",
+      decision: { kind: "allow" },
+    });
+
+    const r = runCli(["verify", chainPath]);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/^UNVERIFIABLE —/);
   });
 
   it("rejects --key and --jwks together as a usage error (exit 2)", () => {

@@ -27,7 +27,9 @@
 // VALID, not TAMPERED). Silence is never an option for a verification tool.
 
 import { createPublicKey, type KeyObject } from "node:crypto";
+import { lookup as dnsLookup, type LookupAddress } from "node:dns";
 import { request as httpsRequest } from "node:https";
+import { isIP, type LookupFunction } from "node:net";
 import { URL } from "node:url";
 import { base64UrlDecode } from "./sign.js";
 
@@ -40,9 +42,19 @@ export const DEFAULT_JWKS_URL =
 // Env var name the CLI honors when no --jwks flag is passed.
 export const JWKS_URL_ENV_VAR = "RECORDER_JWKS_URL";
 
-// Hard bounds on the fetch — a verifier MUST NOT be a DoS amplifier.
-const JWKS_FETCH_TIMEOUT_MS = 5_000;
-const JWKS_MAX_BYTES = 256 * 1024; // 256 KiB is generous for a JWKS
+// Hardened fetch profile (spec D). A verifier that follows a URL out of an
+// untrusted receipt is an SSRF primitive unless every one of these holds. All
+// are fail-closed: a violation aborts the fetch, it never degrades to a weaker
+// check.
+const JWKS_FETCH_TIMEOUT_MS = 5_000; // 5 s
+const JWKS_MAX_BYTES = 64 * 1024; // 64 KiB body cap
+const JWKS_MAX_REDIRECTS = 1; // at most one redirect, same-origin only
+const JWKS_ALLOWED_PORT = "443"; // https default only
+// A JWKS document must be served as JSON. Parameters (charset=...) are ignored.
+const JWKS_ALLOWED_CONTENT_TYPES = [
+  "application/jwk-set+json",
+  "application/json",
+];
 
 // In-process cache: a single verify run that touches multiple chains under
 // the same kid hits the network once. Process exit clears it; we never
@@ -64,10 +76,69 @@ export interface Jwks {
 
 export type JwksResolveError =
   | { kind: "non_https"; url: string }
+  | { kind: "forbidden_port"; url: string; port: string }
+  | { kind: "ip_literal_host"; url: string; host: string }
+  | { kind: "private_address"; url: string; host: string; address: string }
+  | { kind: "too_many_redirects"; url: string }
+  | { kind: "cross_origin_redirect"; url: string; location: string }
+  | { kind: "bad_content_type"; url: string; contentType: string }
   | { kind: "fetch_failed"; url: string; message: string }
   | { kind: "malformed_jwks"; url: string; message: string }
   | { kind: "kid_not_found"; url: string; kid: string }
   | { kind: "malformed_jwk"; url: string; kid: string; message: string };
+
+// Internal typed error so the socket-level guards (which fire deep inside the
+// https/net machinery, e.g. the DNS lookup hook) can carry a precise
+// JwksResolveError back out to resolveKeyFromJwks instead of collapsing to a
+// generic connection failure.
+class JwksFetchError extends Error {
+  constructor(readonly detail: JwksResolveError) {
+    super(detail.kind);
+    this.name = "JwksFetchError";
+  }
+}
+
+// True if `ip` is loopback / link-local / private / otherwise not a public
+// routable address. Conservative and fail-closed: anything we cannot positively
+// classify as public is treated as unsafe. This is the check that stops a
+// jwks_uri whose DNS resolves inward (169.254.169.254, 127.0.0.1, 10.x, ...).
+export function isPrivateAddress(ip: string): boolean {
+  const type = isIP(ip);
+  if (type === 4) return isPrivateV4(ip);
+  if (type === 6) return isPrivateV6(ip);
+  return true; // not a valid IP literal — refuse
+}
+
+function isPrivateV4(ip: string): boolean {
+  const parts = ip.split(".").map((o) => Number.parseInt(o, 10));
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+    return true;
+  }
+  const [a, b] = parts as [number, number, number, number];
+  if (a === 0) return true; // 0.0.0.0/8 "this network"
+  if (a === 10) return true; // 10.0.0.0/8 private
+  if (a === 127) return true; // 127.0.0.0/8 loopback
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 private
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16 private
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
+  if (a >= 224) return true; // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved
+  return false;
+}
+
+function isPrivateV6(ip: string): boolean {
+  const s = ip.toLowerCase();
+  if (s === "::" || s === "::1") return true; // unspecified / loopback
+  // IPv4-mapped (::ffff:a.b.c.d) — classify by the embedded v4 address.
+  const mapped = s.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateV4(mapped[1]!);
+  if (s.startsWith("fe8") || s.startsWith("fe9") || s.startsWith("fea") || s.startsWith("feb")) {
+    return true; // fe80::/10 link-local
+  }
+  if (s.startsWith("fc") || s.startsWith("fd")) return true; // fc00::/7 ULA
+  if (s.startsWith("ff")) return true; // ff00::/8 multicast
+  return false;
+}
 
 export type JwksResolveResult =
   | { ok: true; publicKey: KeyObject; jwk: Jwk }
@@ -138,39 +209,166 @@ export function ed25519PublicKeyFromJwk(jwk: Jwk): KeyObject {
   } as Parameters<typeof createPublicKey>[0]);
 }
 
-// HTTPS GET with a hard timeout + max-bytes cap. The verifier is a trust
-// boundary; we refuse to follow redirects or accept non-TLS schemes.
-export async function fetchJwks(url: string): Promise<Jwks> {
-  const parsed = new URL(url);
+// Validate the STATIC properties of a fetch target — those knowable from the
+// URL alone, before any DNS or socket work: https scheme, port 443, and a
+// hostname that is NOT an IP literal (IP-literal targets bypass the DNS guard
+// and are a classic SSRF shape). Returns a typed error, or null if the target
+// clears the static checks. The DNS/private-address check happens later, at
+// connection time, because it depends on resolution.
+function validateFetchTarget(originalUrl: string, parsed: URL): JwksResolveError | null {
   if (parsed.protocol !== "https:") {
-    throw new Error(`JWKS URL must be https:// (got ${parsed.protocol}//...)`);
+    return { kind: "non_https", url: originalUrl };
   }
+  if (parsed.port !== "" && parsed.port !== JWKS_ALLOWED_PORT) {
+    return { kind: "forbidden_port", url: originalUrl, port: parsed.port };
+  }
+  // URL.hostname keeps the brackets around an IPv6 literal ("[::1]"); strip
+  // them before the IP test or isIP would miss every IPv6 literal.
+  const host = parsed.hostname.replace(/^\[|\]$/g, "");
+  if (isIP(host) !== 0) {
+    return { kind: "ip_literal_host", url: originalUrl, host };
+  }
+  return null;
+}
+
+// A DNS lookup hook for https.request that resolves the hostname and REFUSES
+// to hand back any private/loopback/link-local address. Because the socket
+// connects to exactly the address this hook returns, the public-IP decision
+// and the connection target are the same resolution — no TOCTOU / DNS-rebind
+// window between "checked" and "connected." Honors the `all` option so it is
+// correct under Happy-Eyeballs (Node's autoSelectFamily calls with all:true).
+function guardedLookup(originalUrl: string): LookupFunction {
+  return (hostname, options, callback) => {
+    // Resolve ALL addresses (verbatim: no reordering) so we can reject if ANY
+    // of them is non-public — a hostname that returns one public and one
+    // loopback address must not be reachable via the loopback entry.
+    dnsLookup(hostname, { ...options, all: true, verbatim: true }, (err, addresses) => {
+      if (err) {
+        callback(err, "", 0);
+        return;
+      }
+      const list = addresses as unknown as LookupAddress[];
+      for (const a of list) {
+        if (isPrivateAddress(a.address)) {
+          callback(
+            new JwksFetchError({
+              kind: "private_address",
+              url: originalUrl,
+              host: hostname,
+              address: a.address,
+            }),
+            "",
+            0,
+          );
+          return;
+        }
+      }
+      const first = list[0];
+      if (first === undefined) {
+        callback(new Error(`no DNS records for ${hostname}`), "", 0);
+        return;
+      }
+      // Answer in the shape net requested: the address list when it asked for
+      // all (Happy Eyeballs), otherwise a single validated address.
+      if (options.all) {
+        callback(null, list);
+      } else {
+        callback(null, first.address, first.family);
+      }
+    });
+  };
+}
+
+// HTTPS GET a JWKS document under the full hardened profile (spec D): https +
+// port 443 only, no IP-literal host, no DNS resolution to a private range,
+// at most one same-origin redirect, a 64 KiB body cap, a 5 s timeout, and a
+// JSON content-type. Any violation rejects with a typed JwksFetchError.
+export async function fetchJwks(url: string): Promise<Jwks> {
+  return await fetchJwksFollowing(url, url, JWKS_MAX_REDIRECTS);
+}
+
+// `originalUrl` is the receipt-declared URL (used for error attribution and the
+// same-origin comparison); `currentUrl` is the URL of THIS hop.
+async function fetchJwksFollowing(
+  originalUrl: string,
+  currentUrl: string,
+  redirectsLeft: number,
+): Promise<Jwks> {
+  const parsed = new URL(currentUrl);
+  const targetError = validateFetchTarget(originalUrl, parsed);
+  if (targetError !== null) {
+    throw new JwksFetchError(targetError);
+  }
+
   return await new Promise<Jwks>((resolveP, rejectP) => {
     const req = httpsRequest(
       {
         method: "GET",
         protocol: parsed.protocol,
         hostname: parsed.hostname,
-        port: parsed.port || 443,
+        port: JWKS_ALLOWED_PORT,
         path: parsed.pathname + parsed.search,
-        headers: { accept: "application/json" },
+        headers: { accept: JWKS_ALLOWED_CONTENT_TYPES.join(", ") },
         timeout: JWKS_FETCH_TIMEOUT_MS,
+        lookup: guardedLookup(originalUrl),
       },
       (res) => {
-        if (res.statusCode === undefined || res.statusCode >= 300) {
-          // Treat redirects as failure too — we don't follow them, and a 3xx
-          // here means the operator misconfigured the URL.
-          res.resume();
-          rejectP(new Error(`HTTP ${res.statusCode ?? "?"} fetching JWKS`));
+        const status = res.statusCode ?? 0;
+
+        // Redirects: follow at most one, and only same-origin. Anything else
+        // is a fail-closed refusal — a cross-origin redirect out of an
+        // untrusted URL is the SSRF pivot this profile exists to stop.
+        if (status >= 300 && status < 400) {
+          res.resume(); // drain
+          const location = res.headers.location;
+          if (redirectsLeft <= 0 || location === undefined) {
+            rejectP(new JwksFetchError({ kind: "too_many_redirects", url: originalUrl }));
+            return;
+          }
+          let target: URL;
+          try {
+            target = new URL(location, parsed);
+          } catch {
+            rejectP(new JwksFetchError({ kind: "cross_origin_redirect", url: originalUrl, location }));
+            return;
+          }
+          if (target.protocol !== parsed.protocol || target.host !== parsed.host) {
+            rejectP(new JwksFetchError({ kind: "cross_origin_redirect", url: originalUrl, location }));
+            return;
+          }
+          fetchJwksFollowing(originalUrl, target.href, redirectsLeft - 1).then(resolveP, rejectP);
           return;
         }
+
+        if (status !== 200) {
+          res.resume();
+          rejectP(new JwksFetchError({ kind: "fetch_failed", url: originalUrl, message: `HTTP ${status}` }));
+          return;
+        }
+
+        const contentType = (res.headers["content-type"] ?? "")
+          .split(";")[0]!
+          .trim()
+          .toLowerCase();
+        if (!JWKS_ALLOWED_CONTENT_TYPES.includes(contentType)) {
+          res.resume();
+          rejectP(
+            new JwksFetchError({ kind: "bad_content_type", url: originalUrl, contentType }),
+          );
+          return;
+        }
+
         const chunks: Buffer[] = [];
         let total = 0;
         res.on("data", (chunk: Buffer) => {
           total += chunk.length;
           if (total > JWKS_MAX_BYTES) {
             res.destroy(
-              new Error(`JWKS response exceeded ${JWKS_MAX_BYTES} bytes`),
+              new JwksFetchError({
+                kind: "fetch_failed",
+                url: originalUrl,
+                message: `body exceeded ${JWKS_MAX_BYTES} bytes`,
+              }),
             );
             return;
           }
@@ -183,7 +381,11 @@ export async function fetchJwks(url: string): Promise<Jwks> {
             parsedBody = JSON.parse(body);
           } catch (e) {
             rejectP(
-              new Error(`JWKS body is not valid JSON: ${(e as Error).message}`),
+              new JwksFetchError({
+                kind: "malformed_jwks",
+                url: originalUrl,
+                message: `not valid JSON: ${(e as Error).message}`,
+              }),
             );
             return;
           }
@@ -192,17 +394,41 @@ export async function fetchJwks(url: string): Promise<Jwks> {
             parsedBody === null ||
             !Array.isArray((parsedBody as { keys?: unknown }).keys)
           ) {
-            rejectP(new Error("JWKS body has no `keys` array"));
+            rejectP(
+              new JwksFetchError({
+                kind: "malformed_jwks",
+                url: originalUrl,
+                message: "body has no `keys` array",
+              }),
+            );
             return;
           }
           resolveP(parsedBody as Jwks);
         });
-        res.on("error", rejectP);
+        res.on("error", (e) =>
+          rejectP(
+            e instanceof JwksFetchError
+              ? e
+              : new JwksFetchError({ kind: "fetch_failed", url: originalUrl, message: (e as Error).message }),
+          ),
+        );
       },
     );
-    req.on("error", rejectP);
+    req.on("error", (e) =>
+      rejectP(
+        e instanceof JwksFetchError
+          ? e
+          : new JwksFetchError({ kind: "fetch_failed", url: originalUrl, message: (e as Error).message }),
+      ),
+    );
     req.on("timeout", () => {
-      req.destroy(new Error(`JWKS fetch timed out after ${JWKS_FETCH_TIMEOUT_MS}ms`));
+      req.destroy(
+        new JwksFetchError({
+          kind: "fetch_failed",
+          url: originalUrl,
+          message: `timed out after ${JWKS_FETCH_TIMEOUT_MS}ms`,
+        }),
+      );
     });
     req.end();
   });
@@ -230,8 +456,13 @@ export async function resolveKeyFromJwks(opts: {
       error: { kind: "fetch_failed", url: opts.url, message: "invalid URL" },
     };
   }
-  if (parsed.protocol !== "https:") {
-    return { ok: false, error: { kind: "non_https", url: opts.url } };
+  // Static target validation (scheme / port / IP-literal) up front so an
+  // obviously-unsafe URL fails without a network round-trip. The remaining
+  // guards (DNS→private, redirects, content-type, size, timeout) fire inside
+  // fetchJwks and arrive here as typed JwksFetchError.detail.
+  const targetError = validateFetchTarget(opts.url, parsed);
+  if (targetError !== null) {
+    return { ok: false, error: targetError };
   }
 
   let jwks = jwksCache.get(opts.url);
@@ -239,6 +470,9 @@ export async function resolveKeyFromJwks(opts: {
     try {
       jwks = await fetchJwks(opts.url);
     } catch (e) {
+      if (e instanceof JwksFetchError) {
+        return { ok: false, error: e.detail };
+      }
       return {
         ok: false,
         error: {

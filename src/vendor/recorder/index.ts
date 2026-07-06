@@ -122,6 +122,7 @@ export {
   ed25519PublicKeyFromJwk,
   fetchJwks,
   findJwkByKid,
+  isPrivateAddress,
   resolveKeyFromJwks,
 } from "./jwks.js";
 export type {
