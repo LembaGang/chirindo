@@ -145,6 +145,43 @@ describe("chirindo verify (CLI end-to-end)", () => {
     expect(r.stdout).toMatch(/^TAMPERED — entry 0:/);
   });
 
+  it("names the verifying key on VALID and honors --expect-thumbprint", async () => {
+    const { chainPath, identityPath } = await buildAllowChain(tmp);
+    // Learn the resolved key's thumbprint from a plain verify's output.
+    const first = runCli(["verify", chainPath, "--key", identityPath]);
+    expect(first.status).toBe(0);
+    const m = first.stdout.match(/verified under key (\S+) resolved from flag/);
+    expect(m).not.toBeNull();
+    const tp = m![1]!;
+
+    // Pinned-pass: the resolved key IS the pin.
+    const pass = runCli([
+      "verify",
+      chainPath,
+      "--key",
+      identityPath,
+      "--expect-thumbprint",
+      tp,
+    ]);
+    expect(pass.status).toBe(0);
+    expect(pass.stdout).toMatch(/^VALID —/);
+    expect(pass.stdout).toContain(`verified under key ${tp}`);
+
+    // Pinned-fail: a different (and a repeated) pin, none matching → INVALID.
+    const fail = runCli([
+      "verify",
+      chainPath,
+      "--key",
+      identityPath,
+      "--expect-thumbprint",
+      "nope-1",
+      "--expect-thumbprint",
+      "nope-2",
+    ]);
+    expect(fail.status).toBe(1);
+    expect(fail.stdout).toMatch(/^INVALID — entry chain: untrusted_key/);
+  });
+
   it("rejects --key and --jwks together as a usage error (exit 2)", () => {
     const r = runCli([
       "verify",

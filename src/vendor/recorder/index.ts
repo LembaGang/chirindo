@@ -104,6 +104,8 @@ export {
 } from "./cli/verify.js";
 export type {
   InvalidReason,
+  KeySource,
+  ResolvedKey,
   TamperReason,
   VerifyOptions,
   VerifyOptionsJwks,

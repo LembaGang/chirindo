@@ -46,9 +46,32 @@ import {
 import { requestCommitment } from "../request.js";
 import { verifyEd25519 } from "../sign.js";
 
+// Where the verifying key came from, in precedence order. Surfaced in output
+// so a consumer (human or agent) can never mistake "internally consistent
+// under some key" for "signed by the key I trust."
+export type KeySource = "flag" | "receipt-jwks" | "env" | "default";
+
+// The key a verification actually ran under. `origin` is the concrete
+// location (URL or file path) the key was read from.
+export interface ResolvedKey {
+  thumbprint: string;
+  source: KeySource;
+  origin: string;
+}
+
 export interface VerifyOptionsBase {
   chainPath: string;
   maxSkewMs?: number;
+  // Pinning surface (spec C). When non-empty, the RFC 7638 thumbprint of the
+  // resolved key MUST be a member or verification returns INVALID
+  // (untrusted_key) — fail-closed. Empty/absent ⇒ no pinning: VALID then means
+  // "internally consistent under the presented key," NOT "signed by a trusted
+  // key." That distinction is the whole point of surfacing the resolved key.
+  expectThumbprints?: string[];
+  // Presentation only — how the key was resolved and from where. Echoed in the
+  // honest-output line. Defaults are derived per key path when omitted.
+  keySource?: KeySource;
+  keyOrigin?: string;
 }
 
 export interface VerifyOptionsKey extends VerifyOptionsBase {
@@ -62,7 +85,15 @@ export interface VerifyOptionsJwks extends VerifyOptionsBase {
 export type VerifyOptions = VerifyOptionsKey | VerifyOptionsJwks;
 
 export type VerifyResult =
-  | { kind: "valid"; count: number; sessionId: string; hasCheckpoint: boolean }
+  | {
+      kind: "valid";
+      count: number;
+      sessionId: string;
+      hasCheckpoint: boolean;
+      // The key this chain verified under. ALWAYS present on VALID so output
+      // can name it — VALID is never anonymous.
+      key: ResolvedKey;
+    }
   | {
       kind: "tampered";
       entry: number | "checkpoint";
@@ -74,12 +105,16 @@ export type VerifyResult =
       // chain is internally intact but fails a KEY / TRUST check — the
       // verifier resolved a key that does not match the identity the receipt
       // committed to (key_binding_mismatch), or a key the caller did not
-      // pin/trust (untrusted_key, Task 2). Separate verdict so an agent
-      // consumer can tell "someone rewrote the log" from "this is not the key
-      // you think it is." Fail-closed: both exit non-zero.
+      // pin/trust (untrusted_key). Separate verdict so an agent consumer can
+      // tell "someone rewrote the log" from "this is not the key you think it
+      // is." Fail-closed: both exit non-zero. `entry` is "chain" for
+      // key-level failures that are not tied to a single record.
       kind: "invalid";
-      entry: number | "checkpoint";
+      entry: number | "checkpoint" | "chain";
       reason: InvalidReason;
+      // The key that was resolved — named even on rejection so a consumer can
+      // see WHICH key failed the trust/binding check.
+      key: ResolvedKey;
     }
   | { kind: "empty" }
   | { kind: "unresolved"; reason: string };
@@ -100,9 +135,21 @@ export type InvalidReason =
   // committed `key_thumbprint` — or a v1 receipt omitted `key_thumbprint`
   // entirely (malformed / fail-closed). Checked BEFORE the signature so a
   // substituted key cannot "pass" by verifying under itself.
-  | "key_binding_mismatch";
+  | "key_binding_mismatch"
+  // The resolved key's thumbprint is not in the caller's pinned set
+  // (--expect-thumbprint / trust file). The chain may be internally
+  // consistent, but it was not signed by a key the caller trusts.
+  | "untrusted_key";
 
 const DEFAULT_MAX_SKEW_MS = 5_000;
+
+// Internal: everything verifyChain needs beyond the key itself.
+interface VerifyControls {
+  maxSkewMs: number | undefined;
+  expectThumbprints: string[];
+  keySource: KeySource;
+  keyOrigin: string;
+}
 
 // Internal: resolved verification key + the kid it answers to.
 interface VerifierKey {
@@ -143,7 +190,7 @@ export function runVerify(
   return verifyChain(
     { kid: identity.kid, publicKey: identity.publicKey },
     opts.chainPath,
-    opts.maxSkewMs,
+    controlsFrom(opts, "flag", opts.identityPath),
   );
 }
 
@@ -167,8 +214,24 @@ async function runVerifyJwks(opts: VerifyOptionsJwks): Promise<VerifyResult> {
   return verifyChain(
     { kid, publicKey: resolved.publicKey },
     opts.chainPath,
-    opts.maxSkewMs,
+    controlsFrom(opts, "flag", opts.jwksUrl),
   );
+}
+
+// Build the internal controls from public options, applying per-path defaults
+// for source/origin when the caller (the CLI, which knows the precedence it
+// took) did not supply them.
+function controlsFrom(
+  opts: VerifyOptionsBase,
+  defaultSource: KeySource,
+  defaultOrigin: string,
+): VerifyControls {
+  return {
+    maxSkewMs: opts.maxSkewMs,
+    expectThumbprints: opts.expectThumbprints ?? [],
+    keySource: opts.keySource ?? defaultSource,
+    keyOrigin: opts.keyOrigin ?? defaultOrigin,
+  };
 }
 
 // Shared verify body — identical to the original logic, parameterized on
@@ -179,13 +242,41 @@ async function runVerifyJwks(opts: VerifyOptionsJwks): Promise<VerifyResult> {
 function verifyChain(
   key: VerifierKey,
   chainPath: string,
-  maxSkewMsOpt: number | undefined,
+  controls: VerifyControls,
 ): VerifyResult {
-  const maxSkewMs = maxSkewMsOpt ?? DEFAULT_MAX_SKEW_MS;
+  const maxSkewMs = controls.maxSkewMs ?? DEFAULT_MAX_SKEW_MS;
   const file = readChainFile(chainPath);
 
   if (file.records.length === 0) {
     return { kind: "empty" };
+  }
+
+  // The RFC 7638 thumbprint of the key we resolved. For v1 receipts this must
+  // equal the receipt's committed `key_thumbprint` (the key binding), checked
+  // BEFORE the signature. Computed once — it is constant across the chain.
+  const resolvedKeyThumbprint = rfc7638Thumbprint(key.publicKey);
+  const resolvedKey: ResolvedKey = {
+    thumbprint: resolvedKeyThumbprint,
+    source: controls.keySource,
+    origin: controls.keyOrigin,
+  };
+
+  // Pinning (spec C). If the caller pinned a set of trusted thumbprints and the
+  // key we resolved is not among them, reject up front — fail-closed, before
+  // spending any work on the chain body. The chain may well be internally
+  // consistent; it simply was not signed by a key the caller trusts, and
+  // saying VALID here would be the exact lie the pinning surface exists to
+  // prevent.
+  if (
+    controls.expectThumbprints.length > 0 &&
+    !controls.expectThumbprints.includes(resolvedKeyThumbprint)
+  ) {
+    return {
+      kind: "invalid",
+      entry: "chain",
+      reason: "untrusted_key",
+      key: resolvedKey,
+    };
   }
 
   const sessionId = file.records[0]!.session_id;
@@ -195,11 +286,6 @@ function verifyChain(
   // mandatory backward-compat property.
   let lastEntryHash = genesisPrevHash(sessionId, file.records[0]!.v);
   let lastTs: number | null = null;
-
-  // The RFC 7638 thumbprint of the key we resolved. For v1 receipts this must
-  // equal the receipt's committed `key_thumbprint` (the key binding), checked
-  // BEFORE the signature. Computed once — it is constant across the chain.
-  const resolvedKeyThumbprint = rfc7638Thumbprint(key.publicKey);
 
   for (let i = 0; i < file.records.length; i++) {
     const r = file.records[i]!;
@@ -227,7 +313,12 @@ function verifyChain(
     // `key_thumbprint` is malformed and fails closed here too.
     if (r.v === RECORD_VERSION_V1) {
       if (r.key_thumbprint !== resolvedKeyThumbprint) {
-        return { kind: "invalid", entry: i, reason: "key_binding_mismatch" };
+        return {
+          kind: "invalid",
+          entry: i,
+          reason: "key_binding_mismatch",
+          key: resolvedKey,
+        };
       }
     }
 
@@ -287,6 +378,7 @@ function verifyChain(
     count: file.records.length,
     sessionId,
     hasCheckpoint: file.checkpoint !== null,
+    key: resolvedKey,
   };
 }
 
@@ -321,6 +413,14 @@ function verifyCheckpoint(
   return null;
 }
 
+// The honest-output line (spec C). Names WHICH key verified and from WHERE, so
+// VALID is never mistaken for "signed by Headless Oracle." Without a pin,
+// VALID means "internally consistent under THIS key" — the second half of this
+// line is what makes that unambiguous to a human or an agent.
+function keyLine(key: ResolvedKey): string {
+  return `verified under key ${key.thumbprint} resolved from ${key.source} (${key.origin})`;
+}
+
 // Format a result for CLI stdout.
 export function formatVerifyResult(r: VerifyResult): {
   line: string;
@@ -329,7 +429,9 @@ export function formatVerifyResult(r: VerifyResult): {
   switch (r.kind) {
     case "valid":
       return {
-        line: `VALID — ${r.count} entries, chain intact, all signatures verified, session ${r.sessionId}`,
+        line:
+          `VALID — ${r.count} entries, chain intact, all signatures verified, session ${r.sessionId}\n` +
+          keyLine(r.key),
         exitCode: 0,
       };
     case "tampered":
@@ -339,7 +441,7 @@ export function formatVerifyResult(r: VerifyResult): {
       };
     case "invalid":
       return {
-        line: `INVALID — entry ${r.entry}: ${r.reason}`,
+        line: `INVALID — entry ${r.entry}: ${r.reason}\n` + keyLine(r.key),
         exitCode: 1,
       };
     case "empty":

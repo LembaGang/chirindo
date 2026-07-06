@@ -24,6 +24,7 @@
 import { randomUUID } from "node:crypto";
 import {
   mkdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -58,6 +59,7 @@ Usage:
                        [--jwks-uri <https-url>]
                        -- <downstream-command> [<args>...]
   chirindo verify      <chain-file> [--key <identity.json> | --jwks [<url>]]
+                       [--expect-thumbprint <tp>]... [--trust-file <file>]
                        [--max-skew-ms <ms>]
 
 Defaults:
@@ -83,6 +85,19 @@ verify key resolution (in precedence order):
   no flag, record has jwks_uri            use the embedded URL (self-describing)
   no flag, no embedded URL                local <data-dir>/${IDENTITY_FILENAME}
 
+Trust / pinning (what VALID means):
+  --expect-thumbprint <tp>   Accept only these RFC 7638 key thumbprints
+                             (repeatable). Resolved key not in the set -> INVALID
+                             (untrusted_key).
+  --trust-file <file>        JSON of accepted thumbprints: a bare array, or
+                             { "thumbprints": [ ... ] }. Merged with the flags.
+
+  verify output ALWAYS names the verifying key:
+    "verified under key <thumbprint> resolved from <source> (<origin>)"
+  WITHOUT a pin (--expect-thumbprint / --trust-file), VALID means the chain is
+  INTERNALLY CONSISTENT under the presented key — NOT that it was signed by
+  Headless Oracle or anyone in particular. Pin a thumbprint to assert WHO.
+
 Exit codes:
   0  proxy ran to clean shutdown / init / export-jwks succeeded / VALID
   1  proxy startup error / TAMPERED / UNRESOLVED
@@ -93,6 +108,11 @@ Exit codes:
 interface ParsedArgs {
   command: string | undefined;
   flags: Map<string, string | true>;
+  // All string values seen for each flag, in order — supports repeatable
+  // flags (e.g. --expect-thumbprint a --expect-thumbprint b). `flags` still
+  // holds the LAST value for single-valued flags; `multi` is additive and does
+  // not change any existing single-value consumer.
+  multi: Map<string, string[]>;
   positional: string[];
   passthrough: string[]; // everything after `--`
 }
@@ -100,8 +120,15 @@ interface ParsedArgs {
 function parseArgs(argv: string[]): ParsedArgs {
   const command = argv[0];
   const flags = new Map<string, string | true>();
+  const multi = new Map<string, string[]>();
   const positional: string[] = [];
   const passthrough: string[] = [];
+  const setFlag = (name: string, value: string) => {
+    flags.set(name, value);
+    const seen = multi.get(name);
+    if (seen) seen.push(value);
+    else multi.set(name, [value]);
+  };
   let sawSep = false;
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i]!;
@@ -116,13 +143,13 @@ function parseArgs(argv: string[]): ParsedArgs {
     if (a.startsWith("--")) {
       const eq = a.indexOf("=");
       if (eq !== -1) {
-        flags.set(a.slice(2, eq), a.slice(eq + 1));
+        setFlag(a.slice(2, eq), a.slice(eq + 1));
       } else {
         const next = argv[i + 1];
         if (next === undefined || next.startsWith("--") || next === "--") {
           flags.set(a.slice(2), true);
         } else {
-          flags.set(a.slice(2), next);
+          setFlag(a.slice(2), next);
           i++;
         }
       }
@@ -130,7 +157,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       positional.push(a);
     }
   }
-  return { command, flags, positional, passthrough };
+  return { command, flags, multi, positional, passthrough };
 }
 
 // Resolve a user-supplied path to an absolute path. Absolute inputs are
@@ -407,6 +434,19 @@ async function cmdVerify(args: ParsedArgs): Promise<number> {
       ? { maxSkewMs: Number.parseInt(maxSkewFlag, 10) }
       : {};
 
+  // Pinning surface (spec C). --expect-thumbprint is repeatable; --trust-file
+  // is a JSON file of accepted thumbprints. The two merge. Fail-closed: a
+  // trust file that is named but unreadable/malformed is an error, NOT an
+  // empty (= "trust everything") set — silently dropping a pin is exactly the
+  // failure a trust anchor must never have.
+  const expectThumbprints = args.multi.get("expect-thumbprint") ?? [];
+  const trustFileFlag = args.flags.get("trust-file");
+  if (typeof trustFileFlag === "string") {
+    const loaded = loadTrustFile(resolvePath(trustFileFlag));
+    if (loaded === null) return 2; // message already written
+    expectThumbprints.push(...loaded);
+  }
+
   // Key-source resolution precedence (documented in helpText()):
   //
   //   --key <file>                            local identity, no network
@@ -439,21 +479,89 @@ async function cmdVerify(args: ParsedArgs): Promise<number> {
       envJwksUrl !== undefined);
   let result;
   if (wantsJwks) {
-    const jwksUrl =
-      typeof jwksFlag === "string"
-        ? jwksFlag
-        : (embeddedJwksUri ?? envJwksUrl ?? DEFAULT_JWKS_URL);
-    result = await runVerify({ chainPath, jwksUrl, ...skewOpt });
+    // Classify the source so the honest-output line names it precisely.
+    let jwksUrl: string;
+    let keySource: "flag" | "receipt-jwks" | "env" | "default";
+    if (typeof jwksFlag === "string") {
+      jwksUrl = jwksFlag;
+      keySource = "flag";
+    } else if (embeddedJwksUri !== undefined) {
+      jwksUrl = embeddedJwksUri;
+      keySource = "receipt-jwks";
+    } else if (envJwksUrl !== undefined) {
+      jwksUrl = envJwksUrl;
+      keySource = "env";
+    } else {
+      jwksUrl = DEFAULT_JWKS_URL;
+      keySource = "default";
+    }
+    result = await runVerify({
+      chainPath,
+      jwksUrl,
+      expectThumbprints,
+      keySource,
+      keyOrigin: jwksUrl,
+      ...skewOpt,
+    });
   } else {
     const identityPath = useLocalKey
       ? resolvePath(keyFlag as string)
       : join(resolvePath(DATA_DIR), IDENTITY_FILENAME);
-    result = runVerify({ chainPath, identityPath, ...skewOpt });
+    result = runVerify({
+      chainPath,
+      identityPath,
+      expectThumbprints,
+      // An explicit --key is a flag selection; the implicit local-identity
+      // fallback (no flag, no embedded URL, no env) is the default source.
+      keySource: useLocalKey ? "flag" : "default",
+      keyOrigin: identityPath,
+      ...skewOpt,
+    });
   }
 
   const formatted = formatVerifyResult(result);
   process.stdout.write(formatted.line + "\n");
   return formatted.exitCode;
+}
+
+// Load a JSON trust file of accepted RFC 7638 thumbprints. Accepts either a
+// bare array of strings or an object with a `thumbprints` string array.
+// Returns null (after writing a diagnostic) on any read/parse/shape error —
+// the caller treats null as a fail-closed usage error, never as "no pins."
+function loadTrustFile(path: string): string[] | null {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    process.stderr.write(
+      `chirindo verify: cannot read --trust-file ${path}: ${(e as Error).message}\n`,
+    );
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    process.stderr.write(
+      `chirindo verify: --trust-file ${path} is not valid JSON: ${(e as Error).message}\n`,
+    );
+    return null;
+  }
+  const list = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === "object" &&
+        parsed !== null &&
+        Array.isArray((parsed as { thumbprints?: unknown }).thumbprints)
+      ? (parsed as { thumbprints: unknown[] }).thumbprints
+      : null;
+  if (list === null || !list.every((t) => typeof t === "string" && t.length > 0)) {
+    process.stderr.write(
+      `chirindo verify: --trust-file ${path} must be a JSON array of thumbprint strings ` +
+        `or an object { "thumbprints": [ ... ] }\n`,
+    );
+    return null;
+  }
+  return list as string[];
 }
 
 async function main(argv: string[]): Promise<number> {

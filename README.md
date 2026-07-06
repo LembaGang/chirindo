@@ -116,6 +116,7 @@ chirindo proxy  --policy <file> --server-label <name>
                 [--dir <path>] [--chain <file>] [--session-id <id>]
                 -- <downstream-command> [<args>...]
 chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]
+                [--expect-thumbprint <tp>]... [--trust-file <file>]
                 [--max-skew-ms <ms>]
 ```
 
@@ -227,7 +228,35 @@ record's signature and the hash-chain linkage. Expected output:
 
 ```
 VALID — N entries, chain intact, all signatures verified, session <id>
+verified under key <thumbprint> resolved from <source> (<origin>)
 ```
+
+The second line is not decoration. It names **which** key verified the
+chain and **where** that key came from (`flag`, `receipt-jwks`, `env`,
+or `default`). Read it carefully, because:
+
+> **Without a pin, `VALID` means the chain is *internally consistent
+> under the key that was presented* — NOT that it was signed by Headless
+> Oracle or anyone in particular.** A self-describing receipt tells the
+> verifier where to fetch a key; on its own that only proves the chain
+> agrees with *that* key.
+
+To assert **who** signed, pin the key's RFC 7638 thumbprint:
+
+```
+chirindo verify <chain> --jwks --expect-thumbprint <tp>
+# or a JSON trust file: --trust-file trusted-keys.json
+#   ["<tp1>", "<tp2>"]   |   { "thumbprints": ["<tp1>"] }
+```
+
+`--expect-thumbprint` is repeatable. If the resolved key's thumbprint is
+not in your pinned set, verification is `INVALID — untrusted_key` (exit
+1) even when every signature checks out — the chain is consistent, but
+not with a key you trust. The key binding is enforced *before* the
+signature: every v1 receipt carries the signer's thumbprint in its
+signed bytes, and the verifier compares the thumbprint of the key it
+resolved to that committed value first, so a substituted key at the
+`jwks_uri` cannot pass by verifying under itself.
 
 You just verified, against a public key over the internet, what your
 gate recorded — no trust in this repo, no trust in the binary you ran,
