@@ -119,6 +119,7 @@ export {
   JWKS_URL_ENV_VAR,
   _clearJwksCache,
   _setJwksCacheEntry,
+  _setLookupForTests,
   buildJwk,
   buildJwks,
   ed25519PublicKeyFromJwk,

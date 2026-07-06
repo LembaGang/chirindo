@@ -27,7 +27,11 @@
 // VALID, not TAMPERED). Silence is never an option for a verification tool.
 
 import { createPublicKey, type KeyObject } from "node:crypto";
-import { lookup as dnsLookup, type LookupAddress } from "node:dns";
+import {
+  lookup as dnsLookup,
+  type LookupAddress,
+  type LookupAllOptions,
+} from "node:dns";
 import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { URL } from "node:url";
@@ -130,15 +134,37 @@ function isPrivateV4(ip: string): boolean {
 function isPrivateV6(ip: string): boolean {
   const s = ip.toLowerCase();
   if (s === "::" || s === "::1") return true; // unspecified / loopback
-  // IPv4-mapped (::ffff:a.b.c.d) — classify by the embedded v4 address.
-  const mapped = s.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPrivateV4(mapped[1]!);
+  // Addresses that embed an IPv4 address — IPv4-mapped (::ffff:0:0/96) and
+  // NAT64 (64:ff9b::/96) — are classified by that embedded v4. Both the dotted
+  // (::ffff:127.0.0.1) and hex (::ffff:7f00:1) tail encodings are handled, so
+  // e.g. 64:ff9b::a9fe:a9fe (169.254.169.254 via NAT64) is refused.
+  const embedded = embeddedV4(s);
+  if (embedded !== null) return isPrivateV4(embedded);
   if (s.startsWith("fe8") || s.startsWith("fe9") || s.startsWith("fea") || s.startsWith("feb")) {
     return true; // fe80::/10 link-local
   }
   if (s.startsWith("fc") || s.startsWith("fd")) return true; // fc00::/7 ULA
   if (s.startsWith("ff")) return true; // ff00::/8 multicast
   return false;
+}
+
+// If `s` is an IPv6 address that embeds an IPv4 address in its low 32 bits
+// under a well-known prefix — IPv4-mapped `::ffff:0:0/96` or NAT64
+// `64:ff9b::/96` — return the embedded IPv4 in dotted form; else null.
+// Handles both the dotted-quad tail (`::ffff:127.0.0.1`) and the two-hextet
+// hex tail (`::ffff:7f00:1`). Node emits canonical compressed lowercase, which
+// is what these anchors expect; a stubbed resolver returning either form is
+// covered too.
+function embeddedV4(s: string): string | null {
+  const dotted = s.match(/^(?:::ffff:|64:ff9b::)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dotted) return dotted[1]!;
+  const hex = s.match(/^(?:::ffff:|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const hi = Number.parseInt(hex[1]!, 16);
+    const lo = Number.parseInt(hex[2]!, 16);
+    return `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+  }
+  return null;
 }
 
 export type JwksResolveResult =
@@ -232,6 +258,20 @@ function validateFetchTarget(originalUrl: string, parsed: URL): JwksResolveError
   return null;
 }
 
+// The resolver guardedLookup uses to turn a hostname into addresses. Always
+// called with all:true so the guard sees EVERY resolved address. Swappable via
+// _setLookupForTests so a test can exercise the resolved-address guard with an
+// arbitrary hostname → IP mapping (e.g. a public-looking name that resolves to
+// 169.254.169.254) without depending on real DNS.
+type AllAddressLookup = (
+  hostname: string,
+  options: LookupAllOptions,
+  callback: (err: NodeJS.ErrnoException | null, addresses: LookupAddress[]) => void,
+) => void;
+
+const defaultAllAddressLookup: AllAddressLookup = dnsLookup;
+let activeAllAddressLookup: AllAddressLookup = defaultAllAddressLookup;
+
 // A DNS lookup hook for https.request that resolves the hostname and REFUSES
 // to hand back any private/loopback/link-local address. Because the socket
 // connects to exactly the address this hook returns, the public-IP decision
@@ -243,12 +283,12 @@ function guardedLookup(originalUrl: string): LookupFunction {
     // Resolve ALL addresses (verbatim: no reordering) so we can reject if ANY
     // of them is non-public — a hostname that returns one public and one
     // loopback address must not be reachable via the loopback entry.
-    dnsLookup(hostname, { ...options, all: true, verbatim: true }, (err, addresses) => {
+    activeAllAddressLookup(hostname, { ...options, all: true, verbatim: true }, (err, addresses) => {
       if (err) {
         callback(err, "", 0);
         return;
       }
-      const list = addresses as unknown as LookupAddress[];
+      const list = addresses;
       for (const a of list) {
         if (isPrivateAddress(a.address)) {
           callback(
@@ -541,4 +581,13 @@ export function _clearJwksCache(): void {
 // + `_setJwksCacheEntry` name signal "internal test seam, not API."
 export function _setJwksCacheEntry(url: string, jwks: Jwks): void {
   jwksCache.set(url, jwks);
+}
+
+// Test-only: swap the DNS resolver guardedLookup uses, so a test can map an
+// arbitrary hostname to arbitrary addresses and exercise the resolved-address
+// SSRF guard end-to-end (e.g. a public-looking name that resolves inward to
+// 169.254.169.254). Pass null to restore the real node:dns resolver.
+// Production never calls this. Callers MUST restore (pass null) in teardown.
+export function _setLookupForTests(resolver: AllAddressLookup | null): void {
+  activeAllAddressLookup = resolver ?? defaultAllAddressLookup;
 }
