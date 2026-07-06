@@ -85,6 +85,7 @@ export type JwksResolveError =
   | { kind: "fetch_failed"; url: string; message: string }
   | { kind: "malformed_jwks"; url: string; message: string }
   | { kind: "kid_not_found"; url: string; kid: string }
+  | { kind: "duplicate_kid"; url: string; kid: string }
   | { kind: "malformed_jwk"; url: string; kid: string; message: string };
 
 // Internal typed error so the socket-level guards (which fire deep inside the
@@ -434,10 +435,16 @@ async function fetchJwksFollowing(
   });
 }
 
-// Find the JWK in a JWKS document whose kid matches. JWKS spec is silent on
-// duplicates; we take the first match — strict equality, no normalization.
+// All JWKs in the document whose kid matches — strict equality, no
+// normalization. Returns every match so the caller can fail closed on
+// ambiguity rather than silently picking the first (spec H).
+export function findJwksByKid(jwks: Jwks, kid: string): Jwk[] {
+  return jwks.keys.filter((k) => k.kid === kid);
+}
+
+// Back-compat convenience: the first match, or undefined.
 export function findJwkByKid(jwks: Jwks, kid: string): Jwk | undefined {
-  return jwks.keys.find((k) => k.kid === kid);
+  return findJwksByKid(jwks, kid)[0];
 }
 
 // One-shot resolve: fetch (with cache), pick by kid, materialize KeyObject.
@@ -485,7 +492,17 @@ export async function resolveKeyFromJwks(opts: {
     jwksCache.set(opts.url, jwks);
   }
 
-  const jwk = findJwkByKid(jwks, opts.kid);
+  // Duplicate-kid ambiguity is fail-closed (spec H): a JWKS that serves two
+  // keys under the same kid gives an attacker a pick-first foothold (publish a
+  // rogue key alongside the real one). We refuse to guess which is meant.
+  const matches = findJwksByKid(jwks, opts.kid);
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      error: { kind: "duplicate_kid", url: opts.url, kid: opts.kid },
+    };
+  }
+  const jwk = matches[0];
   if (jwk === undefined) {
     return {
       ok: false,

@@ -4,9 +4,12 @@
 //   identity.json   — public material + kid (safe to share / commit)
 //   private-key.pem — PKCS#8 PEM of the Ed25519 private key (chmod 0600)
 //
-// kid format: "ed25519/<12-char base64url of SHA-256(raw public key)>".
-// Deterministic from the key, so re-initializing the same key yields the
-// same kid; collisions across keys are infeasible at 72 bits.
+// kid format (current): the bare RFC 7638 JWK thumbprint of the public key
+// (spec G). A consumer holding a receipt can recompute the thumbprint from the
+// JWK and cross-check it against `kid` by construction — closing F2.
+// Legacy format: "ed25519/<12-char base64url of SHA-256(raw public key)>",
+// still accepted read-only by the verifier (see kidMatchesKey). Both are
+// deterministic from the key.
 
 import {
   chmodSync,
@@ -51,13 +54,30 @@ export interface LoadedFullIdentity extends LoadedIdentity {
 export const IDENTITY_FILENAME = "identity.json";
 export const PRIVATE_KEY_FILENAME = "private-key.pem";
 
-// Stable, short fingerprint of the public key. base64url so it's filename-
-// and URL-safe; 12 chars = 72 bits of collision resistance, ample for a
-// human-readable handle on a local key.
-export function makeKid(publicKey: KeyObject): string {
+// Legacy kid scheme (pre-thumbprint): "ed25519/<12-char b64url of
+// SHA-256(raw pubkey)>". Retained ONLY so the verifier can still match
+// receipts and identities minted under the old scheme. NOT used for new
+// identities — see makeKid.
+export function legacyKid(publicKey: KeyObject): string {
   const raw = rawPublicKeyBytes(publicKey);
   const digest = Buffer.from(sha256Hex(raw), "hex");
   return "ed25519/" + base64UrlNoPad(digest).slice(0, 12);
+}
+
+// kid for NEW identities (spec G): the bare RFC 7638 JWK thumbprint. Making
+// kid == thumbprint means an external verifier can cross-check kid against the
+// JWK by construction, and for a v1 receipt kid == key_thumbprint == the
+// binding value — one identity, three places, all reconcilable.
+export function makeKid(publicKey: KeyObject): string {
+  return rfc7638Thumbprint(publicKey);
+}
+
+// True if `kid` names `publicKey` under EITHER the current (thumbprint) or the
+// legacy scheme. A verifier matches on this instead of raw string equality so
+// that a legacy chain, a new chain, and a chain that SPANS the migration (same
+// key, kid representation changes partway) all still verify.
+export function kidMatchesKey(publicKey: KeyObject, kid: string): boolean {
+  return kid === rfc7638Thumbprint(publicKey) || kid === legacyKid(publicKey);
 }
 
 // RFC 7638 JWK thumbprint of an Ed25519 (OKP) public key.

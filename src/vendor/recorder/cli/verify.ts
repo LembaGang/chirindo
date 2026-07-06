@@ -29,7 +29,7 @@
 import type { KeyObject } from "node:crypto";
 import { jcsBytes } from "../canonicalize.js";
 import { entryHashOfCanonical, genesisPrevHash } from "../hash.js";
-import { loadIdentity, rfc7638Thumbprint } from "../identity.js";
+import { kidMatchesKey, loadIdentity, rfc7638Thumbprint } from "../identity.js";
 import { readChainFile } from "../io.js";
 import {
   resolveKeyFromJwks,
@@ -205,7 +205,11 @@ function formatJwksError(err: JwksResolveError): string {
     case "malformed_jwks":
       return `malformed JWKS at ${err.url}: ${err.message}`;
     case "kid_not_found":
-      return `could not find key for kid ${err.kid} at ${err.url}`;
+      // spec J: the signing key was not published (publish-then-sign order).
+      return `issuer_key_unresolvable: no key for kid ${err.kid} at ${err.url}`;
+    case "duplicate_kid":
+      // spec H: two keys share the kid — refuse to pick-first.
+      return `duplicate_kid: more than one key for kid ${err.kid} at ${err.url}`;
     case "malformed_jwk":
       return `malformed JWK for kid ${err.kid} at ${err.url}: ${err.message}`;
   }
@@ -335,9 +339,6 @@ function verifyChain(
         reason: "unsupported record version",
       };
     }
-    if (r.kid !== key.kid) {
-      return { kind: "tampered", entry: i, reason: "kid mismatch" };
-    }
 
     // A self-describing receipt that names an insecure jwks_uri is malformed
     // (spec D): the signer committed, inside the signed bytes, to a publication
@@ -353,12 +354,14 @@ function verifyChain(
       };
     }
 
-    // Key binding (v1+). The receipt committed to a specific key identity via
-    // its RFC 7638 `key_thumbprint`. The verifier compares the thumbprint of
-    // the key it ACTUALLY resolved (from jwks_uri / flag / env / local
-    // identity) to that committed value — and does so BEFORE verifying the
-    // signature. Order is the whole point: verify-then-bind would let a
-    // substituted key pass by verifying under itself. A v1 receipt that omits
+    // Key binding (v1+) — spec B: this is the FIRST identity gate, ahead of the
+    // kid check and (below) the signature. The receipt committed to a specific
+    // key identity via its RFC 7638 `key_thumbprint`; the verifier compares the
+    // thumbprint of the key it ACTUALLY resolved to that committed value. Order
+    // is the whole point: verify-then-bind would let a substituted key pass by
+    // verifying under itself, and — now that kid == thumbprint — running the
+    // kid check first would mis-report a substituted key as a kid mismatch
+    // rather than the true key_binding_mismatch. A v1 receipt that omits
     // `key_thumbprint` is malformed and fails closed here too.
     if (r.v === RECORD_VERSION_V1) {
       if (r.key_thumbprint !== resolvedKeyThumbprint) {
@@ -369,6 +372,14 @@ function verifyChain(
           key: resolvedKey,
         };
       }
+    }
+
+    // The record's kid must name the resolved key, under the current
+    // (thumbprint) or legacy scheme. For v1 this is largely redundant with the
+    // binding above (kid == thumbprint), but it is the primary identity gate
+    // for a v0 record, which carries no thumbprint.
+    if (!kidMatchesKey(key.publicKey, r.kid)) {
+      return { kind: "tampered", entry: i, reason: "kid mismatch" };
     }
 
     const canon = jcsBytes(contentOf(r));
@@ -438,7 +449,7 @@ function verifyCheckpoint(
 ):
   | { kind: "tampered"; entry: "checkpoint"; reason: TamperReason }
   | null {
-  if (cp.kid !== key.kid) {
+  if (!kidMatchesKey(key.publicKey, cp.kid)) {
     return { kind: "tampered", entry: "checkpoint", reason: "kid mismatch" };
   }
   if (cp.count !== expected.count) {

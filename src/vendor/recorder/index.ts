@@ -73,6 +73,8 @@ export {
   PRIVATE_KEY_FILENAME,
   buildIdentityFile,
   defaultIssuer,
+  kidMatchesKey,
+  legacyKid,
   loadFullIdentity,
   loadIdentity,
   makeKid,
@@ -122,6 +124,7 @@ export {
   ed25519PublicKeyFromJwk,
   fetchJwks,
   findJwkByKid,
+  findJwksByKid,
   isPrivateAddress,
   resolveKeyFromJwks,
 } from "./jwks.js";
