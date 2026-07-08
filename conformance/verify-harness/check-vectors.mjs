@@ -24,6 +24,11 @@ const { jcs: ourJcs, jcsBytes: ourJcsBytes } = await import(
   "file:///" + resolve(REPO, "dist", "vendor", "recorder", "canonicalize.js").replace(/\\/g, "/")
 );
 
+// Chirindo's strict-ingest gate (F3/F4) — drives the strict_parse reject vectors.
+const { strictJsonParse, StrictJsonParseError } = await import(
+  "file:///" + resolve(REPO, "dist", "vendor", "recorder", "strict-json.js").replace(/\\/g, "/")
+);
+
 const fixture = JSON.parse(
   readFileSync(resolve(REPO, "conformance", "vectors-v1.json"), "utf8"),
 );
@@ -178,8 +183,54 @@ const rejectRows = [];
   console.log(`  Fable claim: no canonical form; gate MUST reject duplicate member names pre-canonicalization.`);
   rejectRows.push({
     name,
-    our: "does not reject pre-parse (uses JSON.parse which silently drops)",
-    ref: "same — reference lib also operates post-parse",
+    our: "JCS layer is post-parse (never sees the collision); the strict-ingest gate ABOVE it rejects pre-parse — see strict_parse/SP2 below",
+    ref: "reference lib is also post-parse",
+  });
+}
+
+// --- STRICT-INGEST reject vectors (strict_parse, F3/F4) ---
+// The declarative V8/V9 above only DESCRIBE the requirement, and demonstrate
+// that the JCS layer alone is post-parse and cannot catch either class. These
+// vectors actually EXERCISE the gate: each `input` is raw JSON text driven
+// through Chirindo's strictJsonParse, which MUST fail closed with the declared
+// `expected_reason` before any value is produced. A vector that is NOT rejected
+// (or is rejected for the wrong reason / with the wrong error type) is a real
+// gap in the gate and exits the harness non-zero.
+console.log();
+console.log("=".repeat(80));
+console.log("STRICT-INGEST reject vectors (strict_parse) — gate MUST fail closed");
+console.log("=".repeat(80));
+
+let strictAnyFail = false;
+for (const v of fixture.strict_parse ?? []) {
+  let verdict, detail;
+  try {
+    strictJsonParse(v.input);
+    verdict = "FAIL (accepted, no rejection)";
+    detail = "strictJsonParse returned a value";
+    strictAnyFail = true;
+  } catch (e) {
+    if (e instanceof StrictJsonParseError && e.reason === v.expected_reason) {
+      verdict = "REJECT (as expected)";
+      detail = `StrictJsonParseError reason=${e.reason}`;
+    } else if (e instanceof StrictJsonParseError) {
+      verdict = "FAIL (wrong reason)";
+      detail = `expected ${v.expected_reason}, got ${e.reason}`;
+      strictAnyFail = true;
+    } else {
+      verdict = "FAIL (wrong error type)";
+      detail = `${e.constructor?.name ?? "Error"}: ${e.message}`;
+      strictAnyFail = true;
+    }
+  }
+  console.log(`\n--- ${v.name} — ${verdict} ---`);
+  console.log(`  input          : ${v.input}`);
+  console.log(`  expected reason: ${v.expected_reason}`);
+  console.log(`  observed       : ${detail}`);
+  rejectRows.push({
+    name: v.name,
+    our: `${verdict} — ${detail}`,
+    ref: "n/a (Chirindo strict-ingest gate, pre-canonicalization)",
   });
 }
 
@@ -290,4 +341,9 @@ if (anyMismatch) {
   console.error("!! MISMATCH DETECTED — STOP AND REPORT");
   process.exit(2);
 }
+if (strictAnyFail) {
+  console.error("!! STRICT-INGEST GATE FAILED A strict_parse VECTOR — STOP AND REPORT");
+  process.exit(2);
+}
 console.log("ALL PRODUCE VECTORS: three-way byte-and-hash agreement");
+console.log("ALL STRICT-INGEST VECTORS: gate failed closed with the expected reason");

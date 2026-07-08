@@ -13,6 +13,7 @@ import type {
   SignedCheckpoint,
   SignedRecord,
 } from "./record.js";
+import { StrictJsonParseError, strictJsonParse } from "./strict-json.js";
 
 export interface ChainFile {
   records: SignedRecord[];
@@ -44,8 +45,15 @@ export function parseChainJsonl(text: string): ChainFile {
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(trimmed);
+      // Verifier receipt-parse path is strict (F3/F4): a chain line carrying an
+      // unsafe integer or a duplicate member is not recomputable, so it fails
+      // closed as a parse error rather than being silently accepted under bytes
+      // a re-parse might read differently.
+      parsed = strictJsonParse(trimmed);
     } catch (e) {
+      if (e instanceof StrictJsonParseError) {
+        throw new ChainParseError(`${e.reason}: ${e.detail}`, i + 1);
+      }
       throw new ChainParseError(
         `invalid JSON (${(e as Error).message})`,
         i + 1,

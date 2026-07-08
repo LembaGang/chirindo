@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { jcsBytes } from "./canonicalize.js";
 import { RECORD_VERSION, type RecordVersion } from "./record.js";
+import { StrictJsonParseError, strictJsonParse } from "./strict-json.js";
 
 export function sha256Hex(bytes: Buffer | Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -28,15 +29,20 @@ export function argsHash(args: unknown): string {
 }
 
 // Convenience for adapters whose payload carries arguments as a JSON-encoded
-// string (e.g. Cursor's beforeMCPExecution `tool_input` field). Parses the
-// string, then canonicalizes the resulting value with JCS. If parsing fails
-// — i.e. the payload is not valid JSON — falls back to hashing the raw UTF-8
-// bytes so observe-only callers still produce a stable hash for whatever
-// they saw on the wire.
+// string (e.g. Cursor's beforeMCPExecution `tool_input` field). STRICT-parses
+// the string (F3/F4: rejects unsafe integers + duplicate members that would
+// break recomputability), then canonicalizes the resulting value with JCS.
+//
+// Fail-closed: a strict violation (StrictJsonParseError) propagates — it MUST
+// NOT be hashed at all, because the whole point is that its bytes are not
+// reproducible. The raw-UTF-8 fallback is preserved ONLY for the pre-existing
+// "not valid JSON" case, so observe-only callers still record a stable hash of
+// whatever un-parseable bytes they saw on the wire.
 export function argsHashFromJsonString(toolInputJson: string): string {
   try {
-    return argsHash(JSON.parse(toolInputJson));
-  } catch {
+    return argsHash(strictJsonParse(toolInputJson));
+  } catch (e) {
+    if (e instanceof StrictJsonParseError) throw e;
     return "sha256:" + sha256Hex(Buffer.from(toolInputJson, "utf8"));
   }
 }
@@ -56,13 +62,15 @@ export function resultHash(result: unknown): string {
 }
 
 // Convenience for callers whose payload is a JSON-encoded result string
-// (e.g. Cursor's afterMCPExecution `result_json` field). Parses, then JCS-
-// canonicalizes. Falls back to raw UTF-8 bytes only if parsing fails — the
-// observe-only-with-best-effort posture mirroring argsHashFromJsonString.
+// (e.g. Cursor's afterMCPExecution `result_json` field). STRICT-parses, then
+// JCS-canonicalizes. Fail-closed exactly like argsHashFromJsonString: a strict
+// violation propagates (never hashed); the raw-UTF-8 fallback survives only for
+// the pre-existing "not valid JSON" best-effort case.
 export function resultHashFromJsonString(resultJson: string): string {
   try {
-    return resultHash(JSON.parse(resultJson));
-  } catch {
+    return resultHash(strictJsonParse(resultJson));
+  } catch (e) {
+    if (e instanceof StrictJsonParseError) throw e;
     return "sha256:" + sha256Hex(Buffer.from(resultJson, "utf8"));
   }
 }

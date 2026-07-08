@@ -317,5 +317,19 @@
       "description": "JWKS serves a different key under the same kid; payload.key_thumbprint no longer matches thumbprint of fetched key",
       "expected": "INVALID_KEY_BINDING (checked BEFORE signature verification)"
     }
+  ],
+  "strict_parse": [
+    {
+      "name": "SP1_unsafe_integer_REJECT",
+      "input": "9007199254740993",
+      "expected_reason": "unsafe_number",
+      "note": "2^53+1. IEEE-754 double parse silently yields 9007199254740992, so the bytes a gate hashed and the bytes a verifier reconstructs diverge. Strict ingest MUST reject integer tokens outside [-(2^53-1), 2^53-1] before hashing."
+    },
+    {
+      "name": "SP2_duplicate_member_REJECT",
+      "input": "{\"a\":1,\"a\":2}",
+      "expected_reason": "duplicate_member",
+      "note": "No canonical form exists; parsers disagree (first-wins / last-wins / error). Strict ingest MUST reject duplicate member names at ANY depth before hashing."
+    }
   ]
 }

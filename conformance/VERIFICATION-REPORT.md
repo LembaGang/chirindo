@@ -168,11 +168,11 @@ Status for N1, N2, N4: **structurally described in the corpus, pending real-veri
 | # | Finding | Where | Status |
 |---|---|---|---|
 | F1 | `entry_hash` convention divergence between authored fixture and code. | `src/vendor/recorder/chain.ts:48,89`, `src/vendor/recorder/hash.ts:72`, `src/vendor/recorder/cli/verify.ts:191` | **RESOLVED** — code's sig-stripped convention retained (deliberately protects against N2 malleability); fixture regenerated to match. See §4a. |
-| F2 | `makeKid` produces proprietary `ed25519/<12-char>`, not RFC 7638 thumbprint. Consumers cannot cross-check `kid` against JWK thumbprint by construction. | `src/vendor/recorder/identity.ts:55` (`makeKid`) | **Open — hardening sprint.** Touches `src/`; needs test coverage before change. |
-| F3 | No unsafe-integer rejection at the input-parse boundary. JS `Number` silently truncates `2^53+1` to `2^53`; JCS canonicalizes the truncated value with no protest. Reference lib has the same limitation. | `argsHashFromJsonString`, `resultHashFromJsonString`, any caller feeding raw JSON strings | **Open — hardening sprint.** Mitigation is a strict JSON parse layer above hashing that rejects with `unsafe_number`. |
-| F4 | No duplicate-key detection at parse time. `JSON.parse` silently keeps last occurrence before JCS sees the collision. | Same call sites as F3 | **Open — hardening sprint.** Mitigation is a strict JSON parse layer that rejects with `duplicate_member` at any depth. |
+| F2 | `makeKid` produces proprietary `ed25519/<12-char>`, not RFC 7638 thumbprint. Consumers cannot cross-check `kid` against JWK thumbprint by construction. | `src/vendor/recorder/identity.ts:55` (`makeKid`) | **RESOLVED (2026-07-06)** — `kid` = bare RFC 7638 thumbprint; legacy scheme accepted read-only via `kidMatchesKey`. See `.claude/rules/10_decisions.md` D3. |
+| F3 | No unsafe-integer rejection at the input-parse boundary. JS `Number` silently truncates `2^53+1` to `2^53`; JCS canonicalizes the truncated value with no protest. Reference lib has the same limitation. | `argsHashFromJsonString`, `resultHashFromJsonString`, any caller feeding raw JSON strings | **RESOLVED (2026-07-08, Phase 2b).** Strict pre-parse gate `strictJsonParse` (`src/vendor/recorder/strict-json.ts`) rejects integer tokens outside `[-(2^53-1), 2^53-1]` with `StrictJsonParseError("unsafe_number")` before any hash is produced; wired above `argsHashFromJsonString`/`resultHashFromJsonString` and the verifier's `parseChainJsonl`. Covered by `test/strict-json.test.ts`, corpus vector `SP1_unsafe_integer_REJECT`, and the strict-ingest check in `check-vectors.mjs`. See D7. |
+| F4 | No duplicate-key detection at parse time. `JSON.parse` silently keeps last occurrence before JCS sees the collision. | Same call sites as F3 | **RESOLVED (2026-07-08, Phase 2b).** Same gate rejects duplicate member names at ANY depth with `StrictJsonParseError("duplicate_member")` pre-canonicalization. Covered by `test/strict-json.test.ts`, corpus vector `SP2_duplicate_member_REJECT`, and `check-vectors.mjs`. See D7. |
 
-F2/F3/F4 are pre-existing implementation gaps in Chirindo v0.2.0 surfaced by the fixture. They do NOT block corpus math (all three-way checks pass) but should be closed in the next hardening sprint under proper test coverage. They are not fixed in this task because they touch `src/` behavior.
+F3/F4 were pre-existing implementation gaps in Chirindo v0.2.0 surfaced by the fixture; both are now closed (Phase 2b, 2026-07-08) under full test coverage — the fix is additive (valid inputs hash to identical bytes; existing receipts, `/0` and `/1` genesis, and the frozen corpus math are unchanged — the strict layer only rejects the two non-recomputable classes). F2 is tracked separately and was resolved 2026-07-06 (see `.claude/rules/10_decisions.md` D3).
 
 ---
 
@@ -185,22 +185,22 @@ npm run build
 # From conformance/verify-harness/:
 npm install
 node ref-self-test.mjs      # RFC 8785 Appendix B self-test
-node check-vectors.mjs      # V1–V10 three-way check
+node check-vectors.mjs      # V1–V10 three-way check + strict_parse (SP1/SP2) reject check
 node check-thumbprint.mjs   # RFC 7638 two-way check
 node check-chain.mjs        # chain structure check (surfaces F1)
 ```
 
 ---
 
-## 7. Promotion + open items for the hardening sprint
+## 7. Promotion + hardening-sprint items (all resolved)
 
 `conformance/vectors-v1.candidate.json` → `conformance/vectors-v1.json`. Frozen. The fixture generator (`conformance/verify-harness/build-fixture.mjs`) is deterministic — anyone can rebuild from source and confirm byte-equality against the frozen file.
 
-The following remain open, deferred to the hardening sprint (none affect the frozen corpus math; each touches `src/` and belongs under proper test coverage):
+The items this corpus surfaced have all since been resolved, each under test coverage (none ever affected the frozen corpus math). Recorded here as history, pointing to the deciding entry:
 
-1. **F2 — `makeKid` → RFC 7638.** Change Chirindo's `kid` scheme so consumers can cross-check `kid` against the JWK thumbprint by construction. Cross-cutting: JWKS `kid`, identity file, existing receipts. Needs a migration plan for any receipts already emitted under the old scheme.
-2. **F3 / F4 — strict JSON parse layer.** Add pre-canonicalization rejection with structured errors (`unsafe_number`, `duplicate_member`) at `argsHashFromJsonString`, `resultHashFromJsonString`, and any receipt-parsing verifier path. These are gate-policy requirements the fixture makes explicit.
-3. **N1 / N2 / N4 — real-verifier unit tests.** Author a verifier test suite that:
+1. **F2 — `makeKid` → RFC 7638. RESOLVED (2026-07-06) — see `.claude/rules/10_decisions.md` D3.** Chirindo's `kid` is now the bare RFC 7638 thumbprint, so a consumer cross-checks `kid` against the JWK thumbprint by construction. The legacy `ed25519/<12-char>` scheme is accepted read-only via `kidMatchesKey`, so a chain spanning the migration still verifies — this is the migration plan, not a deferral.
+2. **F3 / F4 — strict JSON parse layer. RESOLVED (2026-07-08, Phase 2b) — see D7.** Pre-canonicalization rejection with structured errors (`unsafe_number`, `duplicate_member`) lives in `src/vendor/recorder/strict-json.ts` and is wired at `argsHashFromJsonString`, `resultHashFromJsonString`, and the verifier's `parseChainJsonl`. Two executable reject vectors (`SP1`, `SP2`) were added to the frozen corpus via the `.candidate` → promotion cycle, and `check-vectors.mjs` drives them through the gate.
+3. **N1 / N2 / N4 — real-verifier unit tests. RESOLVED — see `test/conformance-negatives.test.ts`.** The suite reconstructs each case with a real Ed25519 key and asserts the corpus's own declared expectation, so code and corpus cannot drift:
    - Signs each of the three receipt payloads with a real Ed25519 key, then confirms N1's tampered version returns `INVALID_SIGNATURE`.
    - Feeds a hand-crafted high-S signature at N2 and confirms the verifier rejects per RFC 8032 §5.1.7.
    - Runs the N4 flow (JWKS serves a different key under the same `kid`) and confirms `INVALID_KEY_BINDING` fires BEFORE any Ed25519 verify attempt.

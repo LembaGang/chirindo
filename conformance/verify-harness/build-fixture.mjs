@@ -30,7 +30,12 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = resolve(HERE, "..", "vectors-v1.json");
-mkdirSync(dirname(FIXTURE), { recursive: true });
+// Output target. Bare `node build-fixture.mjs` reproduces the frozen file
+// (documented behavior). Pass a filename to write a CANDIDATE instead — the
+// candidate->promote flow: build to vectors-v1.candidate.json, diff for byte
+// parity, then promote by copying over the frozen file. Never hand-edit frozen.
+const OUT = process.argv[2] ? resolve(HERE, "..", process.argv[2]) : FIXTURE;
+mkdirSync(dirname(OUT), { recursive: true });
 
 // Chirindo's own JCS + entry-hash + content-stripping — loaded from the built
 // dist so this build script fails loudly (module resolution error) if `npm run
@@ -379,6 +384,31 @@ const fixture = {
       expected: "INVALID_KEY_BINDING (checked BEFORE signature verification)",
     },
   ],
+  // Executable strict-ingest reject vectors (F3/F4). Unlike the declarative
+  // V8/V9 in jcs_canonicalization (which describe the requirement), each `input`
+  // here is raw JSON TEXT fed verbatim to the strict-parse gate, and
+  // `expected_reason` is the StrictJsonParseError.reason it must fail closed
+  // with — before any hash is produced. These prove the gate rejects the two
+  // recomputability-breaking classes rather than silently normalizing them.
+  strict_parse: [
+    {
+      name: "SP1_unsafe_integer_REJECT",
+      input: "9007199254740993",
+      expected_reason: "unsafe_number",
+      note:
+        "2^53+1. IEEE-754 double parse silently yields 9007199254740992, so the " +
+        "bytes a gate hashed and the bytes a verifier reconstructs diverge. Strict " +
+        "ingest MUST reject integer tokens outside [-(2^53-1), 2^53-1] before hashing.",
+    },
+    {
+      name: "SP2_duplicate_member_REJECT",
+      input: '{"a":1,"a":2}',
+      expected_reason: "duplicate_member",
+      note:
+        "No canonical form exists; parsers disagree (first-wins / last-wins / error). " +
+        "Strict ingest MUST reject duplicate member names at ANY depth before hashing.",
+    },
+  ],
 };
 
 // --- derive chain hashes from Chirindo's own code ---
@@ -422,10 +452,10 @@ console.log(`  N1.receipt.prev_hash = ${n1 ? n1.receipt.prev_hash : "(N1 not pre
 
 // --- write file: UTF-8, no BOM ---
 const json = JSON.stringify(fixture, null, 2) + "\n";
-writeFileSync(FIXTURE, json, { encoding: "utf8" });
+writeFileSync(OUT, json, { encoding: "utf8" });
 
 // --- read back and assert byte-shape invariants ---
-const raw = readFileSync(FIXTURE); // Buffer, no decoding
+const raw = readFileSync(OUT); // Buffer, no decoding
 if (raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf) {
   throw new Error("BOM found at start of fixture — must be UTF-8 without BOM");
 }
@@ -438,7 +468,7 @@ const v7b = parsed.jcs_canonicalization.find((v) => v.name === "V7b_nfd").input.
 const v7aBytes = Buffer.byteLength(v7a, "utf8");
 const v7bBytes = Buffer.byteLength(v7b, "utf8");
 
-console.log(`wrote ${FIXTURE}`);
+console.log(`wrote ${OUT}`);
 console.log(`  size: ${raw.length} bytes`);
 console.log(`  V7a "é" input value bytes (expect 2): ${v7aBytes}`);
 console.log(`  V7b "é" input value bytes (expect 3): ${v7bBytes}`);
