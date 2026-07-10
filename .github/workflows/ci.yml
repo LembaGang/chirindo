@@ -1,0 +1,61 @@
+name: ci
+
+# Runs on every push and every pull request. No secrets are referenced:
+# nothing here needs the signing key or reaches the live JWKS. The live-verify
+# step is deliberately a human, hand-on-keyboard action — never CI.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pinned to the Node 20 line (package.json engines: ">=20"). Explicit —
+      # never "latest"/"lts/*" — so the frozen corpus math is reproduced on a
+      # known runtime on every run.
+      - name: Set up Node.js (pinned)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies (root, from lockfile)
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Full suite. No filtering, no --bail relaxation: any failing test fails CI.
+      - name: Test suite (vitest, full run)
+        run: npm test
+
+      # The independent conformance harness has its own lockfile and its own
+      # dependency (@truestamp/canonify) — an RFC 8785 implementation distinct
+      # from the one Chirindo ships, so agreement means something.
+      - name: Install conformance harness deps (from lockfile)
+        run: npm ci
+        working-directory: conformance/verify-harness
+
+      # Four checks, four steps: each fails the build on a non-zero exit and is
+      # individually visible in the run, so a corpus regression names itself.
+      - name: Conformance — reference self-test (RFC 8785 Appendix B)
+        run: node ref-self-test.mjs
+        working-directory: conformance/verify-harness
+
+      - name: Conformance — vectors (three-way agreement + strict-ingest gate)
+        run: node check-vectors.mjs
+        working-directory: conformance/verify-harness
+
+      - name: Conformance — RFC 7638 thumbprint
+        run: node check-thumbprint.mjs
+        working-directory: conformance/verify-harness
+
+      - name: Conformance — chain structure (entry_hash convention)
+        run: node check-chain.mjs
+        working-directory: conformance/verify-harness
