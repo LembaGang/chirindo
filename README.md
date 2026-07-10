@@ -75,44 +75,74 @@ notifications) pass through unmodified.
 ## The signed receipt
 
 Each intercepted `tools/call` produces a single line appended to a
-per-session JSONL chain file. The receipt is a regular
-`evidence.action/0` record from the recorder schema, with the `gate`
-block populated:
+per-session JSONL chain file. The receipt is an `evidence.action/1`
+record from the recorder schema, with the `gate` block populated. The
+example below is real signer output from a throwaway key, verbatim — it
+verifies with `chirindo verify`:
 
-```jsonc
+```json
 {
-  "v": "evidence.action/0",
+  "v": "evidence.action/1",
   "seq": 0,
-  "session_id": "<uuid>",
-  "ts": "...",
-  "agent": {"vendor": "chirindo", "version": "0.0.1"},
+  "session_id": "11111111-2222-4333-8444-555555555555",
+  "ts": "2026-07-08T09:00:00.000Z",
+  "agent": {
+    "vendor": "chirindo",
+    "version": "0.0.1"
+  },
   "event": {
     "type": "mcp_call",
-    "outcome": "denied",                     // or "executed" on ALLOW
-    "server": "<server-label>",
-    "tool_name": "delete",
-    "args_hash": "sha256:...",               // SHA-256 of JSON-stringified arguments
-    "result_hash": "sha256:...",             // present only on ALLOW
-    "decision": "deny",                      // or "allow"
-    "decision_source": "config"
+    "outcome": "executed",
+    "server": "everything",
+    "tool_name": "echo",
+    "args_hash": "sha256:cbbbdcd27692344de5dbab3abcaba413fb0f45307267de7081401576df1cb176",
+    "decision": "allow",
+    "decision_source": "config",
+    "result_hash": "sha256:493466351f6341d054cec14e973f001dc7d66e5bb4a4177d42014725b2f7cb6b"
   },
-  "request_commitment": "sha256:<a>",        // SHA-256 over JCS(request_descriptor)
+  "request_commitment": "sha256:55e4964e7b22557513889732c7998697d40eaeb3cf4996686a638ce9d64c8ccf",
   "gate": {
-    "request_commitment": "sha256:<a>",      // MUST equal record.request_commitment
-    "gate_receipt": "sha256:<self entry_hash>",  // self-anchored for the spike
+    "request_commitment": "sha256:55e4964e7b22557513889732c7998697d40eaeb3cf4996686a638ce9d64c8ccf",
+    "gate_receipt": "sha256:6cbf1406bf3a0c6a2d6a123697ea72c990f2f8e0f50fdbfc5c568109d1e654dc",
     "gate_family": "permit",
-    "result": "halt"                         // "act" on ALLOW
+    "result": "act"
   },
-  "prev_hash": "sha256:...",
-  "kid": "ed25519/<fingerprint>",
-  "sig": "<base64url Ed25519>"
+  "jwks_uri": "https://gate.example.com/.well-known/jwks.json",
+  "key_thumbprint": "DEHVOBA-vd8KledaxgxgPHkpGS4TES9CTQcMTVHcwYo",
+  "iss": "https://gate.example.com",
+  "prev_hash": "sha256:5a8534e71ecae904f1a9b2945b77bcc9bc3035b08c3968d0fe1ce199189cc345",
+  "kid": "DEHVOBA-vd8KledaxgxgPHkpGS4TES9CTQcMTVHcwYo",
+  "sig": "E_BIbjouxmMZClFqU2sVw8xkhZDhI8o4ZKjYmTJzHby0nBxJTvSs1-Gu7EZyrQS0E1etqpe9wekeHxzOVjgvCw"
 }
 ```
 
-The chain verifies via `recorder verify` (no code change to the
-recorder) — same hash chain, same signature scheme, same canonical
-bytes. Cross-tool interop is the point: the gate's output is evidence
-the recorder's verifier already understands.
+Field notes:
+
+- **`v`** is `evidence.action/1`. A v1 receipt binds the signer *inside*
+  the signed bytes with two fields: **`key_thumbprint`** — the RFC 7638
+  JWK thumbprint of the gate's signing key, which the verifier recomputes
+  from the resolved key and checks *before* the signature, so a key
+  substituted at the `jwks_uri` can't pass by verifying under itself — and
+  **`iss`**, the issuer identity, defaulting to the origin of `jwks_uri`
+  (the operator's own domain, never Headless Oracle). For a v1 receipt
+  `kid == key_thumbprint`: one key identity, reconcilable from the receipt
+  alone.
+- **`event`**: this is an ALLOW receipt (`outcome: "executed"`,
+  `decision: "allow"`, `gate.result: "act"`). A DENY receipt instead reads
+  `denied` / `deny` / `halt` and omits `result_hash` — there was no
+  downstream response to hash. `args_hash` and `result_hash` are RFC 8785
+  JCS + SHA-256 over the argument and result values (recomputable by any
+  verifier, not `JSON.stringify`).
+- **`gate.request_commitment`** MUST equal the top-level
+  `request_commitment` (the continuity invariant); **`gate.gate_receipt`**
+  is the receipt's own `entry_hash`, self-anchored for the spike.
+- **`jwks_uri`** (optional) names where this receipt's signing key is
+  published; it is inside the signed bytes, so the operator commits to it.
+
+The chain verifies via the recorder's verify engine — same hash chain,
+same signature scheme, same canonical bytes — which is exactly what
+`chirindo verify` runs. Cross-tool interop is the point: the gate's
+output is evidence the recorder's verifier already understands.
 
 ## Commands
 
