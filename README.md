@@ -21,6 +21,12 @@ The receipt format and signing reuse the existing
 [`recorder`](../recorder) engine — no reimplementation of JCS, hashing,
 or Ed25519.
 
+Chirindo is an **operator-run** gate that signs its receipts
+**operator-side**. Anyone holding a receipt can recompute it against the
+gate's **published** key, so a receipt is a recomputable, tamper-evident
+record of what this operator's gate decided — not a neutral third party's
+attestation, and not proof that the underlying action was "safe."
+
 ## Posture: fail-closed (the opposite of the recorder)
 
 The recorder is observe-only: it never blocks the agent, even when its
@@ -338,6 +344,35 @@ after N denials).
   TAMPERED on a mutated chain, and exit 2 on conflicting `--key` +
   `--jwks` — same vocabulary the recorder uses, because it is the
   recorder's verify engine wired into the chirindo binary.
+- The strict-ingest gate fails closed at the JSON parse boundary: an
+  integer token outside the IEEE-754 safe range (`unsafe_number`) or a
+  repeated object member at any depth (`duplicate_member`) is rejected
+  *before* it is hashed, so a non-recomputable input can never enter a
+  receipt or pass verification. The gate sits on both the receipt-writing
+  hash path and `chirindo verify`'s chain parse
+  (`strict-json.test.ts`, `conformance-strict-parse.test.ts`).
+
+### Also verified (beyond the unit suite)
+
+- **Conformance corpus, three-way and enforced.** The canonicalization
+  (RFC 8785 / JCS) and RFC 7638 key-binding vectors are verified
+  byte-for-byte across three implementations — Chirindo's own, an
+  independent RFC 8785 library (`@truestamp/canonify`), and the external
+  vector author — and the strict-ingest reject vectors fail closed with
+  the expected reason. The binary enforces the *same* canonicalization
+  and strict-ingest the vectors check; it is not a separate reference
+  implementation. (Harness: `conformance/verify-harness/`.) This is
+  deliberately **not** the claim that a published package "passes a
+  conformance suite" — that waits for the 0.3.0 publish and a
+  re-verification from the published artifact.
+- **Live fetch/verify, end-to-end.** The verify path was exercised by
+  hand against the live published JWKS over HTTPS, and all three verdicts
+  behaved as specified: a well-formed chain resolved its key and returned
+  `VALID`; a receipt whose committed `key_thumbprint` was altered returned
+  `INVALID (key_binding_mismatch)`, rejected *before* the signature check;
+  and a chain signed by a key the JWKS does not publish returned
+  `UNVERIFIABLE (issuer_key_unresolvable)` with no silent fallback to a
+  default key.
 
 ### Does NOT prove
 
