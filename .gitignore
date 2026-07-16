@@ -9,3 +9,7 @@ coverage/
 
 # Live-key-signed receipt harness — must NEVER enter git (holds real-key receipts)
 scripts/live-proof/
+capture/
+*.pem
+*.key
+.env*
