@@ -1,0 +1,48 @@
+name: gitleaks
+
+# Secret scan that TRAVELS WITH THE REPO. A fresh clone gets this control for
+# free — unlike the local pre-push hook (in scripts/git-hooks/, git-ignored and
+# only installed by the runbook), which a new clone does not have until it is
+# re-installed. This is the durable, always-on layer.
+#
+# It scans the FULL history (fetch-depth: 0), not just the diff — so a secret
+# introduced in any commit on the branch is caught, including anything that
+# survives or predates the 2026-07-24 history rewrite.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly re-scan (Mondays 06:00 UTC): rules improve over time, so a tree that
+    # was clean at commit time gets re-checked against newer detectors.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          # 0 = all history. Required: gitleaks walks every commit, not the diff.
+          fetch-depth: 0
+
+      # gitleaks-action v2 is free for personal accounts and public repos
+      # (LembaGang/chirindo is a personal account) — no GITLEAKS_LICENSE needed.
+      # The default ruleset already flags armored private-key blocks and common
+      # token formats; add a .gitleaks.toml at repo root to extend it (see the
+      # T6 note in cc-output for a custom rule that also flags the signing-dir
+      # path pattern).
+      #
+      # Supply-chain note: pinned to the mutable @v2 tag to match this repo's
+      # other actions (checkout@v4, setup-node@v4). For stricter provenance,
+      # pin to a full commit SHA instead.
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          # Only used for PR annotations/summaries. Read-only, GitHub-issued,
+          # never a repo secret of ours.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
