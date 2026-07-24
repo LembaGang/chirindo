@@ -7,6 +7,10 @@ coverage/
 .gate.backup-*/
 .cursor/
 
+# Human-only tooling & local git hooks — kept local, never published (stripped from history 2026-07-24)
+.claude/
+scripts/git-hooks/
+
 # Live-key-signed receipt harness — must NEVER enter git (holds real-key receipts)
 scripts/live-proof/
 capture/
