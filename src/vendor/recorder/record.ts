@@ -1,7 +1,7 @@
 // Record schema for the agent-action evidence chain.
 //
 // Version token is intentionally name-independent — it comes from the
-// Internet-Draft (draft-msebenzi-evidence-state-00), not the product name.
+// Internet-Draft (draft-msebenzi-evidence-action-00), not the product name.
 // See README "Renaming" for why these constants are NOT placeholders.
 //
 // Two versions are live:
