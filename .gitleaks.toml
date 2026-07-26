@@ -1,0 +1,84 @@
+# gitleaks configuration for Chirindo.
+#
+# Start from the upstream ruleset and subtract only proven false positives.
+#
+# Every entry below uses `condition = "AND"`: a finding is silenced only if the
+# path matches AND the matched value is one of the two known public thumbprints
+# listed inline. Path alone is never sufficient. That keeps these files fully
+# live for every other detector — an armored private key block, a cloud access
+# token, or any OTHER high-entropy string in the very same file still fails the
+# scan. A path-only allowlist would have turned four files into permanent blind
+# spots.
+#
+# The key is `condition`, NOT `matchCondition`. gitleaks parses allowlists with
+# viper, which silently DROPS unknown keys — a misspelled condition does not
+# error, it degrades to the default "OR", where a path match alone silences the
+# rule. That failure is invisible in a passing scan, so the bidirectional test
+# in the runbook below is the only thing that proves the AND is live.
+#
+# Path regexes are deliberately not anchored with a leading `^`. `gitleaks git`
+# reports repo-relative paths ("README.md") while `gitleaks dir` reports
+# absolute ones ("C:/.../README.md"); an anchored regex silently matches only
+# the former, so the allowlist would no-op in exactly the scan mode a developer
+# runs by hand. Verified both modes against this config on 2026-07-26.
+#
+# WHY THESE ARE NOT SECRETS. Both values are RFC 7638 JWK thumbprints: the
+# base64url SHA-256 of the JCS serialization of a PUBLIC JWK ({crv, kty, x}).
+# They are high-entropy by construction, which is why `generic-api-key` matches,
+# but they are public BY DESIGN — a receipt commits to the signer's thumbprint
+# so any holder can recompute it from the published JWKS and cross-check it
+# BEFORE verifying the signature (.claude/rules/10_decisions.md D3/D5).
+# Publishing the thumbprint is the mechanism, not a leak.
+#
+# Independently verified 2026-07-26: recomputing sha256(JCS({crv,kty,x})) over
+# the corpus public key reproduces NvrZE4rG... byte-for-byte, and a full-history
+# sweep found no private JWK scalar ("d"), no armored private key block, and no
+# key seed in any commit on this branch.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+# README.md embeds a sample `evidence.action/1` receipt so a reader can see the
+# wire format. Its `key_thumbprint` / `kid` fields are the public thumbprint of
+# the documented example key — illustrative prose data, never a credential.
+description = "README sample receipt: RFC 7638 thumbprint of a public key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)README\.md$''']
+regexes = ['''^DEHVOBA-vd8KledaxgxgPHkpGS4TES9CTQcMTVHcwYo$''']
+
+[[allowlists]]
+# The frozen v1 conformance corpus. Each `key_thumbprint` is the thumbprint of
+# the corpus test key, whose full public JWK sits beside it in the same document
+# (kty/crv/x with key_ops ["verify"] — no private half anywhere in the file).
+# The corpus exists so an independent implementer can reproduce our math
+# offline, so these values MUST be published for the fixture to be usable.
+description = "Frozen conformance corpus: public test-key thumbprint, published by design"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)conformance/vectors-v1\.json$''']
+regexes = ['''^NvrZE4rGdm3rW7l4aFU_Y4r_KGtb8s-b6BAxEdC-vT0$''']
+
+[[allowlists]]
+# Pre-promotion path of the same bytes. Absent from HEAD but still reachable in
+# history (promoted to vectors-v1.json in 391581e), and a full-history scan
+# walks the commit that introduced it — so this path must stay allowlisted even
+# though the file no longer exists in the working tree.
+description = "History-only candidate corpus: identical public thumbprint, same rationale"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)conformance/vectors-v1\.candidate\.json$''']
+regexes = ['''^NvrZE4rGdm3rW7l4aFU_Y4r_KGtb8s-b6BAxEdC-vT0$''']
+
+[[allowlists]]
+# Dev-only generator (private:true, absent from the package `files` list, never
+# shipped) that builds the corpus fixture. It hardcodes the same public
+# thumbprint as an expected-value assertion, so a regenerated fixture that
+# drifts from the frozen corpus fails loudly instead of silently rewriting the
+# target it is supposed to be checked against.
+description = "Corpus fixture builder: public thumbprint as an expected-value assertion"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)conformance/verify-harness/build-fixture\.mjs$''']
+regexes = ['''^NvrZE4rGdm3rW7l4aFU_Y4r_KGtb8s-b6BAxEdC-vT0$''']

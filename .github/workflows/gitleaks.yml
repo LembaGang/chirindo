@@ -20,6 +20,19 @@ on:
 permissions:
   contents: read
 
+env:
+  # Pinned by version AND by checksum. gitleaks-action was dropped because it is
+  # licensed per-organization: it works on a personal account today, but the
+  # moment this repo moves under an org the scan starts failing for a licensing
+  # reason rather than a security one — a control that can be switched off by a
+  # billing state is not a control. Running the binary directly has no such
+  # dependency and no GITHUB_TOKEN.
+  GITLEAKS_VERSION: "8.30.1"
+  # sha256 of gitleaks_8.30.1_linux_x64.tar.gz, cross-checked against the
+  # release's own gitleaks_8.30.1_checksums.txt on 2026-07-26. Bump both
+  # together; a version bump with a stale digest fails the verify step closed.
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -30,19 +43,129 @@ jobs:
           # 0 = all history. Required: gitleaks walks every commit, not the diff.
           fetch-depth: 0
 
-      # gitleaks-action v2 is free for personal accounts and public repos
-      # (LembaGang/chirindo is a personal account) — no GITLEAKS_LICENSE needed.
-      # The default ruleset already flags armored private-key blocks and common
-      # token formats; add a .gitleaks.toml at repo root to extend it (see the
-      # T6 note in cc-output for a custom rule that also flags the signing-dir
-      # path pattern).
-      #
-      # Supply-chain note: pinned to the mutable @v2 tag to match this repo's
-      # other actions (checkout@v4, setup-node@v4). For stricter provenance,
-      # pin to a full commit SHA instead.
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+      - name: Install gitleaks (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          TARBALL="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL --retry 3 -o "$TARBALL" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${TARBALL}"
+          # Fail closed on any mismatch: a tampered or truncated download must
+          # stop the job, never silently scan with an unverified binary.
+          echo "${GITLEAKS_SHA256}  ${TARBALL}" | sha256sum -c -
+          tar -xzf "$TARBALL" gitleaks
+          chmod +x gitleaks
+          ./gitleaks version
+
+      - name: Allowlist canary (bidirectional)
+        # Runs BEFORE the real scan on purpose. .gitleaks.toml suppresses four
+        # known-public values; every failure mode of that config is SILENT —
+        # gitleaks parses allowlists with viper, which drops unknown keys
+        # without erroring, so a typo'd `condition` degrades to "OR" (path alone
+        # silences the rule) and a path regex anchored for the wrong scan mode
+        # matches nothing. Both look identical to a clean run. If the allowlist
+        # is broken, this step fails first, rather than the job reporting a
+        # green scan against rules nobody chose.
+        #
+        # Everything happens in a scratch directory outside the workspace. The
+        # checked-out tree is never written to, so the real scan below sees
+        # exactly the committed bytes.
         env:
-          # Only used for PR annotations/summaries. Read-only, GitHub-issued,
-          # never a repo secret of ours.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Synthetic. Matches `generic-api-key` on entropy alone and belongs to
+          # no real credential class — no vendor prefix, no key material, not
+          # parseable as anything. It reads as a canary because it says so.
+          #
+          # It deliberately avoids the words "secret", "example" and "fake":
+          # those are gitleaks default STOPWORDS, so a value containing them is
+          # suppressed upstream and the canary would never fire — the plainest
+          # ways to write "this is not real" are exactly the ways that break
+          # the test. If a future gitleaks adds "canary" or "synthetic" to that
+          # list, this step goes red rather than quietly passing. That is the
+          # correct direction to fail: a canary that cannot fire is not a
+          # canary, and it should be noticed as a broken test, not trusted.
+          CANARY_VALUE: "CANARY-SYNTHETIC-Xk7Qz3Vb9Rm2Tp5Lw8HnJ4dG6yC"
+        run: |
+          set -uo pipefail
+          GITLEAKS="$PWD/gitleaks"
+          CONFIG="$PWD/.gitleaks.toml"
+
+          SCRATCH="$(mktemp -d)"
+          trap 'rm -rf "$SCRATCH"' EXIT
+          mkdir -p "$SCRATCH/conformance"
+          # Copied to the SAME relative path the allowlist targets, so the path
+          # regex matches the scratch copy just as it does the real file.
+          cp conformance/vectors-v1.json "$SCRATCH/conformance/vectors-v1.json"
+
+          # Assert on REPORT CONTENTS, not on exit status. gitleaks exits 1 for
+          # "leaks found" AND for "config missing/unparseable" — verified, they
+          # are indistinguishable by code. A canary that trusted the exit status
+          # would score a broken config as a passing direction-2, which is the
+          # precise failure this step exists to catch. A missing report file is
+          # an error (-1), never silently a zero.
+          count_findings() {
+            if [ ! -s "$1" ]; then echo "-1"; return 0; fi
+            grep -o '"RuleID"' "$1" | wc -l | tr -d ' '
+          }
+
+          echo "--- direction 1: real allowlisted values must stay QUIET ---"
+          "$GITLEAKS" dir "$SCRATCH" --config "$CONFIG" --redact --no-banner \
+            --exit-code 1 --report-format json --report-path "$SCRATCH/d1.json"
+          RC1=$?
+          N1="$(count_findings "$SCRATCH/d1.json")"
+          echo "direction 1: exit=$RC1 findings=$N1"
+          if [ "$RC1" -ne 0 ] || [ "$N1" != "0" ]; then
+            echo "::error::Allowlist canary direction 1 FAILED (exit=$RC1 findings=$N1): the real public thumbprints in conformance/vectors-v1.json are no longer suppressed, or gitleaks could not read .gitleaks.toml. Either the allowlist stopped matching (path regex / rule id drift) or the config is unreadable."
+            exit 1
+          fi
+
+          echo "--- direction 2: planted synthetic value MUST fire ---"
+          # Same file, same allowlisted path, same field — only the value
+          # differs. This is precisely what `condition = "AND"` must catch: if
+          # the AND ever degrades to OR, the path match alone swallows this and
+          # the step correctly fails.
+          printf '\n{"key_thumbprint": "%s"}\n' "$CANARY_VALUE" \
+            >> "$SCRATCH/conformance/vectors-v1.json"
+
+          "$GITLEAKS" dir "$SCRATCH" --config "$CONFIG" --redact --no-banner \
+            --exit-code 1 --report-format json --report-path "$SCRATCH/d2.json"
+          RC2=$?
+          N2="$(count_findings "$SCRATCH/d2.json")"
+          echo "direction 2: exit=$RC2 findings=$N2"
+          if [ "$RC2" -ne 1 ] || [ "$N2" -lt 1 ]; then
+            echo "::error::Allowlist canary direction 2 FAILED (exit=$RC2 findings=$N2): a planted synthetic value in an allowlisted path was NOT detected. .gitleaks.toml is silencing by path rather than by value, so a real credential in that file would also be missed. (findings=-1 means gitleaks wrote no report at all — treat as a broken config, not a clean scan.)"
+            exit 1
+          fi
+
+          echo "Allowlist canary OK: suppresses the four known public values, still detects everything else."
+
+      - name: Scan full history
+        run: |
+          set -euo pipefail
+          # `git` (not the removed `detect`) is the history-scanning command in
+          # 8.x. --log-opts covers every ref, not just the checked-out branch.
+          #
+          # -c is explicit rather than relying on gitleaks' implicit pickup of
+          # ./.gitleaks.toml: if the file is ever renamed or moved, this fails
+          # loudly instead of quietly falling back to the default ruleset and
+          # reporting a green scan against rules nobody chose.
+          #
+          # --redact keeps any real finding out of the public job log; the
+          # fingerprint and location are still reported, which is what a
+          # responder needs. --exit-code 1 makes a leak fail the job.
+          ./gitleaks git . \
+            --log-opts="--all --full-history" \
+            --config .gitleaks.toml \
+            --redact \
+            --exit-code 1 \
+            --report-format sarif \
+            --report-path gitleaks.sarif \
+            --no-banner
+
+      - name: Upload findings report
+        # Runs even when the scan fails — the report is most useful precisely
+        # when the job is red.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-sarif
+          path: gitleaks.sarif
+          if-no-files-found: ignore

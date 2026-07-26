@@ -18,7 +18,7 @@ only that the gate's decision is captured, signed, and tamper-evident
 (not tamper-proof: any actor with the chain file can rewrite history,
 but a mutation breaks the hash chain and is caught by `recorder verify`).
 The receipt format and signing reuse the existing
-[`recorder`](../recorder) engine — no reimplementation of JCS, hashing,
+[`recorder`](src/vendor/recorder) engine — no reimplementation of JCS, hashing,
 or Ed25519.
 
 Chirindo is an **operator-run** gate that signs its receipts
