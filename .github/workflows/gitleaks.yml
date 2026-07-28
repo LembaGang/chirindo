@@ -84,7 +84,7 @@ jobs:
           # canary, and it should be noticed as a broken test, not trusted.
           CANARY_VALUE: "CANARY-SYNTHETIC-Xk7Qz3Vb9Rm2Tp5Lw8HnJ4dG6yC"
         run: |
-          set -uo pipefail
+          set -euo pipefail
           GITLEAKS="$PWD/gitleaks"
           CONFIG="$PWD/.gitleaks.toml"
 
@@ -94,6 +94,18 @@ jobs:
           # Copied to the SAME relative path the allowlist targets, so the path
           # regex matches the scratch copy just as it does the real file.
           cp conformance/vectors-v1.json "$SCRATCH/conformance/vectors-v1.json"
+
+          # Setup above is fail-fast. From here down the step READS exit codes
+          # instead of dying on them, so errexit must be off — and the previous
+          # `set -uo pipefail` never turned it off: GitHub runs `run:` blocks
+          # under `/usr/bin/bash -e {0}`, so -e is already on before line one.
+          # Two commands below exit non-zero on the PASSING path, and errexit
+          # killed the step at each before any assertion ran:
+          #   direction 1 — `grep -o '"RuleID"'` exits 1 when it correctly finds
+          #     zero findings, and pipefail promotes that to the pipeline status;
+          #   direction 2 — gitleaks itself exits 1 when the canary correctly
+          #     fires, which is exactly what that direction asserts.
+          set +e
 
           # Assert on REPORT CONTENTS, not on exit status. gitleaks exits 1 for
           # "leaks found" AND for "config missing/unparseable" — verified, they
