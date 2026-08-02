@@ -281,7 +281,8 @@ built under.
 | registry version | change |
 |---|---|
 | v0 | DRAFT. One row — (`exact`, `base-sepolia`, CDP) — `PROVISIONAL`; every field name documentation-derived. Zero VERIFIED rows, so no conformant implementation could emit at all. |
-| **v1** | **Adds (`exact`, `eip155:84532`, Coinbase CDP) as `VERIFIED`** against the 2026-08-02 live capture. Additive: the v0 row is RETAINED below, unmutated, marked superseded (rule 2). Exactly one VERIFIED row exists. |
+| v1 | **Adds (`exact`, `eip155:84532`, Coinbase CDP) as `VERIFIED`** against the 2026-08-02 live capture. Additive: the v0 row is RETAINED below, unmutated, marked superseded (rule 2). Exactly one VERIFIED row exists. |
+| **v2** | Adds the `amount` **cross-check** source (B `payload.authorization.value`) to the v1 row, per the §8.1.1a amendment. **No mapped field changes**, so every commitment built under v1 recomputes identically under v2 — a cross-check can only cause a refusal, never supply a value. Not a rule-2 mutation; the version bump signals the behavioural change (a v1 reader emits on an A/B amount disagreement, a v2 reader refuses). Still exactly one VERIFIED row. |
 
 The machine-readable form of this registry is
 `src/vendor/recorder/x402-registry.ts` (`X402_REGISTRY_VERSION`,
@@ -383,8 +384,10 @@ exchange there was exactly one offer.)
   hypothesized key `maxAmountRequired` does not appear on the wire at all. A is
   authoritative because it is the requirement the payment was constructed
   against and it exists before settlement; B is recorded as a corroborating
-  cross-check, not as a second source. Interaction with the D7 strict-parse gate
-  is clean: a base-unit decimal string is never an `unsafe_number` (§3.1 rule 4).
+  cross-check, not as a second source — and per §8.1.1a (registry v2), a B that
+  is present and DISAGREES with A blocks emission entirely
+  (`amount_disagreement`). Interaction with the D7 strict-parse gate is clean:
+  a base-unit decimal string is never an `unsafe_number` (§3.1 rule 4).
 - **`settlement` field name — RESOLVED to C `transaction`.** The hypothesis held.
   The value was 0x + 64 hex and resolved on the base-sepolia explorer
   (Status Success), confirming it is the on-chain identifier and not an internal
@@ -702,6 +705,32 @@ A second implementation is delivery-proof-conformant iff:
    scheme without one — a `PROVISIONAL`/`UNSPECIFIED` row does not authorize
    emission), and derives `x402_payment_ref` via
    `"sha256:" + hex(sha256(JCS(subset)))` using an RFC 8785 canonicalizer.
+
+   **1a. Amount cross-check (NORMATIVE; amendment 2026-08-02, registry v2).**
+   When BOTH the requirements amount (artifact A, the row's mapped source) and
+   the signed authorization value (artifact B, the row's `crossCheck.amount`
+   source) are available to the emitter and they **disagree**, the emitter MUST
+   NOT emit `x402_payment_ref`. Refusal reason: **`amount_disagreement`** —
+   ambiguous payment evidence. When only one source is available, it emits from
+   the source that is present.
+
+   Rationale: the row commits to ONE authoritative source so two
+   implementations cannot diverge on the bytes. But a disagreement between the
+   requested amount and the amount actually authorized on-chain means the
+   exchange is telling two stories about how much was paid, and a commitment
+   built from either one would be a commitment to a number the other artifact
+   contradicts. Refusing is the fail-closed reading; picking a side is not the
+   emitter's call to make.
+
+   Comparison is strict and untyped-coercion-free: a JSON number `1000` does
+   not equal the observed decimal string `"1000"`, and a type mismatch between
+   the two sources is itself a disagreement, not something to normalize away.
+
+   Note the cross-check can only ever cause a REFUSAL — it never supplies a
+   subset value. Adding it therefore leaves every previously-built commitment
+   byte-for-byte recomputable; what changes is the set of exchanges an emitter
+   is willing to commit to at all. That is why registry v2 carries it without a
+   new row and without touching a single mapped field (§3.4.1a).
 2. It routes any JSON-string ingest of the `PAYMENT-RESPONSE` through a strict
    parser equivalent to D7 (`unsafe_number` + `duplicate_member` fail closed) and
    never hashes on a strict violation.

@@ -213,8 +213,8 @@ describe("x402_payment_ref hashing (spec §2)", () => {
 });
 
 describe("registry gate — fail closed without a VERIFIED row (spec §3.4.1)", () => {
-  it("registry is at v1 with the promoted row VERIFIED", () => {
-    expect(X402_REGISTRY_VERSION).toBe(1);
+  it("registry is at v2 with the promoted row VERIFIED", () => {
+    expect(X402_REGISTRY_VERSION).toBe(2);
     const row = findRegistryRow({
       scheme: "exact",
       network: "eip155:84532",
@@ -347,6 +347,85 @@ describe("registry gate — fail closed without a VERIFIED row (spec §3.4.1)", 
       expect(e).toBeInstanceOf(PaymentRefError);
       expect((e as PaymentRefError).reason).toBe("unregistered_mapping");
     }
+  });
+});
+
+// Artifact B — PaymentPayload, from the PAYMENT-SIGNATURE request header. Only
+// the cross-checked path matters here; wallet-identifying members are
+// placeholders.
+function payload(authorizationValue: unknown): unknown {
+  return {
+    x402Version: 2,
+    payload: {
+      authorization: {
+        from: "<PAYER_REDACTED>",
+        to: "<PAYTO_REDACTED>",
+        value: authorizationValue,
+        validAfter: "0",
+        validBefore: "1785696192",
+        nonce: "<NONCE_REDACTED>",
+      },
+      signature: "<SIG_REDACTED>",
+    },
+    accepted: { scheme: "exact", network: "eip155:84532", amount: "1000" },
+  };
+}
+
+describe("amount cross-check — A vs the signed authorization (spec §8.1.1a)", () => {
+  it("emits when A and B agree", () => {
+    const ref = paymentRefFromArtifacts(
+      { ...FULL_ARTIFACTS, payload: payload("1000") },
+      VERIFIED_SELECTOR,
+    );
+    // The cross-check never supplies a value, so the commitment is identical to
+    // the one built without B present.
+    expect(ref).toBe(paymentRefFromArtifacts(FULL_ARTIFACTS, VERIFIED_SELECTOR));
+  });
+
+  it("emits from A when B is absent (only one source available)", () => {
+    const subset = buildPaymentRefSubset(FULL_ARTIFACTS, VERIFIED_SELECTOR);
+    expect(subset.amount).toBe("1000");
+  });
+
+  it("emits from A when B is present but carries no authorization value", () => {
+    const subset = buildPaymentRefSubset(
+      { ...FULL_ARTIFACTS, payload: payload(undefined) },
+      VERIFIED_SELECTOR,
+    );
+    expect(subset.amount).toBe("1000");
+  });
+
+  it("REFUSES when A and B disagree — ambiguous payment evidence", () => {
+    expect(() =>
+      paymentRefFromArtifacts(
+        { ...FULL_ARTIFACTS, payload: payload("9999") },
+        VERIFIED_SELECTOR,
+      ),
+    ).toThrowError(expect.objectContaining({ reason: "amount_disagreement" }));
+  });
+
+  it("treats a type mismatch between the two sources as a disagreement", () => {
+    // A JSON number 1000 is not the observed decimal string "1000"; the sources
+    // are not saying the same thing, and normalizing would hide that.
+    expect(() =>
+      paymentRefFromArtifacts(
+        { ...FULL_ARTIFACTS, payload: payload(1000) },
+        VERIFIED_SELECTOR,
+      ),
+    ).toThrowError(expect.objectContaining({ reason: "amount_disagreement" }));
+  });
+
+  it("refuses on disagreement through the JSON-string ingest path too", () => {
+    expect(() =>
+      paymentRefFromJsonStrings(
+        {
+          requirements: JSON.stringify(requirements()),
+          payload: JSON.stringify(payload("9999")),
+          settle: JSON.stringify(settle()),
+        },
+        VERIFIED_SELECTOR,
+      ),
+    ).toThrowError(expect.objectContaining({ reason: "amount_disagreement" }));
   });
 });
 

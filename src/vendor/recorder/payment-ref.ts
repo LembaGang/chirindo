@@ -53,7 +53,12 @@ export type PaymentRefErrorReason =
   | "accepts_index_out_of_range"
   | "missing_required_field"
   | "invalid_field_type"
-  | "row_mismatch";
+  | "row_mismatch"
+  // Both the requested amount (A) and the signed authorization value (B) were
+  // available to the emitter and they disagree. The payment evidence is
+  // ambiguous — we would be committing to a number that is not what was
+  // cryptographically authorized — so we refuse rather than pick a side.
+  | "amount_disagreement";
 
 export class PaymentRefError extends Error {
   constructor(
@@ -257,6 +262,50 @@ export function buildPaymentRefSubset(
       "row_mismatch",
       `artifacts describe (scheme=${scheme}, network=${network}) but the selected row is (scheme=${row.scheme}, network=${row.network})`,
     );
+  }
+
+  // Amount cross-check (spec §8.1, amended 2026-08-02). The row names ONE
+  // authoritative source for `amount`; this reads a corroborating source that
+  // never supplies the value. If it is available and disagrees, the exchange
+  // says two different things about how much was paid — refuse.
+  //
+  // "Only one source available ⇒ emit from the present source" resolves here to
+  // "emit from A": the cross-check artifact being absent is not an error, and
+  // the B-only case is unreachable by construction, since four other required
+  // keys are A-sourced and a subset cannot be built without A at all.
+  const crossCheckAmount = row.crossCheck?.amount;
+  if (crossCheckAmount !== undefined) {
+    // Read RAW (not through readMapped): a corroborating source is not a
+    // mapped field, so a wrong-typed value there is not `invalid_field_type` —
+    // it is one more way the two sources disagree.
+    const root = artifactFor(
+      artifacts,
+      crossCheckAmount.artifact,
+      "amount",
+      false,
+    );
+    const corroborating =
+      root === undefined
+        ? undefined
+        : resolvePath(
+            root,
+            crossCheckAmount.path,
+            idx,
+            `${crossCheckAmount.artifact}.${crossCheckAmount.path}`,
+          );
+    // Strict inequality on purpose: a JSON number 1000 is not the observed
+    // decimal string "1000", and a type mismatch between the two sources is
+    // itself ambiguous evidence, not something to normalize away.
+    if (
+      corroborating !== undefined &&
+      corroborating !== null &&
+      corroborating !== amount
+    ) {
+      throw new PaymentRefError(
+        "amount_disagreement",
+        `amount is "${amount}" at ${row.map.amount.artifact}.${row.map.amount.path} but ${JSON.stringify(corroborating)} at ${crossCheckAmount.artifact}.${crossCheckAmount.path}`,
+      );
+    }
   }
 
   const subset: PaymentRefSubset = { scheme, network, asset, amount, resource };

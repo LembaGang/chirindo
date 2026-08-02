@@ -75,6 +75,19 @@ export interface RegistryRow {
     // absent ⇒ omit the key entirely (never null).
     settlement?: FieldMapping;
   };
+  // Corroborating sources that do NOT feed the subset (spec §8.1, amended
+  // 2026-08-02). A cross-check never supplies a value; it can only cause the
+  // emitter to REFUSE. Adding one therefore cannot change any commitment's
+  // bytes — the mapped fields above are untouched — it can only narrow the set
+  // of exchanges we are willing to commit to.
+  //
+  // `amount`: the signed authorization value. For the `exact` scheme the
+  // requested amount (A) and the authorized amount (B) are expected to be
+  // equal; when both are available and they DISAGREE, the payment evidence is
+  // ambiguous and the emitter must not pick one — see `amount_disagreement`.
+  crossCheck?: {
+    amount?: FieldMapping;
+  };
 }
 
 // Registry version. Incremented independently of the record/spec version.
@@ -83,7 +96,14 @@ export interface RegistryRow {
 //   v1 — promotes (exact, eip155:84532, coinbase-cdp) to VERIFIED against the
 //        2026-08-02 live capture. Additive: the v0 row is retained below,
 //        marked superseded.
-export const X402_REGISTRY_VERSION = 1;
+//   v2 — adds the `amount` CROSS-CHECK to the v1 row (spec §8.1 amendment).
+//        Not a mapping mutation and NOT a rule-2 violation: every mapped field
+//        is byte-for-byte unchanged, so every commitment built under v1
+//        recomputes identically under v2. What changed is the set of exchanges
+//        an emitter is willing to commit to at all — a v1 reader emits on an
+//        A/B amount disagreement, a v2 reader refuses — which is exactly the
+//        kind of behavioural change a version exists to signal.
+export const X402_REGISTRY_VERSION = 2;
 
 // The v0 PROVISIONAL row, retained per rule 2. Never mutated — it is kept so
 // that (a) the promotion history is legible and (b) a lookup under the old
@@ -182,6 +202,17 @@ const ROW_V1_EXACT_EIP155_84532_CDP: RegistryRow = {
       path: "transaction",
       provenance: "observed",
       note: "0x + 64 hex; resolved on-chain. Always-vs-sometimes UNESTABLISHED (one observation)",
+    },
+  },
+  crossCheck: {
+    // Observed at B `payload.authorization.value` — the amount the payer
+    // actually signed an EIP-3009 authorization for. In the capture it carried
+    // the same decimal string as A `accepts[i].amount`.
+    amount: {
+      artifact: "payload",
+      path: "payload.authorization.value",
+      provenance: "observed",
+      note: "the signed authorization value; corroborates A, never supplies the subset",
     },
   },
 };
