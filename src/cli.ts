@@ -60,7 +60,7 @@ Usage:
                        -- <downstream-command> [<args>...]
   chirindo verify      <chain-file> [--key <identity.json> | --jwks [<url>]]
                        [--expect-thumbprint <tp>]... [--trust-file <file>]
-                       [--max-skew-ms <ms>]
+                       [--max-skew-ms <ms>] [--allow-unproven-delivery]
 
 Defaults:
   data dir = ./${DATA_DIR}/
@@ -100,9 +100,29 @@ Trust / pinning (what VALID means):
   INTERNALLY CONSISTENT under the presented key — NOT that it was signed by
   Headless Oracle or anyone in particular. Pin a thumbprint to assert WHO.
 
+Delivery proof (x402):
+  A receipt MAY carry x402_payment_ref — a signed commitment to a payment,
+  read together with the event's result_hash to answer "was anything actually
+  delivered for that payment?". verify reports one of three delivery states:
+
+    (no suffix)                  no payment claim — ordinary receipt
+    DELIVERY PROVEN              payment ref + output hash both committed
+    DELIVERY UNPROVEN            payment referenced, no output commitment
+
+  DELIVERY UNPROVEN exits NON-ZERO by default: settled-but-nothing-delivered
+  is the one outcome this must never wave through. --allow-unproven-delivery
+  relaxes the EXIT CODE only — the verdict is still printed, and no flag ever
+  turns UNPROVEN into PROVEN.
+
+  PROVEN is an attestation of COMMITMENT, not of correctness: it proves the
+  operator committed, in bytes it cannot alter, to a payment reference and to
+  the hash of an output. It does NOT prove the output was correct, useful, or
+  what the consumer actually received — that needs receiver-side signing.
+
 Exit codes:
   0  proxy ran to clean shutdown / init / export-jwks succeeded / VALID
-  1  proxy startup error / TAMPERED / INVALID / UNVERIFIABLE
+  1  proxy startup error / TAMPERED / INVALID / UNVERIFIABLE /
+     VALID with DELIVERY UNPROVEN (unless --allow-unproven-delivery)
   2  usage error
 `;
 }
@@ -118,6 +138,12 @@ interface ParsedArgs {
   positional: string[];
   passthrough: string[]; // everything after `--`
 }
+
+// Flags that NEVER take a value. Without this, `--allow-unproven-delivery
+// <chain>` would swallow the chain path as the flag's value and the command
+// would fail with a confusing usage error — the flag must work in any
+// position, because a scripted caller will not be careful about ordering.
+const BOOLEAN_FLAGS = new Set(["allow-unproven-delivery"]);
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command = argv[0];
@@ -146,6 +172,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       const eq = a.indexOf("=");
       if (eq !== -1) {
         setFlag(a.slice(2, eq), a.slice(eq + 1));
+      } else if (BOOLEAN_FLAGS.has(a.slice(2))) {
+        flags.set(a.slice(2), true);
       } else {
         const next = argv[i + 1];
         if (next === undefined || next.startsWith("--") || next === "--") {
@@ -519,7 +547,15 @@ async function cmdVerify(args: ParsedArgs): Promise<number> {
     });
   }
 
-  const formatted = formatVerifyResult(result);
+  // Delivery gate (delivery-proof spec §5.2). `delivery: "unproven"` — a
+  // referenced payment with no committed output — exits non-zero by DEFAULT:
+  // it is precisely the "settled, delivered nothing" case this feature exists
+  // to expose, and a caller gating on `$?` must not read it as success.
+  // --allow-unproven-delivery relaxes the exit gate ONLY; the verdict stays on
+  // the output line either way.
+  const formatted = formatVerifyResult(result, {
+    allowUnprovenDelivery: args.flags.get("allow-unproven-delivery") === true,
+  });
   process.stdout.write(formatted.line + "\n");
   return formatted.exitCode;
 }

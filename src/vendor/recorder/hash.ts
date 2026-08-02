@@ -75,6 +75,18 @@ export function resultHashFromJsonString(resultJson: string): string {
   }
 }
 
+// x402_payment_ref — "sha256:" + hex(sha256(JCS(payment_ref_subset))).
+// Same convention as args_hash / result_hash / entry_hash, over the same ONE
+// canonicalization path and hash primitive (delivery-proof spec §2.1).
+//
+// This is the pure hash step only. The subset it hashes MUST be built through
+// the registry-gated extractor in `payment-ref.ts` — the §3.4 registry is what
+// makes two implementations agree on WHICH source field fed each subset key,
+// and emitting under an unverified mapping is fail-closed there, not here.
+export function paymentRef(subset: unknown): string {
+  return "sha256:" + sha256Hex(jcsBytes(subset));
+}
+
 // entry_hash = "sha256:" + lowercase hex of SHA-256 over the JCS canonical
 // bytes of the record content (everything except `sig`).
 export function entryHashOfCanonical(canonicalBytes: Buffer): string {

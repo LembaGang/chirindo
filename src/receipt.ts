@@ -23,6 +23,7 @@ import {
   defaultIssuer,
   entryHashOfCanonical,
   genesisPrevHash,
+  isPaymentRefFormat,
   jcsBytes,
   readChainFileOrEmpty,
   requestCommitment,
@@ -75,6 +76,18 @@ export interface ReceiptInputs {
   // key-scoped URN. Explicit override lets an operator name a stable issuer
   // identity independent of where the JWKS happens to be hosted.
   iss?: string;
+  // OPTIONAL x402 delivery-proof commitment — "sha256:" + hex(sha256(JCS(
+  // payment_ref_subset))) per docs/spec/delivery-proof.md §2/§3. Set it ONLY
+  // from the registry-gated producers (`paymentRefFromArtifacts` /
+  // `paymentRefFromJsonStrings`), which refuse to emit for any
+  // (scheme, network, facilitator) without a VERIFIED §3.4 row. Omitted ⇒ the
+  // receipt makes no payment claim and its bytes are unchanged (§7).
+  //
+  // Pairing note: the delivery verdict is PROVEN only when the same record
+  // also carries `event.result_hash` (i.e. `toolResult` was supplied). A
+  // payment ref on a deny-path receipt (no result) is, correctly, an
+  // `unproven` delivery — settled, nothing committed about what was delivered.
+  x402PaymentRef?: string;
   decision: GateDecision;
   ts?: string;
 }
@@ -111,6 +124,18 @@ export function buildEvent(inputs: ReceiptInputs): McpCallEvent {
 // Append one signed receipt to the chain file. Returns the record so
 // callers can use record.sig / record's entry_hash for follow-up logs.
 export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
+  // Boundary guard: a payment ref that did not come from the registry-gated
+  // producer cannot be a free-form string inside signed bytes. This is a shape
+  // check, not the trust gate — the trust gate is the VERIFIED-row requirement
+  // in payment-ref.ts, which is the only conformant way to obtain this value.
+  if (
+    inputs.x402PaymentRef !== undefined &&
+    !isPaymentRefFormat(inputs.x402PaymentRef)
+  ) {
+    throw new Error(
+      `x402_payment_ref must be "sha256:" + 64 lowercase hex chars, got: ${inputs.x402PaymentRef}`,
+    );
+  }
   const file = readChainFileOrEmpty(inputs.chainPath);
   const seq = file.records.length;
   const prev_hash =
@@ -163,6 +188,11 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
     ...(inputs.jwksUri !== undefined ? { jwks_uri: inputs.jwksUri } : {}),
     key_thumbprint: keyThumbprint,
     iss,
+    // Same conditional-spread contract as jwks_uri above: absent ⇒ the key is
+    // not a member under JCS ⇒ byte-identical to a pre-feature receipt.
+    ...(inputs.x402PaymentRef !== undefined
+      ? { x402_payment_ref: inputs.x402PaymentRef }
+      : {}),
     prev_hash,
     kid: inputs.identity.kid,
   };

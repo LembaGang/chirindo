@@ -31,6 +31,7 @@ import { jcsBytes } from "../canonicalize.js";
 import { entryHashOfCanonical, genesisPrevHash } from "../hash.js";
 import { kidMatchesKey, loadIdentity, rfc7638Thumbprint } from "../identity.js";
 import { readChainFile } from "../io.js";
+import { isPaymentRefFormat } from "../payment-ref.js";
 import {
   resolveKeyFromJwks,
   type JwksResolveError,
@@ -58,6 +59,36 @@ export interface ResolvedKey {
   source: KeySource;
   origin: string;
 }
+
+// Delivery verdict (delivery-proof spec §5) — a THIRD verdict axis, orthogonal
+// to chain-integrity (TAMPERED) and key-trust (INVALID). An agent reads three
+// independent answers, never a collapsed one:
+//
+//   "proven"   — the record carries BOTH `x402_payment_ref` and
+//                `event.result_hash`: the operator committed, in signed and
+//                recomputable bytes, to a payment reference AND to the hash of
+//                the output delivered for it. An attestation of COMMITMENT,
+//                not of correctness (§6) — it does not prove the output was
+//                right, useful, or what the consumer actually received.
+//   "unproven" — a payment is referenced but nothing is committed about what
+//                was delivered. Fail-closed: this is exactly the x402
+//                post-settlement accountability gap, and it exits non-zero by
+//                default (§5.2) so a caller reading only `$?` cannot wave
+//                "paid for nothing, provably" through as success.
+//   "none"     — no payment claim; an ordinary v1 receipt, unchanged.
+export type DeliveryVerdict = "proven" | "unproven" | "none";
+
+// Why a chain read `unproven`. Kept distinct so "settled with no output
+// commitment" is never confused with "the commitment itself is unusable".
+//   no_output_commitment  — §5 outcome 2: payment ref present, result_hash absent.
+//   malformed_payment_ref — the committed ref is not "sha256:" + 64 hex, so it
+//                           cannot be recomputed against any subset. Not in the
+//                           spec's presence-only §5 table; treated as unproven
+//                           because a non-recomputable commitment must never
+//                           read as proven.
+export type DeliveryUnprovenReason =
+  | "no_output_commitment"
+  | "malformed_payment_ref";
 
 export interface VerifyOptionsBase {
   chainPath: string;
@@ -93,6 +124,24 @@ export type VerifyResult =
       // The key this chain verified under. ALWAYS present on VALID so output
       // can name it — VALID is never anonymous.
       key: ResolvedKey;
+      // Delivery axis (§5.1): reported on a VALID result, because the chain IS
+      // valid — intact, authentic, key-trusted — and delivery is a separate
+      // question from all three. Never folded into INVALID (a key-trust
+      // verdict whose shape forces a resolved-key surface) or TAMPERED (a
+      // chain-integrity verdict); an unproven-delivery chain is fully intact
+      // and calling it tampered would be a lie.
+      //
+      // Chain-level aggregation is fail-closed and is NOT specified by §5,
+      // which is written per-receipt: ANY record that references a payment
+      // without an output commitment makes the whole chain `unproven`,
+      // regardless of how many other records are proven. A single unproven
+      // paid action is the thing the caller needs to know about, and letting a
+      // later proven record mask it would defeat the fail-closed default.
+      delivery: DeliveryVerdict;
+      // The first record that forced `unproven`, and why. Absent unless
+      // `delivery === "unproven"`.
+      deliveryEntry?: number;
+      deliveryReason?: DeliveryUnprovenReason;
     }
   | {
       kind: "tampered";
@@ -318,6 +367,20 @@ function verifyChain(
     };
   }
 
+  // Delivery accumulator (§5). Evaluated per record only AFTER that record's
+  // integrity and signature checks pass — a delivery claim is meaningless
+  // until the bytes carrying it are proven authentic. `unproven` is sticky:
+  // once any record fails the delivery pairing, no later record can lift it.
+  let delivery: DeliveryVerdict = "none";
+  let deliveryEntry: number | undefined;
+  let deliveryReason: DeliveryUnprovenReason | undefined;
+  const markUnproven = (entry: number, reason: DeliveryUnprovenReason) => {
+    if (delivery === "unproven") return; // keep the FIRST offending entry
+    delivery = "unproven";
+    deliveryEntry = entry;
+    deliveryReason = reason;
+  };
+
   const sessionId = file.records[0]!.session_id;
   // Genesis is version-tied (see hash.ts): a /0 chain baked its seq=0
   // prev_hash over v="evidence.action/0". Recompute genesis with the version
@@ -421,6 +484,19 @@ function verifyChain(
       lastTs = Math.max(lastTs ?? -Infinity, tsMs);
     }
 
+    // §5 delivery outcomes, read from THIS record now that it is authentic.
+    // Outcome 3 (no payment ref) is the status quo: the delivery logic is
+    // never entered and the record is an ordinary evidence.action record.
+    if (r.x402_payment_ref !== undefined) {
+      if (!isPaymentRefFormat(r.x402_payment_ref)) {
+        markUnproven(i, "malformed_payment_ref");
+      } else if (eventResultHash(r.event) === undefined) {
+        markUnproven(i, "no_output_commitment");
+      } else if (delivery === "none") {
+        delivery = "proven";
+      }
+    }
+
     lastEntryHash = computedEntryHash;
   }
 
@@ -439,7 +515,20 @@ function verifyChain(
     sessionId,
     hasCheckpoint: file.checkpoint !== null,
     key: resolvedKey,
+    delivery,
+    ...(deliveryEntry !== undefined ? { deliveryEntry } : {}),
+    ...(deliveryReason !== undefined ? { deliveryReason } : {}),
   };
+}
+
+// The delivered-output commitment (§4). Only tool_call / mcp_call events carry
+// one; every other event type has no result to commit to, so a payment ref on
+// such a record is correctly `unproven` — there is nothing it could be paired
+// with.
+function eventResultHash(event: SignedRecord["event"]): string | undefined {
+  return event.type === "tool_call" || event.type === "mcp_call"
+    ? event.result_hash
+    : undefined;
 }
 
 function verifyCheckpoint(
@@ -481,8 +570,40 @@ function keyLine(key: ResolvedKey): string {
   return `verified under key ${key.thumbprint} resolved from ${key.source} (${key.origin})`;
 }
 
+// Delivery suffix on the VALID line (§5.2). `none` adds nothing — an ordinary
+// VALID, because no delivery claim was made.
+function deliverySuffix(r: Extract<VerifyResult, { kind: "valid" }>): string {
+  switch (r.delivery) {
+    case "none":
+      return "";
+    case "proven":
+      return " | DELIVERY PROVEN";
+    case "unproven": {
+      const why =
+        r.deliveryReason === "malformed_payment_ref"
+          ? "payment referenced, commitment not recomputable"
+          : "payment referenced, no output commitment";
+      const where =
+        r.deliveryEntry !== undefined ? ` — entry ${r.deliveryEntry}` : "";
+      return ` | DELIVERY UNPROVEN (${why})${where}`;
+    }
+  }
+}
+
+export interface FormatVerifyOptions {
+  // §5.2 opt-in leniency. Relaxes the EXIT GATE only: `delivery: "unproven"`
+  // exits 0 instead of non-zero. The verdict itself is still reported in full
+  // on the output line — no flag ever makes `unproven` masquerade as `proven`,
+  // and the information is never hidden. Safety is the default; leniency is
+  // explicit and must be asked for.
+  allowUnprovenDelivery?: boolean;
+}
+
 // Format a result for CLI stdout.
-export function formatVerifyResult(r: VerifyResult): {
+export function formatVerifyResult(
+  r: VerifyResult,
+  opts: FormatVerifyOptions = {},
+): {
   line: string;
   exitCode: 0 | 1;
 } {
@@ -490,9 +611,19 @@ export function formatVerifyResult(r: VerifyResult): {
     case "valid":
       return {
         line:
-          `VALID — ${r.count} entries, chain intact, all signatures verified, session ${r.sessionId}\n` +
+          `VALID — ${r.count} entries, chain intact, all signatures verified, session ${r.sessionId}` +
+          deliverySuffix(r) +
+          "\n" +
           keyLine(r.key),
-        exitCode: 0,
+        // The chain is cryptographically VALID, but `unproven` means the
+        // property the scripted caller is really asking about — "can I rely on
+        // this?" — is NOT satisfied. Same shape as UNVERIFIABLE below (chain
+        // fine, required property absent, fail closed); precedent inside this
+        // verifier, not novelty.
+        exitCode:
+          r.delivery === "unproven" && opts.allowUnprovenDelivery !== true
+            ? 1
+            : 0,
       };
     case "tampered":
       return {

@@ -36,11 +36,43 @@ export {
   entryHashOfCanonical,
   genesisInput,
   genesisPrevHash,
+  paymentRef,
   resultHash,
   resultHashFromJsonString,
   sha256Hex,
 } from "./hash.js";
 export type { GenesisInput } from "./hash.js";
+// x402 delivery-proof surface (docs/spec/delivery-proof.md). The registry is
+// the fail-closed gate: only a VERIFIED (scheme, network, facilitator) row can
+// produce an `x402_payment_ref`.
+export {
+  PaymentRefError,
+  buildPaymentRefSubset,
+  isPaymentRefFormat,
+  paymentRefFromArtifacts,
+  paymentRefFromJsonStrings,
+  requireVerifiedRow,
+} from "./payment-ref.js";
+export type {
+  PaymentRefErrorReason,
+  PaymentRefSelector,
+  PaymentRefSubset,
+  X402ArtifactJson,
+  X402Artifacts,
+} from "./payment-ref.js";
+export {
+  X402_REGISTRY,
+  X402_REGISTRY_VERSION,
+  findRegistryRow,
+} from "./x402-registry.js";
+export type {
+  FieldMapping,
+  FieldProvenance,
+  RegistryLookup,
+  RegistryRow,
+  RowStatus,
+  X402Artifact,
+} from "./x402-registry.js";
 export {
   base64UrlDecode,
   base64UrlNoPad,
@@ -54,7 +86,7 @@ export {
   publicKeyFromPrivate,
   rawPublicKeyBytes,
 } from "./key.js";
-export { Chain, type ChainOptions } from "./chain.js";
+export { Chain, type AppendOptions, type ChainOptions } from "./chain.js";
 export {
   requestCommitment,
   requestDescriptor,
@@ -107,6 +139,9 @@ export {
   runVerify,
 } from "./cli/verify.js";
 export type {
+  DeliveryUnprovenReason,
+  DeliveryVerdict,
+  FormatVerifyOptions,
   InvalidReason,
   KeySource,
   ResolvedKey,

@@ -195,6 +195,23 @@ export interface RecordContent {
   // an adopter's receipts), falling back to `urn:chirindo:key:<thumbprint>`
   // when no jwks_uri is published. Absent on v0 receipts.
   iss?: string;
+  // OPTIONAL — the x402 delivery-proof commitment (docs/spec/delivery-proof.md):
+  //   "sha256:" + hex(sha256(JCS(payment_ref_subset)))
+  // over EXACTLY the six §3.2 subset keys, extracted through a VERIFIED §3.4
+  // scheme-mapping registry row. Inside the signed bytes, so the operator
+  // commits to it and cannot rewrite it after the fact.
+  //
+  // It is a hash of a SUBSET, never the raw PAYMENT-RESPONSE — that is what
+  // keeps wallet internals and PII out of the signed bytes. The delivered
+  // output is NOT re-hashed here: it is already committed by
+  // `event.result_hash` (§4). A verifier reads the two together and emits the
+  // §5 delivery verdict.
+  //
+  // Absent by default, and absence is byte-invisible: JCS is a pure function of
+  // the members PRESENT, so a receipt that makes no payment claim canonicalizes
+  // — and therefore signs, links, and verifies — exactly as it did before this
+  // field existed (§7). Same shape as `jwks_uri`; no record-version bump.
+  x402_payment_ref?: string;
   prev_hash: string;
   kid: string;
 }
