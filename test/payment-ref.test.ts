@@ -213,8 +213,8 @@ describe("x402_payment_ref hashing (spec §2)", () => {
 });
 
 describe("registry gate — fail closed without a VERIFIED row (spec §3.4.1)", () => {
-  it("registry is at v2 with the promoted row VERIFIED", () => {
-    expect(X402_REGISTRY_VERSION).toBe(2);
+  it("registry is at v3 with the promoted row VERIFIED", () => {
+    expect(X402_REGISTRY_VERSION).toBe(3);
     const row = findRegistryRow({
       scheme: "exact",
       network: "eip155:84532",
@@ -347,6 +347,132 @@ describe("registry gate — fail closed without a VERIFIED row (spec §3.4.1)", 
       expect(e).toBeInstanceOf(PaymentRefError);
       expect((e as PaymentRefError).reason).toBe("unregistered_mapping");
     }
+  });
+});
+
+// The registry v3 tuple: the SAME scheme and network settled through the
+// x402.org facilitator instead of Coinbase CDP. `x402org` is the registry key
+// the demo's FACILITATOR=x402org resolves to.
+const X402ORG_SELECTOR: PaymentRefSelector = {
+  ...VERIFIED_SELECTOR,
+  facilitator: "x402org",
+};
+
+describe("registry v3 — second VERIFIED row (exact / eip155:84532 / x402org)", () => {
+  it("registers the x402org tuple as VERIFIED at registry v3", () => {
+    const row = findRegistryRow({
+      scheme: "exact",
+      network: "eip155:84532",
+      facilitator: "x402org",
+    });
+    expect(row?.status).toBe("VERIFIED");
+    expect(row?.since).toBe(3);
+    expect(row?.since).toBeLessThanOrEqual(X402_REGISTRY_VERSION);
+    // Rule 4 — a VERIFIED row may not carry a documentation-derived field.
+    for (const mapping of Object.values(row!.map)) {
+      expect(mapping?.provenance).toBe("observed");
+    }
+    expect(row!.provenance).toMatch(/x402\.org/);
+  });
+
+  it("PERMITS emission under the new tuple", () => {
+    const ref = paymentRefFromArtifacts(FULL_ARTIFACTS, X402ORG_SELECTOR);
+    expect(isPaymentRefFormat(ref)).toBe(true);
+    expect(ref).toBe(
+      "sha256:" +
+        sha256Hex(jcsBytes(buildPaymentRefSubset(FULL_ARTIFACTS, X402ORG_SELECTOR))),
+    );
+  });
+
+  it("commits to the same bytes as the CDP row for the same exchange", () => {
+    // Not a coincidence to paper over: the facilitator is NOT one of the six
+    // §3.2 subset keys, and both rows map the six keys to the same source
+    // paths, so identical artifacts MUST produce an identical commitment. The
+    // registry row is what makes the commitment *comparable*; it is not itself
+    // committed to.
+    expect(paymentRefFromArtifacts(FULL_ARTIFACTS, X402ORG_SELECTOR)).toBe(
+      paymentRefFromArtifacts(FULL_ARTIFACTS, VERIFIED_SELECTOR),
+    );
+  });
+
+  it("still REFUSES any facilitator that is not registered", () => {
+    for (const facilitator of ["x402-org", "x402.org", "X402ORG", "stripe", ""]) {
+      expect(() =>
+        paymentRefFromArtifacts(FULL_ARTIFACTS, { ...VERIFIED_SELECTOR, facilitator }),
+      ).toThrowError(expect.objectContaining({ reason: "unregistered_mapping" }));
+    }
+  });
+
+  it("does not register the new facilitator on any OTHER scheme or network", () => {
+    // The row is one tuple, not a facilitator-wide grant.
+    expect(() =>
+      paymentRefFromArtifacts(FULL_ARTIFACTS, { ...X402ORG_SELECTOR, scheme: "upto" }),
+    ).toThrowError(expect.objectContaining({ reason: "unregistered_mapping" }));
+    expect(() =>
+      paymentRefFromArtifacts(FULL_ARTIFACTS, {
+        ...X402ORG_SELECTOR,
+        network: "eip155:8453",
+      }),
+    ).toThrowError(expect.objectContaining({ reason: "unregistered_mapping" }));
+    // Including the superseded v0 network id — adding a row never revives one.
+    expect(() =>
+      paymentRefFromArtifacts(FULL_ARTIFACTS, {
+        ...X402ORG_SELECTOR,
+        network: "base-sepolia",
+      }),
+    ).toThrowError(expect.objectContaining({ reason: "unregistered_mapping" }));
+  });
+
+  it("carries the v2 amount cross-check — refuses when A and B disagree", () => {
+    expect(() =>
+      paymentRefFromArtifacts(
+        { ...FULL_ARTIFACTS, payload: payload("9999") },
+        X402ORG_SELECTOR,
+      ),
+    ).toThrowError(expect.objectContaining({ reason: "amount_disagreement" }));
+    expect(
+      paymentRefFromArtifacts(
+        { ...FULL_ARTIFACTS, payload: payload("1000") },
+        X402ORG_SELECTOR,
+      ),
+    ).toBe(paymentRefFromArtifacts(FULL_ARTIFACTS, X402ORG_SELECTOR));
+  });
+
+  it("keeps settlement OPTIONAL — two observations are not 'always'", () => {
+    // Presence is now observed twice, across two facilitators. That is still
+    // an observation, not a rule: an absent `transaction` omits the member, it
+    // does not fail the emission.
+    const subset = buildPaymentRefSubset(
+      { requirements: requirements(), settle: settle({ transaction: undefined }) },
+      X402ORG_SELECTOR,
+    );
+    expect("settlement" in subset).toBe(false);
+    expect(subset.amount).toBe("1000");
+  });
+
+  it("leaves the pre-existing rows behaving exactly as before", () => {
+    // Rule 2 in test form: an additive row changes nothing about the rows
+    // already shipped.
+    expect(
+      findRegistryRow({
+        scheme: "exact",
+        network: "eip155:84532",
+        facilitator: "coinbase-cdp",
+      })?.status,
+    ).toBe("VERIFIED");
+    const v0 = findRegistryRow({
+      scheme: "exact",
+      network: "base-sepolia",
+      facilitator: "coinbase-cdp",
+    });
+    expect(v0?.status).toBe("PROVISIONAL");
+    expect(v0?.supersededBy).toEqual({ network: "eip155:84532", since: 1 });
+    expect(() =>
+      paymentRefFromArtifacts(FULL_ARTIFACTS, {
+        ...VERIFIED_SELECTOR,
+        network: "base-sepolia",
+      }),
+    ).toThrowError(expect.objectContaining({ reason: "unverified_row" }));
   });
 });
 

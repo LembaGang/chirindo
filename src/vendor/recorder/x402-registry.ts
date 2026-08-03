@@ -103,7 +103,11 @@ export interface RegistryRow {
 //        an emitter is willing to commit to at all — a v1 reader emits on an
 //        A/B amount disagreement, a v2 reader refuses — which is exactly the
 //        kind of behavioural change a version exists to signal.
-export const X402_REGISTRY_VERSION = 2;
+//   v3 — ADDS a second VERIFIED row: (exact, eip155:84532, x402org), against
+//        the 2026-08-02 live x402.org-facilitator capture. Purely additive —
+//        a new tuple, no existing row touched — so every commitment built
+//        under v1/v2 recomputes identically under v3.
+export const X402_REGISTRY_VERSION = 3;
 
 // The v0 PROVISIONAL row, retained per rule 2. Never mutated — it is kept so
 // that (a) the promotion history is legible and (b) a lookup under the old
@@ -217,11 +221,104 @@ const ROW_V1_EXACT_EIP155_84532_CDP: RegistryRow = {
   },
 };
 
+// The second VERIFIED row (registry v3): the same scheme and network settled
+// through the x402.org facilitator instead of Coinbase CDP. A NEW tuple, so
+// this is a pure rule-2 addition — the CDP rows above are untouched and every
+// commitment built under v1/v2 recomputes identically.
+//
+// The facilitator is a distinct registry dimension for a reason, and this row
+// is the evidence for it: the mapping had to be re-observed, not assumed. What
+// the capture found is that it did NOT need to change — which is a finding
+// about this facilitator pair, not a licence to skip the capture for the next
+// one.
+//
+// Observed against the CDP capture (same rig, same wallet pair, ~1h apart):
+//   * A is BYTE-IDENTICAL to the CDP-run A (the 402 is emitted by the resource
+//     server, not the facilitator, so the facilitator choice does not reach it).
+//     All five A-sourced paths therefore carry over unchanged and re-observed.
+//   * B has the same shape; only per-payment values (nonce, validBefore,
+//     signature) differ. `payload.authorization.value` was again the same
+//     decimal string as A `accepts[i].amount`, so the v2 cross-check is carried
+//     onto this row on its own observation — a row that omitted it would be
+//     weaker than the CDP row on identical evidence.
+//   * C has the same four keys (`success, payer, transaction, network`) and
+//     again NO `asset` field, so `asset` is A-only here too. `transaction` was
+//     0x + 64 hex; a different tx from the CDP settle, same network.
+const ROW_V3_EXACT_EIP155_84532_X402ORG: RegistryRow = {
+  scheme: "exact",
+  network: "eip155:84532",
+  // Matches the demo's FACILITATOR=x402org registry key (chirindo-x402-demo
+  // src/config.ts `registryKey`), so a demo run under that id resolves this row.
+  facilitator: "x402org",
+  status: "VERIFIED",
+  since: 3,
+  provenance:
+    "Captured against live base-sepolia / x402.org facilitator " +
+    "(https://x402.org/facilitator) on 2026-08-02 with zero credentials; " +
+    "same wallet pair as the CDP capture; settled tx block 44965211; " +
+    "artifact shape byte-equivalent to the CDP row's A/B, C same four-key shape, " +
+    "no asset field; field names from raw artifacts " +
+    "(x402-capture-rig/capture/, .dup3 + exchange-4 series).",
+  map: {
+    scheme: {
+      artifact: "requirements",
+      path: "accepts[i].scheme",
+      provenance: "observed",
+      note: "echoed in B at accepted.scheme",
+    },
+    network: {
+      artifact: "requirements",
+      path: "accepts[i].network",
+      provenance: "observed",
+      note: "CAIP-2; agrees with C .network",
+    },
+    asset: {
+      artifact: "requirements",
+      path: "accepts[i].asset",
+      provenance: "observed",
+      note: "C carries no asset field — not comparable; A is the only source",
+    },
+    amount: {
+      artifact: "requirements",
+      path: "accepts[i].amount",
+      provenance: "observed",
+      note: "JSON string, base units; agrees with B payload.authorization.value",
+    },
+    resource: {
+      artifact: "requirements",
+      path: "resource.url",
+      provenance: "observed",
+      note: "A's resource is an object {url, description, mimeType}; the subset takes the url",
+    },
+    settlement: {
+      artifact: "settle",
+      path: "transaction",
+      provenance: "observed",
+      // Settlement presence is now OBSERVED TWICE, across two independent
+      // facilitators (CDP 2026-08-02, x402.org 2026-08-02). Two observations
+      // are still "observed", NOT "always": nothing here establishes that a
+      // successful settle must carry `transaction`, so the member stays
+      // optional per §3.2 and a verifier must not read its absence as
+      // anomalous. A rule is not strengthened by counting samples.
+      note: "0x + 64 hex; present on this settle. Presence now observed twice across two facilitators — still observed, NOT always; stays optional",
+    },
+  },
+  crossCheck: {
+    amount: {
+      artifact: "payload",
+      path: "payload.authorization.value",
+      provenance: "observed",
+      note: "the signed authorization value; corroborates A, never supplies the subset",
+    },
+  },
+};
+
 // Every row, newest last. Any (scheme, network, facilitator) tuple absent from
 // this list has NO mapping — rule 1, fail closed.
 export const X402_REGISTRY: readonly RegistryRow[] = [
   ROW_V0_EXACT_BASE_SEPOLIA_CDP,
   ROW_V1_EXACT_EIP155_84532_CDP,
+  ROW_V3_EXACT_EIP155_84532_X402ORG,
 ];
 
 export interface RegistryLookup {

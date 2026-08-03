@@ -282,7 +282,8 @@ built under.
 |---|---|
 | v0 | DRAFT. One row — (`exact`, `base-sepolia`, CDP) — `PROVISIONAL`; every field name documentation-derived. Zero VERIFIED rows, so no conformant implementation could emit at all. |
 | v1 | **Adds (`exact`, `eip155:84532`, Coinbase CDP) as `VERIFIED`** against the 2026-08-02 live capture. Additive: the v0 row is RETAINED below, unmutated, marked superseded (rule 2). Exactly one VERIFIED row exists. |
-| **v2** | Adds the `amount` **cross-check** source (B `payload.authorization.value`) to the v1 row, per the §8.1.1a amendment. **No mapped field changes**, so every commitment built under v1 recomputes identically under v2 — a cross-check can only cause a refusal, never supply a value. Not a rule-2 mutation; the version bump signals the behavioural change (a v1 reader emits on an A/B amount disagreement, a v2 reader refuses). Still exactly one VERIFIED row. |
+| v2 | Adds the `amount` **cross-check** source (B `payload.authorization.value`) to the v1 row, per the §8.1.1a amendment. **No mapped field changes**, so every commitment built under v1 recomputes identically under v2 — a cross-check can only cause a refusal, never supply a value. Not a rule-2 mutation; the version bump signals the behavioural change (a v1 reader emits on an A/B amount disagreement, a v2 reader refuses). Still exactly one VERIFIED row. |
+| **v3** | **Adds a SECOND VERIFIED row — (`exact`, `eip155:84532`, `x402org`)** (§3.4.2c), against the 2026-08-02 live x402.org-facilitator capture. Purely additive: a new tuple, no existing row read or written, so every commitment built under v1/v2 recomputes identically under v3. Two VERIFIED rows now exist, differing only in the facilitator dimension. |
 
 The machine-readable form of this registry is
 `src/vendor/recorder/x402-registry.ts` (`X402_REGISTRY_VERSION`,
@@ -349,9 +350,10 @@ Notes on the two openly-unresolved cells:
 
 ### 3.4.2b Registry v1 row — **VERIFIED** (`exact` / `eip155:84532` / Coinbase CDP)
 
-**Status: `VERIFIED`.** This is the ONLY VERIFIED row in the registry, and the
-only (scheme, network, facilitator) tuple for which a conformant implementation
-may emit `x402_payment_ref`.
+**Status: `VERIFIED`.** This was the only VERIFIED row at registry v1/v2; as of
+v3 it is one of two (see §3.4.2c, which adds the same scheme+network under a
+different facilitator). Nothing in this row changed — the sentence is corrected
+because it was a claim about the registry as a whole, not about this mapping.
 
 **Provenance.** *Captured against live base-sepolia / Coinbase CDP facilitator on
 2026-08-02; every field name read from raw artifact files
@@ -401,8 +403,60 @@ present on the one successful settle observed. Whether it is ALWAYS present on
 success is **UNESTABLISHED** from one sample, so `settlement` remains the
 optional member per §3.2. One observation does not license a stronger rule.
 
+### 3.4.2c Registry v3 row — **VERIFIED** (`exact` / `eip155:84532` / `x402org`)
+
+**Status: `VERIFIED`.** The same scheme and network as §3.4.2b, settled through
+the **x402.org facilitator** (`https://x402.org/facilitator`) instead of
+Coinbase CDP. Registry key `x402org` — the id the reference demo's
+`FACILITATOR=x402org` resolves to. A NEW tuple, so this is a pure rule-2
+addition: §3.4.2b and §3.4.2 are untouched and every commitment built under
+v1/v2 recomputes identically under v3.
+
+**Provenance.** *Captured against live base-sepolia / x402.org facilitator
+(`https://x402.org/facilitator`) on 2026-08-02 with zero credentials; same
+wallet pair as the CDP capture; settled tx block 44965211; artifact shape
+byte-equivalent to the CDP row's A/B, C same four-key shape, no asset field;
+field names from raw artifacts (`x402-capture-rig/capture/`, `.dup3` +
+`exchange-4` series).* The raw artifacts live outside this repository and are
+referenced by path only.
+
+| subset key   | observed source field | source artifact | provenance | status |
+|--------------|-----------------------|-----------------|------------|--------|
+| `scheme`     | `accepts[i].scheme` (value `"exact"`) | A — `PaymentRequirements` | **observed** (echoed in B at `accepted.scheme`) | VERIFIED |
+| `network`    | `accepts[i].network` (value `"eip155:84532"`, CAIP-2) | A — `PaymentRequirements` | **observed** (agrees with C `.network`) | VERIFIED |
+| `asset`      | `accepts[i].asset` | A — `PaymentRequirements` | **observed** (C again carries NO `asset` field — A is the only source) | VERIFIED |
+| `amount`     | `accepts[i].amount` — a JSON **string**, base units | A — `PaymentRequirements` | **observed** (agrees with B `payload.authorization.value`) | VERIFIED |
+| `resource`   | `resource.url` | A — `PaymentRequirements`, **top level** | **observed** | VERIFIED |
+| `settlement` | `transaction` (0x + 64 hex) | C — `SettleResponse` | **observed** | VERIFIED (optional member) |
+
+Cross-check (§8.1.1a): `amount` ← B `payload.authorization.value`, carried onto
+this row **on its own observation** — B again matched A. A row that omitted the
+cross-check would be weaker than §3.4.2b on identical evidence.
+
+**What the capture established, stated narrowly.** The facilitator is a
+registry dimension precisely because a mapping cannot be assumed to survive a
+change of facilitator. Here it did — and that is a finding about this pair, not
+a licence to skip the capture for the next facilitator:
+- **A was BYTE-IDENTICAL** to the CDP run's `PaymentRequirements`. Expected in
+  hindsight — the 402 is emitted by the resource server, not the facilitator —
+  but it is now observed rather than assumed, and it is what carries all five
+  A-sourced paths over unchanged.
+- **B had the same shape**; only per-payment values (`nonce`, `validBefore`,
+  `signature`) differed.
+- **C had the same four keys** (`success`, `payer`, `transaction`, `network`)
+  and, again, no `asset`. The `transaction` was a different tx on the same
+  network.
+
+**`settlement` presence is now observed TWICE, across two independent
+facilitators — and is still `observed`, NOT `always`.** Two samples do not
+establish that a successful settle must carry `transaction`. The member stays
+optional per §3.2 and a verifier MUST NOT read its absence as anomalous. A rule
+is not strengthened by counting samples.
+
 **Every other x402 scheme (e.g. non-`exact` schemes, other networks, other
-facilitators): `UNSPECIFIED`.** No rows. Fail closed — do not guess.
+facilitators): `UNSPECIFIED`.** No rows. Fail closed — do not guess. In
+particular this row grants nothing facilitator-wide: `x402org` on any other
+scheme or network is unregistered.
 
 ### 3.4.3 Promotion procedure (PROVISIONAL → VERIFIED)
 
@@ -759,26 +813,36 @@ at which a cross-language vector earns its place.
 
 ## 9. Standing gap (per the strategic vision)
 
-**The v0 empirical gap is CLOSED.** The registry ships at v1 with exactly one
-`VERIFIED` row (`exact` / `eip155:84532` / Coinbase CDP), promoted against a live
-capture, and the feature is implemented and production-eligible for that one
-tuple. Everything else still fails closed.
+**The v0 empirical gap is CLOSED.** The registry ships at v3 with two `VERIFIED`
+rows (`exact` / `eip155:84532` via Coinbase CDP and via x402.org), each promoted
+against a live capture, and the feature is implemented and production-eligible
+for those two tuples. Everything else still fails closed.
 
-**The gap that replaces it: coverage of exactly one tuple.** One VERIFIED row
-means Chirindo can attest delivery for `exact` on base-sepolia via CDP and for
-nothing else — not base mainnet, not another facilitator, not a non-`exact`
-scheme. Every uncovered tuple is a consumer who must either go without a receipt
-or build their own mapping, and per §3.4.1 rule 3 an operator CANNOT unblock
-themselves by editing a row: promotion requires a capture. That is correct and
-it is also a scaling bottleneck, because promotion cost is per-tuple and manual.
-What this points toward is a reproducible capture harness whose output feeds a
-row directly — a promotion pipeline rather than a promotion ceremony.
+**The gap that replaces it: coverage of two tuples that differ in one
+dimension.** Both VERIFIED rows are `exact` on base-sepolia; only the
+facilitator differs. Chirindo can attest delivery for those and nothing else —
+not base mainnet, not a non-`exact` scheme, not a third facilitator. Every
+uncovered tuple is a consumer who must either go without a receipt or build
+their own mapping, and per §3.4.1 rule 3 an operator CANNOT unblock themselves
+by editing a row: promotion requires a capture. That is correct and it is also a
+scaling bottleneck, because promotion cost is per-tuple and manual — v3 cost a
+second full capture to establish a mapping that turned out identical. What this
+points toward is a reproducible capture harness whose output feeds a row
+directly — a promotion pipeline rather than a promotion ceremony.
 
-**Two narrower open items, carried forward:**
-- **`settlement` always-vs-sometimes is UNESTABLISHED.** One successful settle
-  was observed. Until a run establishes whether a successful CDP settle ALWAYS
-  carries `transaction`, `settlement` stays optional (§3.2) and a verifier
-  cannot treat its absence as anomalous.
+**Three narrower open items, carried forward:**
+- **`settlement` always-vs-sometimes is UNESTABLISHED.** Presence is now
+  observed twice, across two facilitators — which is still an observation, not a
+  rule. Until a run establishes whether a successful settle ALWAYS carries
+  `transaction`, `settlement` stays optional (§3.2) and a verifier cannot treat
+  its absence as anomalous.
+- **The commitment does not distinguish the facilitator.** The facilitator is a
+  registry dimension but not one of the six §3.2 subset keys, so the two
+  VERIFIED rows produce byte-identical `x402_payment_ref` values for the same
+  exchange. The row makes a commitment *comparable*; it is not itself committed
+  to. A verifier reproducing a preimage therefore learns which mapping was
+  needed, not which facilitator settled — fine while the mappings agree, a
+  question to reopen the first time two rows for one scheme+network do not.
 - **The registry lives in two places** — this document and
   `src/vendor/recorder/x402-registry.ts` — kept in agreement by review, not by a
   check. A second implementation reads the prose; the runtime reads the code. A
