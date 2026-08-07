@@ -24,7 +24,12 @@ Both files have the same shape; pick the one for your client.
 
    ```jsonc
    //  ▼  the documented default (npx-form, works on every platform)
-   "--", "npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"
+   //     This package is a devDependency of Chirindo, so running the demo
+   //     from a Chirindo checkout resolves the local pinned copy rather
+   //     than whatever the registry serves that day. Do not remove it
+   //     from devDependencies as unused — no code imports it; this is
+   //     what it is for.
+   "--", "npx", "-y", "@modelcontextprotocol/server-everything"
 
    //  ▼  fallback if `npx` is not on the client's PATH
    //     (Cursor on Windows in particular has been observed missing it)

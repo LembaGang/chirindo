@@ -393,8 +393,10 @@ after N denials).
   and strict-ingest the vectors check; it is not a separate reference
   implementation. (Harness: `conformance/verify-harness/`.) This is
   deliberately **not** the claim that a published package "passes a
-  conformance suite" — that waits for the 0.3.0 publish and a
-  re-verification from the published artifact.
+  conformance suite". That claim requires a re-verification run against
+  the published artifact, and no such run has been made. `0.3.0` was
+  published on 2026-07-10; everything above was verified against the
+  source tree, not against the tarball the registry serves.
 - **Live fetch/verify, end-to-end.** The verify path was exercised by
   hand against the live published JWKS over HTTPS, and all three verdicts
   behaved as specified: a well-formed chain resolved its key and returned
