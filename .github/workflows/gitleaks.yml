@@ -57,7 +57,7 @@ jobs:
           ./gitleaks version
 
       - name: Allowlist canary (bidirectional)
-        # Runs BEFORE the real scan on purpose. .gitleaks.toml suppresses four
+        # Runs BEFORE the real scan on purpose. .gitleaks.toml suppresses five
         # known-public values; every failure mode of that config is SILENT —
         # gitleaks parses allowlists with viper, which drops unknown keys
         # without erroring, so a typo'd `condition` degrades to "OR" (path alone
@@ -147,7 +147,7 @@ jobs:
             exit 1
           fi
 
-          echo "Allowlist canary OK: suppresses the four known public values, still detects everything else."
+          echo "Allowlist canary OK: suppresses the five known public values, still detects everything else."
 
       - name: Scan full history
         run: |

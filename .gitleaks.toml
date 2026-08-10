@@ -3,11 +3,11 @@
 # Start from the upstream ruleset and subtract only proven false positives.
 #
 # Every entry below uses `condition = "AND"`: a finding is silenced only if the
-# path matches AND the matched value is one of the two known public thumbprints
+# path matches AND the matched value is one of the known public thumbprints
 # listed inline. Path alone is never sufficient. That keeps these files fully
 # live for every other detector — an armored private key block, a cloud access
 # token, or any OTHER high-entropy string in the very same file still fails the
-# scan. A path-only allowlist would have turned four files into permanent blind
+# scan. A path-only allowlist would have turned five files into permanent blind
 # spots.
 #
 # The key is `condition`, NOT `matchCondition`. gitleaks parses allowlists with
@@ -22,7 +22,7 @@
 # the former, so the allowlist would no-op in exactly the scan mode a developer
 # runs by hand. Verified both modes against this config on 2026-07-26.
 #
-# WHY THESE ARE NOT SECRETS. Both values are RFC 7638 JWK thumbprints: the
+# WHY THESE ARE NOT SECRETS. These values are RFC 7638 JWK thumbprints: the
 # base64url SHA-256 of the JCS serialization of a PUBLIC JWK ({crv, kty, x}).
 # They are high-entropy by construction, which is why `generic-api-key` matches,
 # but they are public BY DESIGN — a receipt commits to the signer's thumbprint
@@ -82,3 +82,15 @@ targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''(^|/)conformance/verify-harness/build-fixture\.mjs$''']
 regexes = ['''^NvrZE4rGdm3rW7l4aFU_Y4r_KGtb8s-b6BAxEdC-vT0$''']
+
+[[allowlists]]
+# Byte-invariance fixtures: thumbprint of the DETERMINISTIC test key. The
+# signing seed is Buffer.alloc(32, 7) in the same file — a published constant,
+# chosen so the frozen expected-bytes reproduce on every run. The value is
+# sha256(JCS(public JWK)) of the key that seed derives; the test recomputes it
+# on every run, so a drift fails the suite before it fools the allowlist.
+description = "Frozen byte-invariance fixtures: deterministic test-key thumbprint, public by construction"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)test/byte-invariance-payment-ref\.test\.ts$''']
+regexes = ['''^--6IM5l0OosLj9yWskISYhUA3n_3CURQkmrYMSha_ck$''']
