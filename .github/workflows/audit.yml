@@ -1,0 +1,190 @@
+name: audit
+
+# Dependency-advisory gate. The counterpart to gitleaks.yml: that control asks
+# "did a secret get committed", this one asks "did a dependency become known-
+# vulnerable". Both need a SCHEDULE, not just push/PR, because both can go from
+# clean to dirty with zero commits — a new advisory is published against a tree
+# that has not changed. A gate that only runs on push would report the repo
+# clean indefinitely while an advisory sat open against it.
+#
+# WHAT FAILS THE BUILD: a high-or-critical advisory reachable from the RUNTIME
+# dependency tree (`--omit=dev`). Nothing else. That is the set an adopter
+# actually installs — `files` ships dist/README/LICENSE/NOTICE, and the only
+# runtime dependency is `canonicalize`.
+#
+# WHAT DOES NOT FAIL THE BUILD: anything dev-only. This is a deliberate,
+# documented posture, not an oversight — see the dev-tree step for the full
+# reasoning. Recording it here because an undocumented "we ignore dev findings"
+# is how a gate quietly becomes a decoration.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly (Mondays 07:00 UTC), one hour after gitleaks so the two scheduled
+    # controls report separately rather than as one indistinguishable batch.
+    - cron: "0 7 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Same pin as ci.yml (package.json engines: ">=20"). Explicit, never
+      # "latest" — npm's audit behaviour and exit codes are npm-version
+      # dependent, and this gate asserts on both.
+      - name: Set up Node.js (pinned)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies (from lockfile)
+        run: npm ci
+
+      - name: Audit canary (bidirectional)
+        # Runs BEFORE the real gate, on purpose — same pattern as the gitleaks
+        # allowlist canary, and for the same reason: every failure mode of this
+        # gate is SILENT. `npm audit --omit=dev` prints "found 0 vulnerabilities"
+        # and exits 0 when the tree is clean, when `--omit=dev` over-filters,
+        # and (in some npm/registry states) when the audit could not be
+        # meaningfully performed. All three look identical in a green run.
+        #
+        # So we prove the gate can fire, and prove it fires for the RIGHT
+        # reason, before trusting a clean result from it. Everything happens in
+        # a scratch directory outside the workspace; the checked-out tree is
+        # never written to, so the real gate below sees the committed bytes.
+        #
+        # --package-lock-only: the canary needs no node_modules, so it costs a
+        # metadata resolve instead of an install.
+        env:
+          # A package with a long-standing, well-known advisory, pinned to a
+          # version inside the vulnerable range. It has no dependencies of its
+          # own, so it cannot drag in an unrelated finding and score a false
+          # pass. If this advisory is ever withdrawn the canary goes RED rather
+          # than quietly passing — the correct direction to fail. A canary that
+          # cannot fire is not a canary.
+          CANARY_PKG: "minimist"
+          CANARY_VERSION: "1.2.0"
+        run: |
+          set -euo pipefail
+          SCRATCH="$(mktemp -d)"
+          trap 'rm -rf "$SCRATCH"' EXIT
+
+          # Setup above is fail-fast. From here down the step READS exit codes
+          # instead of dying on them, so errexit must go: GitHub runs `run:`
+          # blocks under `/usr/bin/bash -e {0}`, so -e is already on, and two
+          # commands below exit non-zero on the PASSING path.
+          set +e
+
+          mk() { # $1 = dir, $2 = "dependencies" | "devDependencies"
+            mkdir -p "$1"
+            cat > "$1/package.json" <<JSON
+          { "name": "audit-canary", "version": "1.0.0", "private": true,
+            "$2": { "${CANARY_PKG}": "${CANARY_VERSION}" } }
+          JSON
+            ( cd "$1" && npm install --package-lock-only --no-audit --no-fund >/dev/null 2>&1 )
+          }
+
+          # Count high+critical from the JSON report rather than trusting the
+          # exit status alone. npm audit exits non-zero for "vulnerabilities at
+          # or above --audit-level" AND for assorted operational failures; a
+          # canary that could not tell those apart would score a broken audit
+          # as a passing direction 1.
+          hi() { # $1 = dir, $2... = extra flags
+            local d="$1"; shift
+            ( cd "$d" && npm audit --json --package-lock-only "$@" 2>/dev/null ) \
+              | node -e '
+                  let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+                    try{const m=JSON.parse(s).metadata.vulnerabilities;
+                        console.log((m.high||0)+(m.critical||0));}
+                    catch{console.log(-1);}          // unparseable => -1, never 0
+                  });'
+          }
+
+          mk "$SCRATCH/prod" "dependencies"
+          mk "$SCRATCH/dev"  "devDependencies"
+
+          echo "--- direction 1: vulnerable RUNTIME dep MUST fail the gate ---"
+          ( cd "$SCRATCH/prod" && npm audit --omit=dev --audit-level=high --package-lock-only >/dev/null 2>&1 )
+          RC1=$?; N1="$(hi "$SCRATCH/prod" --omit=dev)"
+          echo "direction 1: exit=$RC1 high+critical=$N1"
+          if [ "$RC1" -ne 1 ] || [ "$N1" -lt 1 ]; then
+            echo "::error::Audit canary direction 1 FAILED (exit=$RC1 high+critical=$N1): a known-vulnerable RUNTIME dependency did not trip the gate. The gate below cannot be trusted to fail on a real advisory. (-1 means the JSON report was unparseable - treat as a broken audit, not a clean tree.)"
+            exit 1
+          fi
+
+          echo "--- direction 2: same package as a DEV dep must be IGNORED ---"
+          ( cd "$SCRATCH/dev" && npm audit --omit=dev --audit-level=high --package-lock-only >/dev/null 2>&1 )
+          RC2=$?; N2="$(hi "$SCRATCH/dev" --omit=dev)"
+          echo "direction 2: exit=$RC2 high+critical=$N2"
+          if [ "$RC2" -ne 0 ] || [ "$N2" -ne 0 ]; then
+            echo "::error::Audit canary direction 2 FAILED (exit=$RC2 high+critical=$N2): --omit=dev did not omit the dev tree. The gate would fail on dev-only findings, which is not the documented posture."
+            exit 1
+          fi
+
+          echo "--- direction 3: that dev finding is REALLY there (control) ---"
+          # Without this, direction 2 passes just as well when the audit silently
+          # did nothing at all. Same tree, same package, --omit=dev dropped.
+          N3="$(hi "$SCRATCH/dev")"
+          echo "direction 3: high+critical without --omit=dev = $N3"
+          if [ "$N3" -lt 1 ]; then
+            echo "::error::Audit canary direction 3 FAILED (high+critical=$N3): the dev-tree advisory is not visible even WITHOUT --omit=dev, so direction 2's silence proves nothing - the audit is not actually running."
+            exit 1
+          fi
+
+          echo "Audit canary OK: the gate fires on a runtime advisory, ignores the dev tree, and the dev finding is genuinely present."
+
+      - name: Runtime dependency gate (high+critical, --omit=dev)
+        # THE GATE. Fails the build on a high-or-critical advisory reachable
+        # from the runtime tree. Fails closed by construction: npm audit exits
+        # non-zero on operational failure too, so an audit that cannot run
+        # stops the build rather than reporting a clean tree.
+        run: |
+          set -euo pipefail
+          npm audit --omit=dev --audit-level=high
+
+      - name: Dev-tree advisories (report only, never fails)
+        # DOCUMENTED POSTURE — the half that keeps this gate from re-creating
+        # the problem it was added to solve.
+        #
+        # Dev-only advisories are REPORTED here and never block. The reasoning:
+        # the dev tree is the toolchain (test runner, fixture servers, build
+        # deps). It is not installed by adopters, not reachable from any shipped
+        # artifact, and its advisories are routinely only fixable by a semver-
+        # major bump of a tool — at which point a blocking gate forces a choice
+        # between a red main branch and a rushed major upgrade. Neither is a
+        # security outcome.
+        #
+        # What this is NOT: permission to ignore them. They are printed on every
+        # run and in the job summary so the count is visible and a rise is
+        # noticeable. The standing expectation is that a dev-tree advisory needing
+        # a breaking bump gets its own task, with the suite as the acceptance
+        # gate — see the T7 section of the 2026-08-27 hardening report.
+        #
+        # If this ever needs to become blocking, change the `|| true` and say so
+        # in the same commit. An undocumented posture is how a gate rots.
+        if: always()
+        run: |
+          set -uo pipefail
+          echo "Dev-tree advisories (informational - these do NOT fail the build):"
+          npm audit || true
+
+          SUMMARY="$(npm audit --json 2>/dev/null | node -e '
+            let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+              try{const m=JSON.parse(s).metadata.vulnerabilities;
+                  console.log(`total ${m.total} | critical ${m.critical}, high ${m.high}, moderate ${m.moderate}, low ${m.low}`);}
+              catch{console.log("report unavailable");}
+            });')"
+          {
+            echo "### Dependency audit"
+            echo ""
+            echo "- **Runtime tree (gating):** clean at high+critical, or this job failed above."
+            echo "- **Full tree incl. dev (informational):** ${SUMMARY}"
+            echo ""
+            echo "Dev-only advisories do not fail this build by design; see the workflow comments."
+          } >> "$GITHUB_STEP_SUMMARY"
