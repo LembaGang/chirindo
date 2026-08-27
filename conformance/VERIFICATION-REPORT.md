@@ -150,16 +150,16 @@ The fixture also carries `receipt_chain.verification_algorithm` (rewritten this 
 | `seq` strictly `[0, 1, 2]` | **OK** |
 | `iat` non-decreasing (`09:00:00Z` → `09:00:02Z` → `09:00:05Z`) | **OK** |
 | N3 (drop seq=1): breaks both linkage AND seq contiguity, as designed | **OK** |
-| N4 (thumbprint check ordering before signature verify) | **structurally described** — verifier ordering requirement, no code exercised here |
+| N4 (thumbprint check ordering before signature verify) | **VERIFIED (2026-08-27)** — real-verifier test, red-proofed: `test/conformance-negatives.test.ts` → "N4 — substituted key → INVALID_KEY_BINDING, checked BEFORE signature". See the v0.4.x section. |
 
-### 4c. NOT verified in this task
+### 4c. NOT verified in this task — and what has since been verified
 
-- **Signature authenticity for any of the three receipts.** Fable had the public key only; the sigs were fabricated. Cryptographic verification requires re-signing the payloads against a real private key in a later sprint.
-- **N1 (tampered decision → INVALID_SIGNATURE).** Assertion about verifier behavior. Verifiable only by running a real verifier with a real key against the tampered receipt.
-- **N2 (high-S malleability → REJECTED per RFC 8032 §5.1.7).** Assertion about verifier behavior. Verifiable only in a real-verifier unit test.
-- **N4 (thumbprint precedes signature verify).** Assertion about verifier ordering. Verifiable only by testing the real verifier's failure path when JWKS serves a different key under the same `kid`.
+- **Signature authenticity for any of the three receipts.** Fable had the public key only; the sigs were fabricated. This remains **NOT verified from the corpus itself**, by design: the corpus sigs are illustrative and cannot verify under any real key. The negatives are instead RECONSTRUCTED with a real Ed25519 key in the unit suite, which asserts the corpus's own declared `expected` string so code and corpus cannot drift.
+- **N1 (tampered decision → INVALID_SIGNATURE).** **VERIFIED (2026-08-27), real verifier, red-proofed** — `test/conformance-negatives.test.ts` → "N1 — tampered decision → INVALID_SIGNATURE".
+- **N2 (high-S malleability → REJECTED per RFC 8032 §5.1.7).** **VERIFIED (2026-08-27), real verifier + crypto layer, red-proofed** — `test/conformance-negatives.test.ts` → "N2 — high-S (S+L) malleation is rejected (RFC 8032 §5.1.7)".
+- **N4 (thumbprint precedes signature verify).** **VERIFIED (2026-08-27), real verifier, red-proofed** — `test/conformance-negatives.test.ts` → "N4 — substituted key → INVALID_KEY_BINDING, checked BEFORE signature".
 
-Status for N1, N2, N4: **structurally described in the corpus, pending real-verifier unit tests.**
+Status for N1, N2, N4: **discharged by real-verifier unit tests** — see "N1 / N2 / N4 — real-verifier tests, red-proofed" in the v0.4.x re-verification section for the reason codes and the break that turns each one red. (The tests predate this pass; 2026-08-27 is the date each was shown able to fail.)
 
 ---
 
@@ -303,6 +303,28 @@ pre-canonicalization.
 **Red-proof (reverted).** The duplicate check short-circuited to `false` →
 **5 failures**, again spanning unit cases, the wired call site
 (`resultHashFromJsonString`), and the corpus vector SP2.
+
+### N1 / N2 / N4 — real-verifier tests, red-proofed
+
+All three run against the REAL verifier entry point (`runVerify`) with real
+Ed25519 keys, not against fixtures. They already existed at this commit
+(`test/conformance-negatives.test.ts`, specs K + L); what this pass adds is the
+red-proof — each guard was removed in turn and the test observed to fail, so
+none of them is a check that cannot fail. Each test also asserts the corpus's
+own `negative[].expected` string, so the corpus and the code cannot drift apart
+silently.
+
+| Case | Test name | Verifier outcome asserted | Break applied | Observed failure |
+|---|---|---|---|---|
+| N1 | "N1 — tampered decision → INVALID_SIGNATURE" | `tampered` / `signature invalid` — `decision` is outside `request_descriptor`, so the tamper surfaces purely as a broken signature, not a `request_commitment` mismatch | record signature check in `cli/verify.ts` short-circuited | `expected 'valid' to be 'tampered'` — the tampered chain verifies clean |
+| N2 | "N2 — high-S (S+L) malleation is rejected (RFC 8032 §5.1.7)" | crypto layer: original sig verifies, `S+L` form does NOT; chain layer: `tampered` / `signature invalid` | `verifyEd25519` made non-strict — S reduced mod L before verifying, i.e. a backend that NORMALISES instead of rejecting | `expected true to be false` — the malleated signature is accepted |
+| N4 | "N4 — substituted key → INVALID_KEY_BINDING, checked BEFORE signature" | `invalid` / `key_binding_mismatch` — the reason code is what proves ordering; a verify-then-bind implementation reports `signature invalid` instead | the `key_thumbprint` binding gate in `cli/verify.ts` removed | `expected 'tampered' to be 'invalid'` — the substituted key is mis-reported as a signature failure |
+
+N4's red-proof is the sharpest of the three: removing the gate does not make the
+chain verify, it makes it fail for the WRONG reason. The test is pinned to the
+reason code precisely so that ordering — not merely refusal — is what gets
+checked. All three breaks were reverted; `cli/verify.ts` and `sign.ts` were
+confirmed byte-identical to HEAD afterwards.
 
 ### Not closed by this pass — stated plainly
 
