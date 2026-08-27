@@ -206,3 +206,122 @@ The items this corpus surfaced have all since been resolved, each under test cov
    - Runs the N4 flow (JWKS serves a different key under the same `kid`) and confirms `INVALID_KEY_BINDING` fires BEFORE any Ed25519 verify attempt.
 
 Future changes to the corpus itself go through a new `.candidate` → promotion cycle — do not edit `vectors-v1.json` in place.
+
+---
+
+## v0.4.x re-verification — 2026-08-27
+
+Re-run of the full harness at commit `ba181f2` (package version 0.4.0), plus a
+red-proof pass over the tests that discharge F2/F3/F4. Nothing in this section
+edits the frozen corpus (`conformance/vectors-v1.json` is untouched) and no
+signing/verification logic was changed — the temporary breaks described below
+were reverted and each source file confirmed byte-identical to HEAD afterwards.
+
+### Document state on entry (recorded, not silently fixed)
+
+This report was internally inconsistent before this section was appended, and
+that is worth stating plainly rather than smoothing over: §5 (findings table)
+and §7 (hardening items) already carried F2/F3/F4 and N1/N2/N4 as **RESOLVED**
+with dates, while the Top-line verdict, §2a, §3, and §4c still described the
+same items as **open / pending**. The stale text is the earlier prose; the
+resolutions in §5/§7 are correct. This section supersedes the open/pending
+language wherever the two disagree. The individual stale sentences are left in
+place as history — see "Not closed by this pass" below.
+
+### Harness results — all four entry points, exit 0
+
+Run from `conformance/verify-harness/` after `npm run build` at the repo root
+(Node v24.13.0, Windows):
+
+| Entry point | Result | Exit |
+|---|---|---|
+| `ref-self-test.mjs` | SELF-TEST PASSED — `@truestamp/canonify` reproduces RFC 8785 Appendix B byte-for-byte (sha256 `2d5e01a318d0f0879ab568c4be289c8b1f64ef8921a53c6277d5e069978baacb`) | **0** |
+| `check-vectors.mjs` | ALL PRODUCE VECTORS: three-way byte-and-hash agreement (V1–V7b, V10). ALL STRICT-INGEST VECTORS: gate failed closed with the expected reason (SP1 `unsafe_number`, SP2 `duplicate_member`) | **0** |
+| `check-thumbprint.mjs` | THUMBPRINT VERIFIED — two-way agreement on canonical input and thumbprint value; `kid == thumbprint` | **0** |
+| `check-chain.mjs` | CHAIN STRUCTURE VERIFIED under the sig-stripped `entry_hash` convention; all three `entry_hash` values reproduce three-way | **0** |
+
+Every sha256 in §2, §3 and §4a reproduced unchanged at this commit.
+
+### F2 — CLOSED
+
+**Claim discharged:** `kid` equals the RFC 7638 thumbprint, so a consumer can
+cross-check `kid` against the JWK by construction.
+
+| | |
+|---|---|
+| Tests | `test/conformance-key-binding.test.ts` — "F2 — kid is the RFC 7638 thumbprint (external known answer)" (6 cases, **new in this pass**), and the pre-existing `test/kid-scheme.test.ts` — "kid = RFC 7638 thumbprint (spec G)" (5 cases) |
+| Code | `src/vendor/recorder/identity.ts` — `makeKid` → `rfc7638Thumbprint`; `kidMatchesKey` accepts the legacy scheme read-only |
+
+**Why a new test was needed.** `test/kid-scheme.test.ts` asserts
+`identity.kid === rfc7638Thumbprint(publicKey)`. Because `makeKid` *calls*
+`rfc7638Thumbprint`, that assertion is self-referential: it pins the two to each
+other and cannot observe our thumbprint routine drifting away from RFC 7638.
+The new file anchors both against the frozen corpus's independently authored
+`key_binding` block (§3 — authored by reasoning about the RFC, not by running
+Chirindo): the JWK is imported as a real `KeyObject`, and the JCS preimage,
+the thumbprint, and `makeKid`'s output are each compared to the corpus literal.
+
+**Red-proof (two breaks, both reverted).**
+
+1. `makeKid` reverted to `legacyKid` (i.e. the F2 finding reintroduced) →
+   **3 failures**: the new "makeKid emits that same thumbprint" case plus 2 in
+   `kid-scheme.test.ts` (`expected 'ed25519/wogSqhk0kByo' to be
+   'NvrZE4rGdm3rW7l4aFU_Y4r_KGtb8s-b6BAxEdC-vT0'`).
+2. `rfc7638Thumbprint` given a non-required JWK member (`use: "sig"` added to
+   the JCS input — a genuine drift from RFC 7638's required-members-only rule) →
+   **3 failures, all in the new file**, while `test/kid-scheme.test.ts` stayed
+   **5/5 green**.
+
+Break 2 is the load-bearing observation: the pre-existing test could not have
+caught a thumbprint that stopped being an RFC 7638 thumbprint. F2 is closed by
+the external anchor, not by the self-consistency check.
+
+### F3 — CLOSED
+
+**Claim discharged:** integer tokens outside `[-(2^53-1), 2^53-1]` are rejected
+at the JSON-string ingest boundary, before any hash is produced.
+
+| | |
+|---|---|
+| Tests | `test/strict-json.test.ts` — "strictJsonParse — unsafe_number" (9 cases) and "wired call sites fail closed …" → "argsHashFromJsonString THROWS on an unsafe integer"; `test/conformance-strict-parse.test.ts` — "SP1_unsafe_integer_REJECT -> REJECT (unsafe_number)", driven straight from the frozen corpus |
+| Code | `src/vendor/recorder/strict-json.ts` (`isUnsafeIntegerToken` / `validate`), wired at `hash.ts` `argsHashFromJsonString` / `resultHashFromJsonString` and `io.ts` `parseChainJsonl` |
+
+**Red-proof (reverted).** `isUnsafeIntegerToken` forced to `return false` →
+**7 failures**, spanning all three layers: the unit cases, the wired call site
+(`argsHashFromJsonString`), and the corpus vector SP1.
+
+### F4 — CLOSED
+
+**Claim discharged:** a repeated object member name at any depth is rejected
+pre-canonicalization.
+
+| | |
+|---|---|
+| Tests | `test/strict-json.test.ts` — "strictJsonParse — duplicate_member" (5 cases) and "resultHashFromJsonString THROWS on a duplicate member"; `test/conformance-strict-parse.test.ts` — "SP2_duplicate_member_REJECT -> REJECT (duplicate_member)" |
+| Code | Same gate — the `top.keys.has(value)` check in `validate()` |
+
+**Red-proof (reverted).** The duplicate check short-circuited to `false` →
+**5 failures**, again spanning unit cases, the wired call site
+(`resultHashFromJsonString`), and the corpus vector SP2.
+
+### Not closed by this pass — stated plainly
+
+1. **Exponent-form overflow is still uncovered.** `strictJsonParse` rejects
+   integer-form tokens only. A token like `1e400` parses to `Infinity`, which
+   has no JSON representation — an adjacent recomputability hole with no test
+   and no corpus vector. This is the standing gap recorded under D7 and is
+   NOT closed here.
+2. **Harness prose is stale in two places** (flagged, deliberately not edited —
+   outside this task's scope, and the harness is dev-only and unshipped):
+   `check-thumbprint.mjs` still prints a `FINDING` saying `makeKid()` uses the
+   proprietary scheme, and `check-chain.mjs` still prints "pending real-verifier
+   unit tests (later sprint)" for N1/N2. Both statements are false at this
+   commit. They are console prose, not assertions — neither affects any exit
+   code — but a reader of harness output would be misled.
+3. **Corpus signature authenticity remains untested by the corpus itself**
+   (§4c) — unchanged and by design; the negatives are reconstructed with real
+   keys in the unit suite instead (see the N1/N2/N4 section below).
+4. **Registry/prose drift check** — the x402 scheme registry exists in both
+   prose and code with no automated drift check between them (D9 standing gap).
+   Untouched by this pass.
+
