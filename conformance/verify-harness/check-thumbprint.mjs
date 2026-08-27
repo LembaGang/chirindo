@@ -5,10 +5,17 @@
 //   (b) via Chirindo's own jcs()
 // Both must equal Fable's claimed value AND match the jwks.keys[0].kid.
 //
-// FINDING (flagged, not fixed here): Chirindo's makeKid() in
+// FINDING F2, as originally raised 2026-07-05 (retained verbatim as the
+// historical record): Chirindo's makeKid() in
 // src/vendor/recorder/identity.ts produces "ed25519/<12-char-b64url>",
 // which is NOT an RFC 7638 thumbprint. The vector's rule ("kid MUST equal
 // the RFC 7638 thumbprint") is aspirational for our current impl.
+//
+// RESOLVED 2026-07-06. makeKid() now returns the bare RFC 7638 thumbprint;
+// the legacy "ed25519/<fp>" scheme is accepted read-only via kidMatchesKey.
+// Re-verified and red-proofed 2026-08-27 -- see
+// conformance/VERIFICATION-REPORT.md, section "v0.4.x re-verification -
+// 2026-08-27" (F2), and test/conformance-key-binding.test.ts.
 
 import { canonify } from "@truestamp/canonify";
 import { readFileSync } from "node:fs";
@@ -85,11 +92,24 @@ if (refTp !== fableTp) { console.error("!! refTp != fableTp"); anyFail = true; }
 if (jwksKid !== ourTp) { console.error("!! kid != thumbprint"); anyFail = true; }
 
 console.log();
-console.log("FINDING (not verified here, flagged for backlog):");
-console.log("  Chirindo's makeKid() (src/vendor/recorder/identity.ts) uses a proprietary");
-console.log("  scheme 'ed25519/<12-char-b64url-of-sha256(raw-pubkey)>', NOT RFC 7638.");
-console.log("  The vector's rule 'kid MUST equal the RFC 7638 thumbprint' is aspirational");
-console.log("  for the current implementation.");
+const REPORT_SECTION =
+  'conformance/VERIFICATION-REPORT.md "v0.4.x re-verification — 2026-08-27"';
+
+console.log("FINDING F2 (raised 2026-07-05) - RESOLVED 2026-07-06:");
+console.log("  As raised: \"Chirindo's makeKid() (src/vendor/recorder/identity.ts) uses");
+console.log("  a proprietary scheme 'ed25519/<12-char-b64url-of-sha256(raw-pubkey)>',");
+console.log("  NOT RFC 7638. The vector's rule 'kid MUST equal the RFC 7638 thumbprint'");
+console.log("  is aspirational for the current implementation.\"");
+console.log();
+console.log("  CURRENT STATUS: makeKid() returns the bare RFC 7638 thumbprint, so a");
+console.log("  consumer cross-checks kid against the JWK by construction. The legacy");
+console.log("  scheme is accepted read-only (kidMatchesKey), so chains spanning the");
+console.log("  migration still verify. Re-verified and red-proofed 2026-08-27.");
+console.log("  Record: " + REPORT_SECTION + " (F2).");
+console.log("  Tests:  test/conformance-key-binding.test.ts (anchors the thumbprint to");
+console.log("          this corpus's key_binding literals), test/kid-scheme.test.ts.");
+console.log("  NOTE: this script does not itself exercise makeKid() - it checks the");
+console.log("  corpus thumbprint two ways. The closure is proven by those tests.");
 
 if (anyFail) process.exit(2);
 console.log();

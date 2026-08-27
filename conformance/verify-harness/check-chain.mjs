@@ -7,9 +7,15 @@
 //   4) seq strictly 0,1,2
 //   5) iat non-decreasing
 // Plus structural claims about N3 (seq gap) and N4 (thumbprint check ordering).
+//
 // N1 (tampered decision) and N2 (high-S malleability) are policy assertions
-// about verifier behavior — flagged as "structurally described, pending
-// real-verifier unit tests," NOT verified here.
+// about verifier behavior. They were originally "structurally described,
+// pending real-verifier unit tests," NOT verified here — that remains true OF
+// THIS SCRIPT, which cannot verify signatures (the corpus sigs are
+// illustrative). They are no longer pending anywhere else: N1/N2/N4 are
+// discharged by real-verifier tests in test/conformance-negatives.test.ts,
+// red-proofed 2026-08-27. See conformance/VERIFICATION-REPORT.md, section
+// "v0.4.x re-verification — 2026-08-27".
 
 import { canonify as refCanonify } from "@truestamp/canonify";
 import { readFileSync } from "node:fs";
@@ -185,18 +191,36 @@ console.log("  This is a policy assertion about verifier ordering: the verifier 
 console.log("  check that thumbprint(fetched-key) == payload.key_thumbprint BEFORE");
 console.log("  attempting Ed25519 signature verification. Otherwise an attacker can");
 console.log("  substitute a key under the same kid and force use of their signature.");
-console.log("  This is a REQUIREMENT on the verifier — flagged as 'structurally described'.");
+const REPORT_SECTION =
+  'conformance/VERIFICATION-REPORT.md "v0.4.x re-verification — 2026-08-27"';
+
+console.log("  This is a REQUIREMENT on the verifier. Originally flagged here as");
+console.log("  'structurally described' (no code exercised); VERIFIED 2026-08-27 by");
+console.log("  test/conformance-negatives.test.ts → \"N4 — substituted key →");
+console.log("  INVALID_KEY_BINDING, checked BEFORE signature\", which asserts the");
+console.log("  reason code key_binding_mismatch (not 'signature invalid') and so pins");
+console.log("  the ORDERING, not merely the refusal.");
+console.log("  Record: " + REPORT_SECTION + ".");
 
 // N1, N2: signature-level behavior — needs real verifier
 console.log("\n--- N1_tampered_decision / N2_high_S_malleability ---");
 console.log("  N1 asserts that changing 'decision' from 'deny' to 'allow' invalidates");
 console.log("  the Ed25519 signature. Verifiable only by running a real verifier with");
-console.log("  a real key against the tampered receipt (later sprint).");
+console.log("  a real key against the tampered receipt.");
 console.log("  N2 asserts that a high-S non-canonical Ed25519 signature must be");
 console.log("  rejected per RFC 8032 Section 5.1.7. Verifiable only in a real-verifier");
-console.log("  unit test (later sprint).");
-console.log("  STATUS FOR N1, N2: structurally described in the corpus, pending real-");
-console.log("  verifier unit tests. NOT verified in this task.");
+console.log("  unit test.");
+console.log();
+console.log("  STATUS FOR N1, N2: still NOT verified BY THIS SCRIPT, which cannot");
+console.log("  authenticate signatures - the corpus sigs are illustrative (public key");
+console.log("  only). They are no longer pending: both are VERIFIED 2026-08-27 against");
+console.log("  the real verifier, with real Ed25519 keys, in");
+console.log("  test/conformance-negatives.test.ts:");
+console.log("    N1 → \"N1 — tampered decision → INVALID_SIGNATURE\"");
+console.log("    N2 → \"N2 — high-S (S+L) malleation is rejected (RFC 8032 §5.1.7)\"");
+console.log("  Each asserts this corpus's own negative[].expected string, so the code");
+console.log("  and the corpus cannot drift apart silently.");
+console.log("  Record: " + REPORT_SECTION + ".");
 
 console.log();
 console.log("=".repeat(80));
