@@ -16,6 +16,10 @@ name: audit
 # documented posture, not an oversight — see the dev-tree step for the full
 # reasoning. Recording it here because an undocumented "we ignore dev findings"
 # is how a gate quietly becomes a decoration.
+#
+# The dev-tree report is scripts/ci/dev-audit-report.sh — a real file so the
+# canary can execute it, after run 33075038345 showed that an "informational"
+# inline step can still fail a build. Canary direction 4 covers that class.
 on:
   push:
   pull_request:
@@ -137,7 +141,25 @@ jobs:
             exit 1
           fi
 
-          echo "Audit canary OK: the gate fires on a runtime advisory, ignores the dev tree, and the dev finding is genuinely present."
+          echo "--- direction 4: the dev-tree REPORT must never fail its caller ---"
+          # Added after run 33075038345, where the informational dev-tree step
+          # exited 1 and failed the job. Directions 1-3 test what the gate
+          # DETECTS; none of them tests what a step RETURNS, so none of them
+          # could have caught it. This one runs the real script -- the same file
+          # the step below invokes, not a copy -- against the real checkout,
+          # which genuinely carries dev-only advisories, under the harshest
+          # shell GitHub can supply. `npm audit --json` exits non-zero whenever
+          # it finds something, and that is exactly the status that leaked.
+          DEVSUM="$SCRATCH/devsummary.md"
+          GITHUB_STEP_SUMMARY="$DEVSUM" bash -eo pipefail scripts/ci/dev-audit-report.sh >/dev/null 2>&1
+          RC4=$?
+          echo "direction 4: exit=$RC4 (bash -eo pipefail, tree with findings)"
+          if [ "$RC4" -ne 0 ]; then
+            echo "::error::Audit canary direction 4 FAILED (exit=$RC4): scripts/ci/dev-audit-report.sh returned non-zero. That script is informational and MUST NOT fail the build under any shell options or findings count. This is the regression from run 33075038345."
+            exit 1
+          fi
+
+          echo "Audit canary OK: the gate fires on a runtime advisory, ignores the dev tree, the dev finding is genuinely present, and the informational report cannot fail the build."
 
       - name: Runtime dependency gate (high+critical, --omit=dev)
         # THE GATE. Fails the build on a high-or-critical advisory reachable
@@ -169,22 +191,12 @@ jobs:
         # If this ever needs to become blocking, change the `|| true` and say so
         # in the same commit. An undocumented posture is how a gate rots.
         if: always()
-        run: |
-          set -uo pipefail
-          echo "Dev-tree advisories (informational - these do NOT fail the build):"
-          npm audit || true
-
-          SUMMARY="$(npm audit --json 2>/dev/null | node -e '
-            let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
-              try{const m=JSON.parse(s).metadata.vulnerabilities;
-                  console.log(`total ${m.total} | critical ${m.critical}, high ${m.high}, moderate ${m.moderate}, low ${m.low}`);}
-              catch{console.log("report unavailable");}
-            });')"
-          {
-            echo "### Dependency audit"
-            echo ""
-            echo "- **Runtime tree (gating):** clean at high+critical, or this job failed above."
-            echo "- **Full tree incl. dev (informational):** ${SUMMARY}"
-            echo ""
-            echo "Dev-only advisories do not fail this build by design; see the workflow comments."
-          } >> "$GITHUB_STEP_SUMMARY"
+        # The logic lives in scripts/ci/dev-audit-report.sh, not inline, for two
+        # reasons. It is executed by the canary above, so the canary tests the
+        # real artifact rather than a copy of it. And it owns its own shell
+        # options: run 33075038345 failed here because the inline block inherited
+        # errexit from GitHub (`bash -e {0}`) while its own `set -uo pipefail`
+        # added pipefail, and the pair turned `npm audit --json`'s findings-present
+        # exit 1 into a dead step. The script clears both flags and ends in an
+        # explicit `exit 0` -- see its header for the four-way proof.
+        run: bash scripts/ci/dev-audit-report.sh
