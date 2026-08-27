@@ -214,7 +214,7 @@ Generate the gate's signing identity:
 ```
 node <ABSOLUTE-PATH-TO-CHIRINDO>/dist/cli.js init --dir <ABSOLUTE-PATH-TO-CHIRINDO>/.gate
 # -> initialized chirindo at <abs path>
-#    kid: ed25519/...
+#    kid:          <rfc7638-thumbprint>
 ```
 
 ### 2. Configure your client
@@ -394,9 +394,9 @@ after N denials).
   implementation. (Harness: `conformance/verify-harness/`.) This is
   deliberately **not** the claim that a published package "passes a
   conformance suite". That claim requires a re-verification run against
-  the published artifact, and no such run has been made. `0.3.0` was
-  published on 2026-07-10; everything above was verified against the
-  source tree, not against the tarball the registry serves.
+  the published artifact, and no such run has been made. `0.4.0` is the
+  current published version (2026-08-07); everything above was verified
+  against the source tree, not against the tarball the registry serves.
 - **Live fetch/verify, end-to-end.** The verify path was exercised by
   hand against the live published JWKS over HTTPS, and all three verdicts
   behaved as specified: a well-formed chain resolved its key and returned
