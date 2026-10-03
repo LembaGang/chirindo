@@ -8,10 +8,11 @@
 // tsx is required: the kit imports the TypeScript sources and the stub witness
 // in test/witness-stub.ts, which is not part of the built dist.
 //
-// The witness here is a LOCAL STUB, not Headless Oracle's witness. Everything
-// is deterministic (fixed gate and witness seeds, fixed session id, fixed stub
-// clock, one tool call at a time), so RESULTS.md is byte-identical on every
-// run. Scratch files go to ./work/ (gitignored; it holds a throwaway private
+// The witness here is a LOCAL STUB, not Headless Oracle's witness. RESULTS.md
+// is byte-identical on every run (fixed keys, session id, stub clock, one call
+// at a time); the chain files in work/ carry real record timestamps and differ
+// between runs, and received_at from the stub clock is not comparable with
+// them. Scratch files go to ./work/ (gitignored; it holds a throwaway private
 // key derived from a published seed).
 
 import { spawn } from "node:child_process";
@@ -237,7 +238,7 @@ for (const c of CASES) {
 const cell = ({ text, status }) =>
   text.split("\n").map((l) => "`" + l.replace(/\|/g, "\\|") + "`").join("<br>") + `<br>exit ${status}`;
 const md = [
-  `This is NOT Headless Oracle's witness: these results come from a local stub witness ("witness":"stub.invalid", throwaway key from a fixed seed) implementing WITNESS_SPEC v0.3 sections 2 to 4.`,
+  `This is NOT Headless Oracle's witness: these results come from a local stub witness ("witness":"stub.invalid", throwaway key from a fixed seed) implementing WITNESS_SPEC v0.4 sections 2 to 4.`,
   "received_at values come from a fixed test clock and are not real times.",
   "",
   "# E015.4 evidence kit: results",

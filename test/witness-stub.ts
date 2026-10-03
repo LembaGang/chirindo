@@ -1,4 +1,4 @@
-// In-process STUB witness implementing WITNESS_SPEC v0.3 sections 2 to 4, for
+// In-process STUB witness implementing WITNESS_SPEC v0.4 sections 2 to 4, for
 // the unit tests and examples/e015-4-kit. This is NOT Headless Oracle's
 // witness. Deviations from the spec, both deliberate:
 //

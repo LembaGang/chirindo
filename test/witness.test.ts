@@ -1,4 +1,4 @@
-// Witness client (WITNESS_SPEC v0.3): checkpoint sidecar, witness receipt
+// Witness client (WITNESS_SPEC v0.4): checkpoint sidecar, witness receipt
 // acceptance, proxy checkpointing, and the verify --witness layer. Every test
 // talks to the in-process STUB witness (test/witness-stub.ts), which signs with
 // a throwaway key and says "witness":"stub.invalid" — so every acceptance path

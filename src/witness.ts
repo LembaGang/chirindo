@@ -1,4 +1,4 @@
-// Witness client — the client side of WITNESS_SPEC v0.3 (sections 2 to 5).
+// Witness client — the client side of WITNESS_SPEC v0.4 (sections 2 to 5).
 //
 // A witness is an independent party that records signed checkpoints and signs
 // a receipt saying when it saw each one. The chain alone cannot detect a cut-off

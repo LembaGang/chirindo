@@ -1,4 +1,4 @@
-This is NOT Headless Oracle's witness: these results come from a local stub witness ("witness":"stub.invalid", throwaway key from a fixed seed) implementing WITNESS_SPEC v0.3 sections 2 to 4.
+This is NOT Headless Oracle's witness: these results come from a local stub witness ("witness":"stub.invalid", throwaway key from a fixed seed) implementing WITNESS_SPEC v0.4 sections 2 to 4.
 received_at values come from a fixed test clock and are not real times.
 
 # E015.4 evidence kit: results

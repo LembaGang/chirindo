@@ -210,7 +210,7 @@ given only the file has no expected length), nor the key holder rewriting
 history and re-signing it. A **witness** narrows both: the gate sends signed
 checkpoints `{count, last_entry_hash, ...}` to an independent party, which
 records each one and signs a receipt saying when it saw it. The wire
-contract is WITNESS_SPEC v0.3. This client was built and tested against a
+contract is [WITNESS_SPEC v0.4](docs/WITNESS_SPEC_v0.4.md). This client was built and tested against a
 local stub of that spec; this README does not assert that Headless Oracle's
 witness endpoint is deployed.
 

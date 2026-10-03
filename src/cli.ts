@@ -13,7 +13,7 @@
 //
 //   chirindo checkpoint <chain-file> [--dir <path>] [--witness <base-url>]
 //       Sign a checkpoint over the chain head into <chain>.witness.ndjson and
-//       optionally have a witness countersign it (WITNESS_SPEC v0.3).
+//       optionally have a witness countersign it (WITNESS_SPEC v0.4).
 //
 //   chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]
 //                                [--max-skew-ms <ms>]

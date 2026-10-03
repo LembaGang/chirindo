@@ -23,10 +23,11 @@ npx tsx examples/e015-4-kit/run.mjs
 ```
 
 The script prints `all 12 outcomes match the expected table` and rewrites
-`RESULTS.md`, or exits 1 and names each outcome that differs. Every run is
-deterministic (fixed keys, fixed session id `e015-4-kit-0001`, fixed stub
-clock, one tool call at a time), so `RESULTS.md` is byte-identical on every
-run: rerun it and `git diff` it. Scratch files are written to `work/`
+`RESULTS.md`, or exits 1 and names each outcome that differs. RESULTS.md is
+byte-identical on every run (fixed keys, session id, stub clock, one call at
+a time); the chain files in work/ carry real record timestamps and differ
+between runs, and received_at from the stub clock is not comparable with
+them. Scratch files are written to `work/`
 (ignored by git; it holds the throwaway private key).
 
 ## What it does
@@ -34,7 +35,8 @@ run: rerun it and `git diff` it. Scratch files are written to `work/`
 1. Creates a throwaway gate identity from a fixed seed (32 bytes of 0x01) and
    a throwaway witness key from another (32 bytes of 0x02).
 2. Starts a stub witness on 127.0.0.1 that implements the witness wire
-   protocol (WITNESS_SPEC v0.3 sections 2 to 4). It differs from the real
+   protocol ([WITNESS_SPEC v0.4](../../docs/WITNESS_SPEC_v0.4.md) sections
+   2 to 4). It differs from the real
    service in two stated ways: it signs as `stub.invalid`, and it accepts
    small-order public keys, which the real witness rejects.
 3. Runs `chirindo proxy --checkpoint-every 2 --witness ...` in front of a
@@ -58,8 +60,8 @@ run: rerun it and `git diff` it. Scratch files are written to `work/`
 | resigned | the key holder rewrote one record's arguments and re-signed and re-linked the whole chain | **VALID** | TAMPERED (last_entry_hash mismatch at the first witnessed count after the rewrite) |
 
 The first four rows are what a signed hash chain gives you with no third
-party: anyone without the signing key who edits, deletes or reorders records
-is caught. The last two rows are what it cannot catch: a chain whose tail was
+party: anyone without the signing key who edits or reorders records, or
+deletes one other than at the tail, is caught. The last two rows are what it cannot catch: a chain whose tail was
 cut off, and a history rewritten by whoever holds the key, both still verify
 VALID. Only the comparison with witnessed checkpoints catches them, and only
 for history up to the last witnessed checkpoint, rewritten after that
@@ -98,7 +100,7 @@ How each receipt field maps, and what is missing:
 | D003.3 tool version | none | **Gap:** tool version is not recorded. |
 | D003.3 input parameters | `event.args_hash` | **Gap:** inputs are kept only as a hash (SHA-256 over RFC 8785 JCS of the arguments), not the parameters themselves. Someone holding the arguments can prove they match; the log alone does not reveal them. |
 | D003.3 timestamps | `ts` | **Gap:** one `ts` per receipt, taken when the receipt is written (after the downstream response for ALLOW, at decision time for DENY), not a request timestamp. |
-| D003.3 unauthorized access attempts | DENY receipts (`event.decision: "deny"`, `outcome: "denied"`, `gate.result: "halt"`) | Recorded; the deny reason text is not in the receipt. |
+| D003 "Restrict unsafe tool calls": blocked calls | DENY receipts (`event.decision: "deny"`, `outcome: "denied"`, `gate.result: "halt"`) | Recorded (no alerting); the deny reason text is not in the receipt. |
 | E015.2 tool call results | `event.result_hash` | **Gap:** a hash only, and on ALLOW only; DENY receipts have no result. |
 | E015.2 agent provenance | `agent` | **Gap:** `agent` is the constant `{vendor:"chirindo", version:"0.0.1"}`; it identifies neither the agent nor the package version (0.4.0). The signing key (`kid` / `key_thumbprint`) identifies the gate instance that signed. |
 | E015.2 authorization record | `event.decision`, `event.decision_source: "config"`, `gate.*` | Policy decision recorded; no approver identity (decisions come from the policy file, not a person). |
