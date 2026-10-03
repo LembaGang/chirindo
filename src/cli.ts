@@ -11,8 +11,13 @@
 //       JSON-RPC frame, enforce policy at tools/call. Run by the MCP client
 //       (e.g. Claude Desktop) as its configured MCP server.
 //
+//   chirindo checkpoint <chain-file> [--dir <path>] [--witness <base-url>]
+//       Sign a checkpoint over the chain head into <chain>.witness.ndjson and
+//       optionally have a witness countersign it (WITNESS_SPEC v0.3).
+//
 //   chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]
 //                                [--max-skew-ms <ms>]
+//                                [--witness <base-url> | --witness-file <f>]
 //       Independently verify a chain file. Re-exports the recorder's
 //       verifier — same engine, same VALID/TAMPERED/UNRESOLVED output,
 //       same exit codes. Lets a stranger close the loop with ONLY chirindo
@@ -23,6 +28,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -45,7 +51,23 @@ import {
 } from "./vendor/recorder/index.js";
 import { loadPolicy } from "./policy.js";
 import { runProxy, spawnRealDownstream } from "./proxy.js";
+import { appendSidecarLine, buildCheckpoint } from "./checkpoint.js";
+import {
+  DEFAULT_WITNESS_KEY_ID,
+  DEFAULT_WITNESS_NAME,
+  checkWitnessBaseUrl,
+  parseWitnessKeyArg,
+  readSidecar,
+  sidecarPathFor,
+  verifyAgainstWitness,
+  witnessCheckpoint,
+  witnessPubFromRaw,
+  type WitnessPub,
+  type WitnessTarget,
+} from "./witness.js";
 
+// Clean shutdown waits at most this long for the final witness POST.
+const SHUTDOWN_WITNESS_WAIT_MS = 5_000;
 const DATA_DIR = ".gate";
 
 function helpText(): string {
@@ -57,10 +79,17 @@ Usage:
   chirindo proxy       --policy <file> --server-label <name>
                        [--dir <path>] [--chain <file>] [--session-id <id>]
                        [--jwks-uri <https-url>]
+                       [--checkpoint-every <N>] [--witness <base-url>]
+                       [--witness-key <hex|jwk-file>] [--witness-name <name>]
                        -- <downstream-command> [<args>...]
+  chirindo checkpoint  <chain-file> [--dir <path>] [--witness <base-url>]
+                       [--witness-key <hex|jwk-file>] [--witness-name <name>]
   chirindo verify      <chain-file> [--key <identity.json> | --jwks [<url>]]
                        [--expect-thumbprint <tp>]... [--trust-file <file>]
                        [--max-skew-ms <ms>] [--allow-unproven-delivery]
+                       [--witness <base-url> | --witness-file <sidecar>]
+                       [--witness-key <hex|jwk-file>] [--witness-key-id <id>]
+                       [--witness-name <name>]
 
 Defaults:
   data dir = ./${DATA_DIR}/
@@ -119,10 +148,24 @@ Delivery proof (x402):
   the hash of an output. It does NOT prove the output was correct, useful, or
   what the consumer actually received — that needs receiver-side signing.
 
+Witness (checkpoints):
+  Checkpoints go to <chain-file>.witness.ndjson, never into the chain file.
+  --witness <base-url> POSTs each checkpoint to a witness (https, or http for
+  loopback only); --witness-name is the expected receipt "witness" member
+  (default ${DEFAULT_WITNESS_NAME}). On the proxy a witness failure is logged
+  and the call is permitted. verify --witness / --witness-file compares the
+  chain with witnessed checkpoints: a cut-off tail, or a rewrite by the key
+  holder, of history up to the last witnessed checkpoint reads TAMPERED.
+  --witness-file trusts the sidecar the operator supplied; only querying the
+  witness is independent of the operator.
+
 Exit codes:
-  0  proxy ran to clean shutdown / init / export-jwks succeeded / VALID
+  0  proxy ran to clean shutdown / init / export-jwks / checkpoint succeeded /
+     VALID (and, in witness mode, WITNESSED under a pinned witness key)
   1  proxy startup error / TAMPERED / INVALID / UNVERIFIABLE /
-     VALID with DELIVERY UNPROVEN (unless --allow-unproven-delivery)
+     VALID with DELIVERY UNPROVEN (unless --allow-unproven-delivery) /
+     NO WITNESS / witness key fetched but not pinned /
+     checkpoint refused or witness failure
   2  usage error
 `;
 }
@@ -353,6 +396,22 @@ function cmdProxy(args: ParsedArgs): number {
     }
   }
 
+  const everyFlag = args.flags.get("checkpoint-every");
+  let checkpointEvery: number | undefined;
+  if (everyFlag !== undefined) {
+    if (
+      typeof everyFlag !== "string" ||
+      !/^[1-9][0-9]*$/.test(everyFlag) ||
+      !Number.isSafeInteger(Number(everyFlag))
+    ) {
+      process.stderr.write("[chirindo] --checkpoint-every must be a positive integer\n");
+      return 2;
+    }
+    checkpointEvery = Number(everyFlag);
+  }
+  const witness = parseWitnessTarget(args, "proxy");
+  if (witness === null) return 2;
+
   // Log the resolved absolute paths and the cwd we were spawned with. This
   // is the single most useful diagnostic when a host (Cursor / Claude
   // Desktop) launches us from an unexpected directory.
@@ -412,6 +471,8 @@ function cmdProxy(args: ParsedArgs): number {
     serverLabel,
     chainPath,
     ...(jwksUri !== undefined ? { jwksUri } : {}),
+    ...(checkpointEvery !== undefined ? { checkpointEvery } : {}),
+    ...(witness !== undefined ? { witness } : {}),
     log: (m) => process.stderr.write(m + "\n"),
   });
 
@@ -422,7 +483,14 @@ function cmdProxy(args: ParsedArgs): number {
       `\n`,
   );
 
-  handle.done.then(() => {
+  // The shutdown checkpoint (and its witness POST, capped at 5 s) must finish
+  // BEFORE process.exit, or the head of every session would go unwitnessed.
+  handle.done.then(async () => {
+    try {
+      await handle.finalCheckpoint(SHUTDOWN_WITNESS_WAIT_MS);
+    } catch (e) {
+      process.stderr.write(`[chirindo] shutdown checkpoint failed: ${(e as Error).message}\n`);
+    }
     process.stderr.write(
       `[chirindo] proxy exiting (${handle.receiptCount()} receipts written)\n`,
     );
@@ -431,6 +499,161 @@ function cmdProxy(args: ParsedArgs): number {
 
   // Keep the event loop alive — Node would otherwise exit once stdin/stdout
   // are piped but no top-level await is keeping us here.
+  return 0;
+}
+
+// The pinned witness key. Its id is --witness-key-id if given, else the JWK
+// file's kid, else DEFAULT_WITNESS_KEY_ID (spec section 5 step 4). Returns null
+// after writing a diagnostic: an unreadable pin is a usage error, never "no pin".
+function loadPinnedWitnessKey(
+  arg: string,
+  idFlag: string | undefined,
+  cmd: string,
+): WitnessPub | null {
+  try {
+    const parsed = parseWitnessKeyArg(arg);
+    return {
+      pubObj: witnessPubFromRaw(parsed.raw),
+      hex: parsed.raw.toString("hex"),
+      id: idFlag ?? parsed.jwkKid ?? DEFAULT_WITNESS_KEY_ID,
+    };
+  } catch (e) {
+    process.stderr.write(`chirindo ${cmd}: ${(e as Error).message}\n`);
+    return null;
+  }
+}
+
+// --witness / --witness-key / --witness-name for `proxy` and `checkpoint`.
+// undefined = no --witness; null = usage error already written.
+function parseWitnessTarget(
+  args: ParsedArgs,
+  cmd: string,
+): WitnessTarget | undefined | null {
+  const url = args.flags.get("witness");
+  const pinArg = args.flags.get("witness-key");
+  const name = args.flags.get("witness-name");
+  if (url === undefined) {
+    if (pinArg !== undefined || name !== undefined) {
+      process.stderr.write(
+        `chirindo ${cmd}: --witness-key and --witness-name need --witness <base-url>\n`,
+      );
+      return null;
+    }
+    return undefined;
+  }
+  if (typeof url !== "string" || pinArg === true || name === true) {
+    process.stderr.write(`chirindo ${cmd}: --witness, --witness-key and --witness-name take a value\n`);
+    return null;
+  }
+  let baseUrl: string;
+  try {
+    baseUrl = checkWitnessBaseUrl(url);
+  } catch (e) {
+    process.stderr.write(`chirindo ${cmd}: ${(e as Error).message}\n`);
+    return null;
+  }
+  const target: WitnessTarget = { baseUrl, name: name ?? DEFAULT_WITNESS_NAME };
+  if (typeof pinArg === "string") {
+    const pinned = loadPinnedWitnessKey(pinArg, undefined, cmd);
+    if (pinned === null) return null;
+    target.pinned = pinned;
+  }
+  return target;
+}
+
+// `chirindo checkpoint` — sign a checkpoint over the chain head into the
+// sidecar, optionally witnessed. Refuses (exit 1, nothing written) unless the
+// chain verifies VALID under this identity's key and that key is the one that
+// signed it, so a checkpoint can only ever vouch for a chain we can stand behind.
+async function cmdCheckpoint(args: ParsedArgs): Promise<number> {
+  const chainArg = args.positional[0];
+  if (chainArg === undefined) {
+    process.stderr.write(
+      "usage: chirindo checkpoint <chain-file> [--dir <path>] [--witness <base-url>] " +
+        "[--witness-key <hex|jwk-file>] [--witness-name <name>]\n",
+    );
+    return 2;
+  }
+  const witness = parseWitnessTarget(args, "checkpoint");
+  if (witness === null) return 2;
+  const chainPath = resolvePath(chainArg);
+  const dir = resolvePath((args.flags.get("dir") as string) ?? DATA_DIR);
+  const identityPath = join(dir, IDENTITY_FILENAME);
+  let identity;
+  try {
+    identity = loadFullIdentity(identityPath, join(dir, PRIVATE_KEY_FILENAME));
+  } catch (e) {
+    process.stderr.write(
+      `chirindo checkpoint: cannot load identity from ${dir}: ${(e as Error).message}\n`,
+    );
+    return 1;
+  }
+  const refuse = (why: string): number => {
+    process.stderr.write(`chirindo checkpoint: refused, nothing written: ${why}\n`);
+    return 1;
+  };
+
+  let verdict;
+  try {
+    verdict = runVerify({ chainPath, identityPath });
+  } catch (e) {
+    return refuse(`cannot read chain ${chainPath}: ${(e as Error).message}`);
+  }
+  if (verdict.kind !== "valid") {
+    const line = formatVerifyResult(verdict).line.split("\n")[0];
+    return refuse(`chain does not verify VALID under the identity's key (${line})`);
+  }
+  const { records } = readChainFile(chainPath);
+  if (records[0]!.kid !== identity.kid) {
+    return refuse(`identity kid ${identity.kid} differs from the chain's kid ${records[0]!.kid}`);
+  }
+  if (identity.kid.startsWith("ed25519/")) {
+    return refuse(`legacy kid ${identity.kid} cannot be witnessed; the witness accepts RFC 7638 thumbprint kids only`);
+  }
+
+  const cp = buildCheckpoint(records, identity);
+  const sidecar = sidecarPathFor(chainPath);
+  let existing: ReturnType<typeof readSidecar> = [];
+  if (existsSync(sidecar)) {
+    try {
+      existing = readSidecar(sidecar);
+    } catch (e) {
+      return refuse((e as Error).message);
+    }
+  }
+  const sameHead = existing.filter(
+    (l) =>
+      l.checkpoint.count === cp.count &&
+      l.checkpoint.last_entry_hash === cp.last_entry_hash,
+  );
+  if (
+    sameHead.some((l) => l.witness_receipt !== null) ||
+    (witness === undefined && sameHead.length > 0)
+  ) {
+    process.stdout.write(`head already checkpointed at count ${cp.count}\n`);
+    return 0;
+  }
+
+  if (witness === undefined) {
+    appendSidecarLine(sidecar, { checkpoint: cp, witness_receipt: null, witness_error: null });
+    process.stdout.write(`checkpoint at count ${cp.count} written to ${sidecar} (not witnessed)\n`);
+    return 0;
+  }
+  const outcome = await witnessCheckpoint(cp, identity.publicKey, witness);
+  appendSidecarLine(sidecar, {
+    checkpoint: cp,
+    witness_receipt: outcome.receipt,
+    witness_error: outcome.error,
+  });
+  if (outcome.error !== null) {
+    process.stderr.write(
+      `chirindo checkpoint: witness failed for count ${cp.count}: ${outcome.error} (recorded in ${sidecar})\n`,
+    );
+    return 1;
+  }
+  process.stdout.write(
+    `checkpoint at count ${cp.count} witnessed, received_at ${outcome.receipt.received_at}, written to ${sidecar}\n`,
+  );
   return 0;
 }
 
@@ -458,6 +681,58 @@ async function cmdVerify(args: ParsedArgs): Promise<number> {
     );
     return 2;
   }
+  // Witness mode (spec section 5). Usage errors exit 2 before any work.
+  const witnessUrlFlag = args.flags.get("witness");
+  const witnessFileFlag = args.flags.get("witness-file");
+  const witnessPinFlag = args.flags.get("witness-key");
+  const witnessIdFlag = args.flags.get("witness-key-id");
+  const witnessNameFlag = args.flags.get("witness-name");
+  const witnessMode = witnessUrlFlag !== undefined || witnessFileFlag !== undefined;
+  if (witnessUrlFlag !== undefined && witnessFileFlag !== undefined) {
+    process.stderr.write(
+      "chirindo verify: --witness and --witness-file are alternatives; pass at most one\n",
+    );
+    return 2;
+  }
+  if (
+    !witnessMode &&
+    (witnessPinFlag !== undefined || witnessIdFlag !== undefined || witnessNameFlag !== undefined)
+  ) {
+    process.stderr.write(
+      "chirindo verify: --witness-key, --witness-key-id and --witness-name need --witness or --witness-file\n",
+    );
+    return 2;
+  }
+  if (witnessFileFlag !== undefined && witnessPinFlag === undefined) {
+    process.stderr.write(
+      "chirindo verify: --witness-file requires --witness-key (a sidecar carries no key to trust)\n",
+    );
+    return 2;
+  }
+  if ([witnessUrlFlag, witnessFileFlag, witnessPinFlag, witnessIdFlag, witnessNameFlag].includes(true)) {
+    process.stderr.write("chirindo verify: witness options take a value\n");
+    return 2;
+  }
+  let witnessBase: string | undefined;
+  if (typeof witnessUrlFlag === "string") {
+    try {
+      witnessBase = checkWitnessBaseUrl(witnessUrlFlag);
+    } catch (e) {
+      process.stderr.write(`chirindo verify: ${(e as Error).message}\n`);
+      return 2;
+    }
+  }
+  let witnessPinned: WitnessPub | undefined;
+  if (typeof witnessPinFlag === "string") {
+    const pinned = loadPinnedWitnessKey(
+      witnessPinFlag,
+      typeof witnessIdFlag === "string" ? witnessIdFlag : undefined,
+      "verify",
+    );
+    if (pinned === null) return 2;
+    witnessPinned = pinned;
+  }
+
   const maxSkewFlag = args.flags.get("max-skew-ms");
   const skewOpt =
     typeof maxSkewFlag === "string"
@@ -556,8 +831,28 @@ async function cmdVerify(args: ParsedArgs): Promise<number> {
   const formatted = formatVerifyResult(result, {
     allowUnprovenDelivery: args.flags.get("allow-unproven-delivery") === true,
   });
-  process.stdout.write(formatted.line + "\n");
-  return formatted.exitCode;
+  if (!witnessMode) {
+    process.stdout.write(formatted.line + "\n");
+    return formatted.exitCode;
+  }
+
+  // Step 1: the witness layer only runs on a VALID chain (DELIVERY UNPROVEN
+  // still counts as VALID here); anything else is reported unchanged.
+  if (result.kind !== "valid") {
+    process.stdout.write(formatted.line + "\n");
+    return formatted.exitCode;
+  }
+  const witnessed = await verifyAgainstWitness({
+    chainPath,
+    validText: formatted.line,
+    validExit: formatted.exitCode,
+    witnessName: typeof witnessNameFlag === "string" ? witnessNameFlag : DEFAULT_WITNESS_NAME,
+    ...(witnessBase !== undefined ? { baseUrl: witnessBase } : {}),
+    ...(typeof witnessFileFlag === "string" ? { sidecarPath: resolvePath(witnessFileFlag) } : {}),
+    ...(witnessPinned !== undefined ? { pinned: witnessPinned } : {}),
+  });
+  process.stdout.write(witnessed.text + "\n");
+  return witnessed.code;
 }
 
 // Load a JSON trust file of accepted RFC 7638 thumbprints. Accepts either a
@@ -618,6 +913,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdExportJwks(args);
     case "proxy":
       return cmdProxy(args);
+    case "checkpoint":
+      return await cmdCheckpoint(args);
     case "verify":
       return await cmdVerify(args);
     default:

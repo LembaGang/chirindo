@@ -26,6 +26,7 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import type { LoadedFullIdentity } from "./vendor/recorder/index.js";
 import { type Policy, type PolicyDecision, evaluate } from "./policy.js";
+import { ProxyCheckpointer } from "./checkpoint.js";
 import { appendReceipt, type GateDecision } from "./receipt.js";
 import {
   denyToolResult,
@@ -34,6 +35,7 @@ import {
   splitLines,
   type JsonRpcRequest,
 } from "./rpc.js";
+import type { WitnessTarget } from "./witness.js";
 
 export interface ProxyDeps {
   // Process-like handles. Tests inject in-memory streams; the CLI uses
@@ -55,6 +57,11 @@ export interface ProxyDeps {
   jwksUri?: string;
   log: (msg: string) => void; // writes to stderr in production
   now?: () => string;
+  // OPTIONAL checkpointing into `<chain>.witness.ndjson`. Setting either one
+  // enables it (and the shutdown checkpoint). A checkpoint or witness step
+  // never delays, alters or denies a tool call.
+  checkpointEvery?: number;
+  witness?: WitnessTarget;
 }
 
 export interface DownstreamProcess {
@@ -71,6 +78,10 @@ export interface ProxyHandle {
   done: Promise<void>;
   // Number of receipts written, for tests / diagnostics.
   receiptCount: () => number;
+  // Clean-shutdown checkpoint of the head, awaiting queued witness POSTs for
+  // at most `timeoutMs`. No-op when checkpointing is off or no receipt was
+  // written. A killed process never gets here: it writes no final checkpoint.
+  finalCheckpoint: (timeoutMs: number) => Promise<void>;
 }
 
 export function runProxy(deps: ProxyDeps): ProxyHandle {
@@ -78,6 +89,17 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
   let downStdoutBuf = "";
   let clientStdinBuf = "";
   let receiptCount = 0;
+  const checkpointer =
+    deps.checkpointEvery !== undefined || deps.witness !== undefined
+      ? new ProxyCheckpointer({
+          chainPath: deps.chainPath,
+          identity: deps.identity,
+          ...(deps.checkpointEvery !== undefined ? { every: deps.checkpointEvery } : {}),
+          ...(deps.witness !== undefined ? { witness: deps.witness } : {}),
+          log: deps.log,
+          ...(deps.now ? { now: deps.now } : {}),
+        })
+      : null;
 
   // Track pending tools/call requests by JSON-RPC id so when the
   // downstream's response arrives we know it's the ALLOW result we should
@@ -206,6 +228,13 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
         ...(deps.now ? { ts: deps.now() } : {}),
       });
       receiptCount += 1;
+      // Its own try: a checkpoint failure must never turn into the receipt-
+      // write failure path below, which withholds the result (fail-closed).
+      try {
+        checkpointer?.afterReceipt(receiptCount);
+      } catch (e) {
+        deps.log(`[chirindo] checkpoint failed: ${(e as Error).message}`);
+      }
       return true;
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
@@ -319,6 +348,9 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
   return {
     done,
     receiptCount: () => receiptCount,
+    finalCheckpoint: async (timeoutMs) => {
+      await checkpointer?.shutdown(receiptCount, timeoutMs);
+    },
   };
 }
 

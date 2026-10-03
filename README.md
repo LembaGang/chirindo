@@ -15,8 +15,10 @@ Chirindo emits **calibrated evidence**: a verifying party can prove that
 the gate fired for a given call and that the chain is recomputable from
 the signed records. The receipts do **not** prove an action was "safe" —
 only that the gate's decision is captured, signed, and tamper-evident
-(not tamper-proof: any actor with the chain file can rewrite history,
-but a mutation breaks the hash chain and is caught by `recorder verify`).
+(not tamper-proof: an edit, a reorder, or a deletion other than cutting off
+the tail breaks the hash chain and is caught by `recorder verify`; cutting
+off the tail, and a rewrite by the key holder, are caught only against
+witnessed checkpoints, see [Witness](#witness)).
 The receipt format and signing reuse the existing
 [`recorder`](src/vendor/recorder) engine — no reimplementation of JCS, hashing,
 or Ed25519.
@@ -41,6 +43,7 @@ agent from acting on an un-receipted result).
 | Signer throws | log + permit | DENY |
 | Policy missing / invalid | n/a | DENY |
 | Receipt write fails | log + permit | DENY result back to client |
+| Witness unreachable or receipt invalid | n/a | log + permit (availability; the session is then protected by the chain alone) |
 
 ## Architecture
 
@@ -150,10 +153,17 @@ output is evidence the recorder's verifier already understands.
 chirindo init   [--dir <path>]
 chirindo proxy  --policy <file> --server-label <name>
                 [--dir <path>] [--chain <file>] [--session-id <id>]
+                [--checkpoint-every <N>] [--witness <base-url>]
+                [--witness-key <hex|jwk-file>] [--witness-name <name>]
                 -- <downstream-command> [<args>...]
+chirindo checkpoint <chain-file> [--dir <path>] [--witness <base-url>]
+                [--witness-key <hex|jwk-file>] [--witness-name <name>]
 chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]
                 [--expect-thumbprint <tp>]... [--trust-file <file>]
                 [--max-skew-ms <ms>]
+                [--witness <base-url> | --witness-file <sidecar>]
+                [--witness-key <hex|jwk-file>] [--witness-key-id <id>]
+                [--witness-name <name>]
 ```
 
 Defaults: `--dir = ./.gate/`, identity at `<dir>/identity.json`, chain
@@ -190,6 +200,136 @@ a deny rule is allowed. The shipped `policy.json` is `{"deny": []}` —
 records everything, blocks nothing, **observe-only by default**.
 Enforcement is opt-in (see step 6 below). **Fail-closed**: an
 unreadable or malformed policy file still denies all calls.
+
+## Witness
+
+A hash chain signed by the operator lets anyone detect edits, reordering,
+and deletions other than cutting off the tail, made by someone who does not
+hold the signing key. It cannot detect the tail being cut off (a verifier
+given only the file has no expected length), nor the key holder rewriting
+history and re-signing it. A **witness** narrows both: the gate sends signed
+checkpoints `{count, last_entry_hash, ...}` to an independent party, which
+records each one and signs a receipt saying when it saw it. The wire
+contract is WITNESS_SPEC v0.3. This client was built and tested against a
+local stub of that spec; this README does not assert that Headless Oracle's
+witness endpoint is deployed.
+
+```
+# checkpoint the head of a chain, optionally witnessed
+chirindo checkpoint <chain> --witness https://api.headlessoracle.com
+
+# or let the proxy do it: every N receipts, and once more on clean shutdown
+chirindo proxy ... --checkpoint-every 50 --witness https://api.headlessoracle.com -- <cmd>
+
+# verify the chain against the witness (pin the witness key: hex or JWK file)
+chirindo verify <chain> --key <identity.json> \
+  --witness https://api.headlessoracle.com --witness-key <hex>
+```
+
+- Checkpoints are written to the sidecar `<chain>.witness.ndjson`, one line
+  `{checkpoint, witness_receipt, witness_error}` each, **never** into the
+  chain file (a checkpoint inside the live chain would make every later
+  receipt write fail). `chirindo checkpoint` refuses (exit 1, nothing
+  written) unless the chain verifies VALID under the identity's key, that key
+  signed the chain, and its kid is an RFC 7638 thumbprint (not a legacy
+  `ed25519/...` kid).
+- A witness failure on the proxy is one sidecar line with `witness_error`
+  and one stderr line; the tool call is never delayed, altered or denied
+  (see the fail-closed table). On clean shutdown the proxy checkpoints the
+  head and waits at most 5 s for the witness before exiting. **A killed
+  process writes no final checkpoint**: everything after its last witnessed
+  checkpoint is protected by the chain alone.
+- **What is sent to the witness:** the checkpoint's `kid`, `session_id`,
+  `count`, `last_entry_hash`, `ts`, `sig`, the constant `v` and `type`
+  fields, and the gate's public key; plus, as with any HTTPS request, the
+  sender's IP address. Never arguments, results or records.
+- A `--session-id` longer than 128 characters cannot be witnessed.
+- `verify --witness <url>` queries the witness (following `next_after`
+  pages); `verify --witness-file <sidecar> --witness-key <key>` reads the
+  receipts from the sidecar, offline. **`--witness-file` trusts the sidecar
+  the operator supplied; only querying the witness is independent of the
+  operator.** Output on success is the usual VALID lines, then
+  `WITNESSED through count N, received_at T, witness key <hex>` and
+  `M records after the last witnessed checkpoint are not witness-protected`.
+  A cut-off tail, a rewrite, or a fork reads `TAMPERED` naming the lowest
+  failing count; no receipts reads `NO WITNESS: ...` (exit 1); a witness key
+  fetched from `/v5/keys` instead of pinned is named and exits 1.
+  `--witness-name` sets the expected receipt `witness` member (default
+  `headlessoracle.com`).
+
+Receipt signature verification needs no Headless Oracle service when you
+verify with `--key`, with `--jwks <your URL>`, or through the receipt's own
+`jwks_uri`. Without `--key` or a `--jwks` URL, a receipt with no `jwks_uri`,
+and with `$RECORDER_JWKS_URL` unset, is checked against keys fetched from
+https://headlessoracle.com/.well-known/jwks.json; pinning a thumbprint
+(`--expect-thumbprint`) removes the need to trust that fetch. Evidence from
+Headless Oracle's witness relies on Headless Oracle, and only for truncation
+and rewrite detection.
+
+A runnable demonstration against a local stub witness (not Headless
+Oracle's) is in [`examples/e015-4-kit/`](examples/e015-4-kit/).
+
+### Honest limits
+
+A witness receipt is Headless Oracle's signed statement that at
+`received_at` it was shown a checkpoint signed by the key with that
+thumbprint; it is only as reliable as Headless Oracle and its signing key.
+It does not prove who controls the key, that the records are true, or that
+they were written at the times they carry.
+
+**What it adds to the chain alone:** a cut-off tail, or a rewrite by the key
+holder (edit, delete or reorder, then re-sign and re-link), of any history
+up to the last witnessed checkpoint, made after that checkpoint was
+witnessed, is detected when the chain is compared with the witness's
+receipts. Edits, reordering, and deletions other than cutting off the tail,
+made by anyone without the signing key, are already detected by the chain
+and its signatures, with no witness. Cutting off the tail is not detected by
+the chain alone, whoever does it.
+
+**What it does not detect:**
+
+- records after the last witnessed checkpoint, which can be cut off or
+  rewritten undetectably;
+- a history rewritten before it was first witnessed (compare `received_at`
+  with the records' `ts`: that gap is the exposure window);
+- a session the operator never presents, because the verifier looks up only
+  the `session_id` of the chain it was given, and a rewrite under a new
+  `session_id` or a new key starts with no receipts;
+- unwitnessed periods: a failed checkpoint never blocks a tool call, a
+  killed process writes no final checkpoint, and because the witness accepts
+  checkpoints from anyone without an account, anyone can use up the rate
+  limit or the daily cap and leave other operators' checkpoints unwitnessed
+  until it resets;
+- a wrong witness: nothing here lets a verifier detect Headless Oracle
+  omitting receipts from a query, signing a false `received_at`, losing
+  stored rows, or the theft of its signing key; receipts are not kept in a
+  public append-only log with consistency proofs.
+
+**Two honest cases verify TAMPERED:**
+
+- A chain file exported before its session ended verifies TAMPERED once
+  later checkpoints are witnessed, because it looks truncated; verify the
+  complete session file.
+- Two chains written under the same key and `session_id` (for example a
+  reused `--session-id` with a new chain file) are a fork to the witness and
+  verify TAMPERED.
+
+Verifying against a sidecar file trusts the operator who supplied it. Only
+querying the witness is independent of the operator.
+
+Receipts are individually signed but the list is not: a mirror, proxy or
+modified client can drop receipts, hiding a cut-off tail or rewrite after
+the last receipt it returns. Pinning the witness key does not detect a
+dropped receipt; query https://api.headlessoracle.com directly.
+
+After a key rotation `/v5/keys` lists only the new key; receipts signed
+under an earlier key verify only against a copy pinned before rotation.
+
+The witness is operated by Headless Oracle, which also publishes the gate
+software. It is independent of the operator, not of Headless Oracle. Anyone
+who knows a (`kid`, `session_id`) pair can read that session's checkpoint
+counts and times. No arguments, results or records are ever sent to the
+witness.
 
 ## Getting started
 
@@ -312,8 +452,10 @@ no trust in the client you used. The receipts **prove the gate fired
 for each call and that the chain is recomputable from the signed
 records**. They do **not** prove the action was "safe," only that the
 decision is captured, signed, and **tamper-evident** (not tamper-proof:
-any actor with the chain file can rewrite history, but a mutation
-breaks the hash chain and is caught by `chirindo verify`).
+an edit, a reorder, or a deletion other than cutting off the tail breaks
+the hash chain and is caught by `chirindo verify`; cutting off the tail,
+and a rewrite by the key holder, are caught only against witnessed
+checkpoints, see [Witness](#witness)).
 
 Offline alternative (no network): `--key <ABSOLUTE-PATH-TO-CHIRINDO>/.gate/identity.json`.
 
