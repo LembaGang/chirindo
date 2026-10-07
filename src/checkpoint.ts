@@ -19,6 +19,7 @@ import {
 import { GATE_AGENT } from "./receipt.js";
 import {
   sidecarPathFor,
+  upgradeHintLine,
   witnessCheckpoint,
   type SidecarLine,
   type WitnessOutcome,
@@ -71,6 +72,8 @@ export class ProxyCheckpointer {
   // Checkpoints queued but not yet written to the sidecar.
   private readonly inflight = new Set<SignedCheckpoint>();
   private closed = false;
+  // At most one upgrade hint per process, however many checkpoints are refused.
+  private upgradeHinted = false;
 
   constructor(o: ProxyCheckpointOptions) {
     this.o = o;
@@ -175,6 +178,10 @@ export class ProxyCheckpointer {
       this.o.log(
         `[chirindo] witness failed for checkpoint at count ${cp.count}: ${outcome.error} (call permitted; recorded in ${this.sidecar})`,
       );
+      if ("upgrade" in outcome && outcome.upgrade !== undefined && !this.upgradeHinted) {
+        this.upgradeHinted = true;
+        this.o.log(upgradeHintLine(outcome.error, outcome.upgrade));
+      }
     }
   }
 }

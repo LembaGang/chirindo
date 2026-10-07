@@ -1,4 +1,7 @@
-// Witness client — the client side of WITNESS_SPEC v0.4 (sections 2 to 5).
+// Witness client — the client side of WITNESS_SPEC v0.5 (sections 2 to 5;
+// docs/WITNESS_SPEC_v0.5.md). v0.5 adds an OPTIONAL account key for the
+// Evidence plans, sent only on POST /v1/witness/checkpoints; GET of
+// checkpoints and of /v5/keys are public and never carry it.
 //
 // A witness is an independent party that records signed checkpoints and signs
 // a receipt saying when it saw each one. The chain alone cannot detect a cut-off
@@ -63,6 +66,61 @@ export interface WitnessTarget {
   baseUrl: string;
   name: string; // expected `witness` member of every receipt
   pinned?: WitnessPub; // absent => fetch from <base>/v5/keys per receipt
+  // Evidence plan key (v0.5). When set it is sent as `authorization: Bearer
+  // <key>` on the checkpoint POST and nowhere else. It must never reach the
+  // sidecar, stdout/stderr, an error string or a thrown error.
+  accountKey?: string;
+}
+
+// The only key shape the witness accepts (spec section 2, check 1.5). Checked
+// by the CLI before any network call; a key that fails it is never sent.
+export const WITNESS_ACCOUNT_KEY_RE = /^ho_live_[0-9a-f]{64}$/;
+
+export function isWitnessAccountKey(s: string): boolean {
+  return WITNESS_ACCOUNT_KEY_RE.test(s);
+}
+
+// True when `text` carries any 16-character window of `key`. Used to refuse
+// to copy server-supplied text that echoes the key into evidence files or logs.
+function echoesKey(text: string, key: string | undefined): boolean {
+  if (key === undefined) return false;
+  for (let i = 0; i + 16 <= key.length; i++) {
+    if (text.includes(key.slice(i, i + 16))) return true;
+  }
+  return false;
+}
+
+// Where to upgrade, from the `upgrade` object the witness sends with 429
+// quota_exceeded and with the anonymous-cap 503 (spec section 2, "upgrade"):
+// its `pricing` URL, else its `checkout.url`. Only a plain https URL with no
+// query or fragment is accepted, so a hostile body cannot put arbitrary text
+// on the operator's terminal. Prices are never hardcoded here.
+const UPGRADE_URL_RE = /^https:\/\/[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?(\/[A-Za-z0-9._~%\/-]{0,200})?$/;
+
+export function upgradeUrlFrom(body: Record<string, unknown> | null, key?: string): string | undefined {
+  const up = body?.["upgrade"];
+  if (typeof up !== "object" || up === null || Array.isArray(up)) return undefined;
+  const u = up as Record<string, unknown>;
+  const checkout = u["checkout"];
+  const candidates = [
+    u["pricing"],
+    typeof checkout === "object" && checkout !== null ? (checkout as Record<string, unknown>)["url"] : undefined,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && UPGRADE_URL_RE.test(c) && !echoesKey(c, key)) return c;
+  }
+  return undefined;
+}
+
+// The one stderr hint printed when a witness pool is used up: 429
+// quota_exceeded (this account key's quota) or 503 witness_unavailable with an
+// upgrade object (the shared anonymous cap). Both reset at 00:00 UTC.
+export function upgradeHintLine(code: string, url: string): string {
+  const why =
+    code === "quota_exceeded"
+      ? "this account key's daily checkpoint quota is used (it resets at 00:00 UTC)"
+      : "the witness's shared anonymous daily cap is reached (it resets at 00:00 UTC); an Evidence plan key has its own quota";
+  return `[chirindo] witness ${code}: ${why}. Plans: ${url}`;
 }
 
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -151,6 +209,7 @@ export function verifyWitnessSignature(receipt: Record<string, unknown>, pubObj:
 }
 
 // GET <base>/v5/keys and return the raw key whose key_id equals `keyId`.
+// Public: no account key is ever sent here.
 export async function fetchWitnessKey(
   baseUrl: string,
   keyId: string,
@@ -189,7 +248,9 @@ export async function fetchWitnessKey(
 
 export type WitnessOutcome =
   | { receipt: WitnessReceipt; error: null }
-  | { receipt: null; error: string };
+  // `upgrade` is set only when the witness refused for a used-up pool and its
+  // reply named a usable upgrade URL. It is never written to the sidecar.
+  | { receipt: null; error: string; upgrade?: string };
 
 function allStrings(o: Record<string, unknown>): o is Record<string, string> {
   return Object.values(o).every((v) => typeof v === "string");
@@ -213,12 +274,16 @@ export async function witnessCheckpoint(
     checkpoint: cp,
     public_key_jwk: { kty: "OKP", crv: "Ed25519", x: publicKeyBase64Url(gatePub) },
   });
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  // redirect: "error" below also means the key is never re-sent to a host the
+  // witness redirects to.
+  if (target.accountKey !== undefined) headers["authorization"] = `Bearer ${target.accountKey}`;
   let status: number;
   let text: string;
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body,
       redirect: "error",
       signal: AbortSignal.timeout(timeoutMs),
@@ -241,12 +306,20 @@ export async function witnessCheckpoint(
   if (status !== 200 && status !== 201) {
     // The server's `error` member is its code (spec section 2). Only a short
     // identifier is copied into the sidecar, so a hostile body cannot inject
-    // arbitrary text into evidence files or logs.
+    // arbitrary text into evidence files or logs, nor echo the account key.
+    // v0.5 codes include invalid_key (401), payment_required (402),
+    // witness_plan_required (403), quota_exceeded and RATE_LIMITED (429) and
+    // witness_unavailable (503); all are recorded, never retried here.
     const code = obj?.["error"];
-    return {
-      receipt: null,
-      error: typeof code === "string" && /^[A-Za-z0-9_]{1,64}$/.test(code) ? code : `http_${status}`,
-    };
+    const error =
+      typeof code === "string" && /^[A-Za-z0-9_]{1,64}$/.test(code) && !echoesKey(code, target.accountKey)
+        ? code
+        : `http_${status}`;
+    const upgrade =
+      error === "quota_exceeded" || error === "witness_unavailable"
+        ? upgradeUrlFrom(obj, target.accountKey)
+        : undefined;
+    return upgrade !== undefined ? { receipt: null, error, upgrade } : { receipt: null, error };
   }
   if (obj === null || !allStrings(obj)) return { receipt: null, error: "bad_witness_response" };
 
@@ -273,7 +346,8 @@ export async function witnessCheckpoint(
 }
 
 // ---------------------------------------------------------------------------
-// Collecting receipts (spec section 5 step 3)
+// Collecting receipts (spec section 5 step 3). GET is public (spec section 3):
+// no account key is ever sent.
 // ---------------------------------------------------------------------------
 
 export type Collected = { ok: true; receipts: unknown[] } | { ok: false; reason: string };

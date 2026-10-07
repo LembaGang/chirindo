@@ -12,8 +12,9 @@
 //       (e.g. Claude Desktop) as its configured MCP server.
 //
 //   chirindo checkpoint <chain-file> [--dir <path>] [--witness <base-url>]
+//                       [--witness-account-key-file <path>]
 //       Sign a checkpoint over the chain head into <chain>.witness.ndjson and
-//       optionally have a witness countersign it (WITNESS_SPEC v0.4).
+//       optionally have a witness countersign it (WITNESS_SPEC v0.5).
 //
 //   chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]
 //                                [--max-skew-ms <ms>]
@@ -56,6 +57,8 @@ import {
   DEFAULT_WITNESS_KEY_ID,
   DEFAULT_WITNESS_NAME,
   checkWitnessBaseUrl,
+  isWitnessAccountKey,
+  upgradeHintLine,
   parseWitnessKeyArg,
   readSidecar,
   sidecarPathFor,
@@ -65,6 +68,10 @@ import {
   type WitnessPub,
   type WitnessTarget,
 } from "./witness.js";
+
+// The Evidence plan key for the witness (v0.5) may come from this variable;
+// --witness-account-key-file takes precedence over it.
+const WITNESS_ACCOUNT_KEY_ENV = "CHIRINDO_WITNESS_ACCOUNT_KEY";
 
 // Clean shutdown waits at most this long for the final witness POST.
 const SHUTDOWN_WITNESS_WAIT_MS = 5_000;
@@ -81,9 +88,11 @@ Usage:
                        [--jwks-uri <https-url>]
                        [--checkpoint-every <N>] [--witness <base-url>]
                        [--witness-key <hex|jwk-file>] [--witness-name <name>]
+                       [--witness-account-key-file <path>]
                        -- <downstream-command> [<args>...]
   chirindo checkpoint  <chain-file> [--dir <path>] [--witness <base-url>]
                        [--witness-key <hex|jwk-file>] [--witness-name <name>]
+                       [--witness-account-key-file <path>]
   chirindo verify      <chain-file> [--key <identity.json> | --jwks [<url>]]
                        [--expect-thumbprint <tp>]... [--trust-file <file>]
                        [--max-skew-ms <ms>] [--allow-unproven-delivery]
@@ -158,6 +167,22 @@ Witness (checkpoints):
   holder, of history up to the last witnessed checkpoint reads TAMPERED.
   --witness-file trusts the sidecar the operator supplied; only querying the
   witness is independent of the operator.
+  --witness-key is the WITNESS's public key (to verify its receipts).
+
+Witness account key (WITNESS_SPEC v0.5, Evidence plans; optional):
+  Without one, checkpoints go to the witness's shared anonymous pool. With
+  one, proxy and checkpoint send "Authorization: Bearer <key>" on the
+  checkpoint POST only (GETs are public and never carry it), and new
+  checkpoints count against that key's own daily quota.
+    --witness-account-key-file <path>   file holding the key (whitespace trimmed)
+    $${WITNESS_ACCOUNT_KEY_ENV}       the key itself
+  Precedence: --witness-account-key-file wins; the environment variable is
+  read only when the flag is absent. The key is never accepted as a command-
+  line value. It must be ho_live_ followed by 64 lowercase hex characters,
+  checked before any request (exit 2 otherwise). It is never written to the
+  sidecar or printed. A refused key (invalid_key, payment_required,
+  witness_plan_required) or a used-up quota (quota_exceeded) is recorded as
+  witness_error like any witness failure: the proxy permits the call.
 
 Exit codes:
   0  proxy ran to clean shutdown / init / export-jwks / checkpoint succeeded /
@@ -482,6 +507,13 @@ function cmdProxy(args: ParsedArgs): number {
       (jwksUri !== undefined ? ` jwks_uri=${jwksUri}` : "") +
       `\n`,
   );
+  if (witness?.accountKey !== undefined) {
+    process.stderr.write(
+      `[chirindo] witness ${witness.baseUrl}: account key from ` +
+        (accountKeySource === "file" ? "--witness-account-key-file" : `$${WITNESS_ACCOUNT_KEY_ENV}`) +
+        ` (not shown)\n`,
+    );
+  }
 
   // The shutdown checkpoint (and its witness POST, capped at 5 s) must finish
   // BEFORE process.exit, or the head of every session would go unwitnessed.
@@ -523,8 +555,63 @@ function loadPinnedWitnessKey(
   }
 }
 
-// --witness / --witness-key / --witness-name for `proxy` and `checkpoint`.
-// undefined = no --witness; null = usage error already written.
+// Where the account key came from, for the proxy's boot line (never the key).
+let accountKeySource: "file" | "env" | undefined;
+
+// The witness account key (v0.5) for `proxy` and `checkpoint`:
+// --witness-account-key-file <path> if given, else $CHIRINDO_WITNESS_ACCOUNT_KEY.
+// Returns undefined when neither is set and null after writing a usage error.
+// No message here ever contains the key: only the flag, path or variable name.
+function loadWitnessAccountKey(
+  args: ParsedArgs,
+  cmd: string,
+): { key: string; source: "file" | "env" } | undefined | null {
+  const fileFlag = args.flags.get("witness-account-key-file");
+  if (fileFlag === true) {
+    process.stderr.write(`chirindo ${cmd}: --witness-account-key-file takes a path\n`);
+    return null;
+  }
+  if (typeof fileFlag === "string") {
+    // A key typed where the path belongs would otherwise be echoed in the
+    // "cannot read" message below.
+    if (/ho_live_[0-9a-f]{16}/.test(fileFlag)) {
+      process.stderr.write(
+        `chirindo ${cmd}: --witness-account-key-file takes the path of a file holding the key, not the key itself\n`,
+      );
+      return null;
+    }
+    const path = resolvePath(fileFlag);
+    let text: string;
+    try {
+      text = readFileSync(path, "utf8");
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code ?? "unreadable";
+      process.stderr.write(`chirindo ${cmd}: cannot read --witness-account-key-file ${path} (${code})\n`);
+      return null;
+    }
+    const key = text.trim();
+    if (!isWitnessAccountKey(key)) {
+      process.stderr.write(
+        `chirindo ${cmd}: the account key in --witness-account-key-file ${path} is not ho_live_ followed by 64 lowercase hex characters\n`,
+      );
+      return null;
+    }
+    return { key, source: "file" };
+  }
+  const env = process.env[WITNESS_ACCOUNT_KEY_ENV];
+  if (env === undefined || env.trim() === "") return undefined;
+  const key = env.trim();
+  if (!isWitnessAccountKey(key)) {
+    process.stderr.write(
+      `chirindo ${cmd}: $${WITNESS_ACCOUNT_KEY_ENV} is not ho_live_ followed by 64 lowercase hex characters\n`,
+    );
+    return null;
+  }
+  return { key, source: "env" };
+}
+
+// --witness / --witness-key / --witness-name / the account key, for `proxy`
+// and `checkpoint`. undefined = no --witness; null = usage error already written.
 function parseWitnessTarget(
   args: ParsedArgs,
   cmd: string,
@@ -532,13 +619,22 @@ function parseWitnessTarget(
   const url = args.flags.get("witness");
   const pinArg = args.flags.get("witness-key");
   const name = args.flags.get("witness-name");
+  const keyFile = args.flags.get("witness-account-key-file");
+  if (args.flags.has("witness-account-key")) {
+    process.stderr.write(
+      `chirindo ${cmd}: the account key is never accepted on the command line; ` +
+        `use --witness-account-key-file <path> or $${WITNESS_ACCOUNT_KEY_ENV}\n`,
+    );
+    return null;
+  }
   if (url === undefined) {
-    if (pinArg !== undefined || name !== undefined) {
+    if (pinArg !== undefined || name !== undefined || keyFile !== undefined) {
       process.stderr.write(
-        `chirindo ${cmd}: --witness-key and --witness-name need --witness <base-url>\n`,
+        `chirindo ${cmd}: --witness-key, --witness-name and --witness-account-key-file need --witness <base-url>\n`,
       );
       return null;
     }
+    // $CHIRINDO_WITNESS_ACCOUNT_KEY alone is ignored: there is nothing to send it to.
     return undefined;
   }
   if (typeof url !== "string" || pinArg === true || name === true) {
@@ -558,8 +654,15 @@ function parseWitnessTarget(
     if (pinned === null) return null;
     target.pinned = pinned;
   }
+  const account = loadWitnessAccountKey(args, cmd);
+  if (account === null) return null;
+  if (account !== undefined) {
+    target.accountKey = account.key;
+    accountKeySource = account.source;
+  }
   return target;
 }
+
 
 // `chirindo checkpoint` — sign a checkpoint over the chain head into the
 // sidecar, optionally witnessed. Refuses (exit 1, nothing written) unless the
@@ -570,7 +673,7 @@ async function cmdCheckpoint(args: ParsedArgs): Promise<number> {
   if (chainArg === undefined) {
     process.stderr.write(
       "usage: chirindo checkpoint <chain-file> [--dir <path>] [--witness <base-url>] " +
-        "[--witness-key <hex|jwk-file>] [--witness-name <name>]\n",
+        "[--witness-key <hex|jwk-file>] [--witness-name <name>] [--witness-account-key-file <path>]\n",
     );
     return 2;
   }
@@ -649,6 +752,9 @@ async function cmdCheckpoint(args: ParsedArgs): Promise<number> {
     process.stderr.write(
       `chirindo checkpoint: witness failed for count ${cp.count}: ${outcome.error} (recorded in ${sidecar})\n`,
     );
+    if (outcome.upgrade !== undefined) {
+      process.stderr.write(upgradeHintLine(outcome.error, outcome.upgrade) + "\n");
+    }
     return 1;
   }
   process.stdout.write(
@@ -682,6 +788,13 @@ async function cmdVerify(args: ParsedArgs): Promise<number> {
     return 2;
   }
   // Witness mode (spec section 5). Usage errors exit 2 before any work.
+  // verify only reads (GET is public), so it takes no account key.
+  if (args.flags.has("witness-account-key-file") || args.flags.has("witness-account-key")) {
+    process.stderr.write(
+      "chirindo verify: verify only reads from the witness, which is public; it takes no account key\n",
+    );
+    return 2;
+  }
   const witnessUrlFlag = args.flags.get("witness");
   const witnessFileFlag = args.flags.get("witness-file");
   const witnessPinFlag = args.flags.get("witness-key");
