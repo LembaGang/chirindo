@@ -177,8 +177,8 @@ Witness account key (WITNESS_SPEC v0.5, Evidence plans; optional):
     --witness-account-key-file <path>   file holding the key (whitespace trimmed)
     $${WITNESS_ACCOUNT_KEY_ENV}       the key itself
   Precedence: --witness-account-key-file wins; the environment variable is
-  read only when the flag is absent. The key is never accepted as a command-
-  line value. It must be ho_live_ followed by 64 lowercase hex characters,
+  read only when the flag is absent and --witness is given. The key is never
+  accepted as a command-line value. It must be ho_live_ followed by 64 lowercase hex characters,
   checked before any request (exit 2 otherwise). It is never written to the
   sidecar or printed. A refused key (invalid_key, payment_required,
   witness_plan_required) or a used-up quota (quota_exceeded) is recorded as

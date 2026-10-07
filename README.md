@@ -155,9 +155,11 @@ chirindo proxy  --policy <file> --server-label <name>
                 [--dir <path>] [--chain <file>] [--session-id <id>]
                 [--checkpoint-every <N>] [--witness <base-url>]
                 [--witness-key <hex|jwk-file>] [--witness-name <name>]
+                [--witness-account-key-file <path>]
                 -- <downstream-command> [<args>...]
 chirindo checkpoint <chain-file> [--dir <path>] [--witness <base-url>]
                 [--witness-key <hex|jwk-file>] [--witness-name <name>]
+                [--witness-account-key-file <path>]
 chirindo verify <chain-file> [--key <identity.json> | --jwks <url>]
                 [--expect-thumbprint <tp>]... [--trust-file <file>]
                 [--max-skew-ms <ms>]
@@ -210,9 +212,21 @@ given only the file has no expected length), nor the key holder rewriting
 history and re-signing it. A **witness** narrows both: the gate sends signed
 checkpoints `{count, last_entry_hash, ...}` to an independent party, which
 records each one and signs a receipt saying when it saw it. The wire
-contract is [WITNESS_SPEC v0.4](docs/WITNESS_SPEC_v0.4.md). This client was built and tested against a
-local stub of that spec; this README does not assert that Headless Oracle's
-witness endpoint is deployed.
+contract is [WITNESS_SPEC v0.5](docs/WITNESS_SPEC_v0.5.md), a public edition
+of the spec the witness serves at https://api.headlessoracle.com/v1/witness/spec
+(the served spec is authoritative; v0.5 adds optional accounts to
+[v0.4](docs/WITNESS_SPEC_v0.4.md) and changes nothing a verifier checks).
+Use `https://api.headlessoracle.com` as the witness base URL: the same paths
+on `https://headlessoracle.com` are not served yet.
+
+**What has been exercised, and what has not.** This client is tested against
+a local stub of the spec (`test/witness-stub.ts`), and was run by hand on
+7 Oct 2026 against the witness's own source served locally (`wrangler dev`):
+anonymous and account-key checkpoints, `verify --witness` with a pinned key,
+402 `payment_required`, 403 `witness_plan_required`, the anonymous-cap 503 and
+the account 429 `quota_exceeded`. It has **not** been run against the
+production endpoint, and no production POST of a checkpoint has succeeded
+yet. This README does not claim the live endpoint works.
 
 ```
 # checkpoint the head of a chain, optionally witnessed
@@ -268,6 +282,56 @@ and rewrite detection.
 
 A runnable demonstration against a local stub witness (not Headless
 Oracle's) is in [`examples/e015-4-kit/`](examples/e015-4-kit/).
+
+### Witness accounts (v0.5, optional)
+
+Without an account, checkpoints go to a pool shared by everyone. An Evidence
+plan key gives the operator its own daily quota:
+
+```
+# from a file (preferred; whitespace around the key is trimmed)
+chirindo proxy ... --witness https://api.headlessoracle.com \
+  --witness-account-key-file ~/.config/chirindo/witness.key -- <cmd>
+
+# or from the environment
+CHIRINDO_WITNESS_ACCOUNT_KEY=ho_live_... chirindo checkpoint <chain> \
+  --witness https://api.headlessoracle.com
+```
+
+- **Precedence:** `--witness-account-key-file` wins; `CHIRINDO_WITNESS_ACCOUNT_KEY`
+  is read only when the flag is absent, and only when `--witness` is given.
+  The key is never accepted as a command-line value (`--witness-account-key`
+  is refused), so it does not land in shell history or process listings.
+  `--witness-key` is unrelated: it is the witness's *public* key.
+- The key must be `ho_live_` followed by 64 lowercase hex characters; anything
+  else exits 2 before any request is made, with a message that never echoes it.
+- It is sent as `Authorization: Bearer <key>` on the checkpoint POST only.
+  Reading receipts (`GET /v1/witness/checkpoints`, `GET /v5/keys`) is public
+  and never carries it. Redirects are refused, so it is never re-sent to
+  another host. It is never written to the sidecar or printed.
+- A refused key (401 `invalid_key`, 402 `payment_required`, 403
+  `witness_plan_required`) or a used-up quota (429 `quota_exceeded`) is a
+  witness failure like any other: one sidecar line with `witness_error`, and
+  on the proxy the tool call is permitted unchanged. A 401 is never answered
+  from the anonymous pool instead. When the reply carries the spec's `upgrade`
+  object (429 `quota_exceeded`, or the anonymous-cap 503), chirindo prints at
+  most one stderr line naming its pricing URL; it does not retry.
+
+Limits, as the spec states them (all best effort):
+
+| | anonymous (no key) | Evidence plan key |
+|---|---|---|
+| new checkpoints per UTC day | 2,000 shared by all anonymous callers (a launch limit), then 503 `witness_unavailable` | `evidence_starter` 1,000, `evidence` 3,000, then 429 `quota_exceeded` with `Retry-After` to 00:00 UTC |
+| requests per minute | about 60 per client address, POST and GET counted separately | about 600 per client address and about 600 per account |
+
+Only a POST that stores a new checkpoint counts; repeating an already-stored
+checkpoint is free. Account checkpoints do not count against the anonymous
+cap, and that cap being reached does not block an account, so an account key
+closes the "anyone can use up the daily cap" gap below for that operator (not
+the rate limit per address). Receipts are identical for both pools; nothing in
+a receipt says which pool stored it. Prices are not in this README: the
+witness returns them in its `upgrade` object and at
+https://headlessoracle.com/v5/pricing.
 
 ### Honest limits
 
@@ -537,8 +601,10 @@ after N denials).
   deliberately **not** the claim that a published package "passes a
   conformance suite". That claim requires a re-verification run against
   the published artifact, and no such run has been made. `0.4.0` is the
-  current published version (2026-08-07); everything above was verified
-  against the source tree, not against the tarball the registry serves.
+  current published version (2026-08-07, read from the registry on
+  2026-10-07) and has no witness commands; this tree is `0.5.0` and is not
+  published. Everything above was verified against the source tree, not
+  against the tarball the registry serves.
 - **Live fetch/verify, end-to-end.** The verify path was exercised by
   hand against the live published JWKS over HTTPS, and all three verdicts
   behaved as specified: a well-formed chain resolved its key and returned
