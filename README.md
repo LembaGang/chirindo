@@ -138,7 +138,10 @@ Field notes:
   verifier, not `JSON.stringify`).
 - **`gate.request_commitment`** MUST equal the top-level
   `request_commitment` (the continuity invariant); **`gate.gate_receipt`**
-  is the receipt's own `entry_hash`, self-anchored for the spike.
+  is the receipt's own `entry_hash`: the receipt anchors to its own chain,
+  and an outside time for it comes from a witnessed checkpoint whose
+  `count` covers that entry (see
+  [Showing a gate ran before an action](#showing-a-gate-ran-before-an-action)).
 - **`jwks_uri`** (optional) names where this receipt's signing key is
   published; it is inside the signed bytes, so the operator commits to it.
 
@@ -216,17 +219,46 @@ contract is [WITNESS_SPEC v0.5](docs/WITNESS_SPEC_v0.5.md), a public edition
 of the spec the witness serves at https://api.headlessoracle.com/v1/witness/spec
 (the served spec is authoritative; v0.5 adds optional accounts to
 [v0.4](docs/WITNESS_SPEC_v0.4.md) and changes nothing a verifier checks).
-Use `https://api.headlessoracle.com` as the witness base URL: the same paths
-on `https://headlessoracle.com` are not served yet.
+Both `https://api.headlessoracle.com` and `https://headlessoracle.com` serve
+the witness paths (checked 9 Oct 2026, below); the spec names
+`https://api.headlessoracle.com` as the base URL.
 
 **What has been exercised, and what has not.** This client is tested against
 a local stub of the spec (`test/witness-stub.ts`), and was run by hand on
 7 Oct 2026 against the witness's own source served locally (`wrangler dev`):
 anonymous and account-key checkpoints, `verify --witness` with a pinned key,
 402 `payment_required`, 403 `witness_plan_required`, the anonymous-cap 503 and
-the account 429 `quota_exceeded`. It has **not** been run against the
-production endpoint, and no production POST of a checkpoint has succeeded
-yet. This README does not claim the live endpoint works.
+the account 429 `quota_exceeded`.
+
+On 9 Oct 2026 the 0.5.0 client code (packed from this repository and
+installed in a clean directory) was run against production, anonymously,
+with no account key:
+
+- Two one-receipt chains were made with `chirindo proxy` around the mock MCP
+  server in `examples/observe-only-agent/`. `chirindo checkpoint` sent one
+  to `https://api.headlessoracle.com` and the other to
+  `https://headlessoracle.com`; each POST was accepted and returned a signed
+  receipt (`witness.checkpoint/1`, `public_key_id` `key_2026_v1`), written
+  to the sidecar.
+- The witness key was taken from `GET /v5/keys` (both hosts returned the
+  same key) and pinned. `chirindo verify --key ... --witness <host>
+  --witness-key <pinned>` read `VALID` and `WITNESSED through count 1` for
+  both chains against both hosts, each host returning the receipt the other
+  host stored, so the two hosts read one store.
+- One byte of a chain changed (one hex digit of `event.args_hash`): verify
+  read `TAMPERED — entry 0: request_commitment mismatch`, exit 1. That edit
+  is caught by the chain itself; the run did not exercise a witness-only
+  detection (a cut-off tail or a re-signed rewrite) against production.
+  With a wrong pinned witness key, verify read `TAMPERED — witness receipt
+  at count 1 invalid`, exit 1.
+- `GET /v1/witness/checkpoints?kid=...&session_id=...` returned the stored
+  receipt on both hosts.
+
+Not exercised against production: account keys, the 402 paid path, the
+403 and 401 key refusals, the anonymous daily cap (503) and the account
+quota (429), rate limits, fork receipts, multi-page `next_after` reads,
+checkpoints from a long-running proxy (`--checkpoint-every`, the shutdown
+checkpoint), and a key rotation.
 
 ```
 # checkpoint the head of a chain, optionally witnessed
@@ -394,6 +426,27 @@ software. It is independent of the operator, not of Headless Oracle. Anyone
 who knows a (`kid`, `session_id`) pair can read that session's checkpoint
 counts and times. No arguments, results or records are ever sent to the
 witness.
+
+### Showing a gate ran before an action
+
+A receipt's `gate_receipt` (in its `gate` object) is its own `entry_hash`.
+Outside evidence about it says these things and no more:
+
+1. **A witness receipt.** A witnessed checkpoint whose `count` covers the
+   gate receipt's entry is the witness's signed statement that it received
+   that checkpoint at `received_at`, on the witness's clock. It says nothing
+   about whether the gate's contents are true or whether the action was
+   authorized.
+2. **The transaction itself.** Where the action is an on-chain transaction,
+   the strongest ordering evidence is to carry the gate receipt's
+   `entry_hash` in the transaction itself, so the blockchain orders them
+   without trusting any clock.
+3. **Refusals.** A witness also records refusals (DENY receipts, once a
+   checkpoint covers them), which leave nothing on-chain.
+
+The served spec's `honest_limits` member
+(https://api.headlessoracle.com/v1/witness/spec) states what a witness
+receipt does and does not attest.
 
 ## Getting started
 
@@ -600,11 +653,13 @@ after N denials).
   implementation. (Harness: `conformance/verify-harness/`.) This is
   deliberately **not** the claim that a published package "passes a
   conformance suite". That claim requires a re-verification run against
-  the published artifact, and no such run has been made. `0.4.0` is the
-  current published version (2026-08-07, read from the registry on
-  2026-10-07) and has no witness commands; this tree is `0.5.0` and is not
-  published. Everything above was verified against the source tree, not
-  against the tarball the registry serves.
+  the published artifact, and no such run has been made. Published
+  versions and their dates are listed on npm
+  (https://www.npmjs.com/package/@headlessoracle/chirindo?activeTab=versions).
+  From 0.5.1 on, each release is published from its tag, and the release
+  notes record a file-by-file comparison of the published tarball with that
+  tag. Everything above was verified against the source tree, not against
+  the tarball the registry serves.
 - **Live fetch/verify, end-to-end.** The verify path was exercised by
   hand against the live published JWKS over HTTPS, and all three verdicts
   behaved as specified: a well-formed chain resolved its key and returned

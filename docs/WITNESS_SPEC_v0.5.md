@@ -9,7 +9,9 @@ Wire contract between the Headless Oracle witness service and the chirindo clien
 ## Purpose
 An operator sends signed chain checkpoints to the witness, which records each one and signs a receipt saying when it saw it. The witness attests only "at time T, I received this checkpoint, validly signed by the key with this thumbprint". It does not attest who owns the key, nor that the records are true.
 
-Base URL: `https://api.headlessoracle.com`. https://headlessoracle.com serves the same paths once its route for /v1/witness/\* is deployed.
+Base URL: `https://api.headlessoracle.com`. https://headlessoracle.com serves the same paths.
+
+> *Editorial correction to this public edition, 9 Oct 2026:* the line above previously read "https://headlessoracle.com serves the same paths once its route for /v1/witness/\* is deployed." Both hosts served the witness paths when checked on 9 Oct 2026 (an anonymous checkpoint POST accepted on each, and `GET /v1/witness/spec` byte-identical on both). This changes nothing a verifier checks.
 
 ## 1. The checkpoint (unchanged, produced by chirindo's vendored recorder)
 `SignedCheckpoint` from `src/vendor/recorder/record.ts`: `{ v, type:"checkpoint", session_id, count, last_entry_hash, ts, kid, sig }`, signed exactly as `Chain.checkpoint()` in `src/vendor/recorder/chain.ts` does. The served spec states it as:
