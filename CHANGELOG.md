@@ -5,6 +5,22 @@ Published versions and their dates are listed on npm
 Releases before 0.5.1 have no entry here; their notes are their commit
 messages.
 
+## Unreleased
+
+- Corrects the 0.5.1 README and the 0.5.1 entry below, which say
+  `gate_receipt` is the receipt's entry hash. It is not: `gate_receipt` (in
+  the receipt's `gate` object) is the hash of the receipt computed while
+  `gate_receipt` still held the placeholder `"self"`. The entry hash is
+  `"sha256:" + hex(SHA-256(JCS(record without "sig")))`, the value the next
+  record's `prev_hash` carries, and that computed value is what ordering
+  evidence should carry. The README's field notes and "Showing a gate ran
+  before an action" now say so; the 0.5.1 entry is left as published.
+- New `examples/ordering-evidence/`: an ALLOW receipt and a DENY receipt,
+  each with a checkpoint witnessed on production, a Base Sepolia payment
+  whose EIP-3009 nonce is the ALLOW receipt's entry hash, and an offline
+  checker (`check.mjs`, Node built-ins only) with one-byte failure tests.
+  Not part of the npm package.
+
 ## 0.5.1 — 2026-10-09
 
 Docs and package metadata only. No behaviour change: `src/` and `test/` are

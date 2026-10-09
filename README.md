@@ -138,9 +138,13 @@ Field notes:
   verifier, not `JSON.stringify`).
 - **`gate.request_commitment`** MUST equal the top-level
   `request_commitment` (the continuity invariant); **`gate.gate_receipt`**
-  is the receipt's own `entry_hash`: the receipt anchors to its own chain,
-  and an outside time for it comes from a witnessed checkpoint whose
-  `count` covers that entry (see
+  is the hash of the receipt computed while `gate_receipt` still held the
+  placeholder `"self"`; it is not the receipt's entry hash. The entry hash
+  is computed from the signed record without `sig`,
+  `"sha256:" + hex(SHA-256(JCS(record without "sig")))` (the value the next
+  record's `prev_hash` carries), and that computed value is what ordering
+  evidence should carry. An outside time for the receipt comes from a
+  witnessed checkpoint whose `count` covers that entry (see
   [Showing a gate ran before an action](#showing-a-gate-ran-before-an-action)).
 - **`jwks_uri`** (optional) names where this receipt's signing key is
   published; it is inside the signed bytes, so the operator commits to it.
@@ -429,8 +433,12 @@ witness.
 
 ### Showing a gate ran before an action
 
-A receipt's `gate_receipt` (in its `gate` object) is its own `entry_hash`.
-Outside evidence about it says these things and no more:
+A receipt's `gate_receipt` (in its `gate` object) is the hash of the receipt
+computed while `gate_receipt` still held the placeholder `"self"`; it is not
+the receipt's entry hash. The entry hash is computed from the signed record
+without `sig`, `"sha256:" + hex(SHA-256(JCS(record without "sig")))`, and that
+computed value is what ordering evidence should carry. Outside evidence about
+a receipt says these things and no more:
 
 1. **A witness receipt.** A witnessed checkpoint whose `count` covers the
    gate receipt's entry is the witness's signed statement that it received
@@ -438,15 +446,18 @@ Outside evidence about it says these things and no more:
    about whether the gate's contents are true or whether the action was
    authorized.
 2. **The transaction itself.** Where the action is an on-chain transaction,
-   the strongest ordering evidence is to carry the gate receipt's
-   `entry_hash` in the transaction itself, so the blockchain orders them
-   without trusting any clock.
+   the strongest ordering evidence is to carry the gate receipt's entry
+   hash, computed as above, in the transaction itself, so the blockchain
+   orders them without trusting any clock.
 3. **Refusals.** A witness also records refusals (DENY receipts, once a
    checkpoint covers them), which leave nothing on-chain.
 
 The served spec's `honest_limits` member
 (https://api.headlessoracle.com/v1/witness/spec) states what a witness
 receipt does and does not attest.
+
+A worked example of all three, run against production with an offline
+checker, is in [`examples/ordering-evidence/`](examples/ordering-evidence/).
 
 ## Getting started
 
