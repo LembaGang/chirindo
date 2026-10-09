@@ -1,0 +1,6 @@
+{
+  "kid": "D8WTDAY8BnSSusV5d-jWRKXEatX7-8iWQm4txYYYJ9U",
+  "alg": "ed25519",
+  "public_key_b64url": "yTfM4JDuZh6f2UHd3ulop1mAz2xoa-_njkFpOnglY_c",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAyTfM4JDuZh6f2UHd3ulop1mAz2xoa+/njkFpOnglY/c=\n-----END PUBLIC KEY-----\n"
+}

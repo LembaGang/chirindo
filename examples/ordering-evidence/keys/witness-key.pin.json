@@ -1,0 +1,8 @@
+{
+  "source_url": "https://api.headlessoracle.com/v5/keys",
+  "fetched_at": "2026-10-09T13:03:22Z",
+  "key_id": "key_2026_v1",
+  "public_key_hex": "03dc27993a2c90856cdeb45e228ac065f18f69f0933c917b2336c1e75712f178",
+  "sha256_of_raw_32_key_bytes": "c9ea3bc503e2b8ef4b260f78324313c1b0b07f25cdfd95a04a8b900e2a00e158",
+  "response_file": "v5-keys.response.json"
+}

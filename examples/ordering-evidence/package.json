@@ -1,0 +1,9 @@
+{
+  "name": "chirindo-ordering-evidence",
+  "private": true,
+  "type": "module",
+  "description": "Worked example: a gate receipt, its witnessed checkpoint, and a Base Sepolia payment whose nonce is the receipt entry hash. check.mjs uses Node built-ins only; viem is used only by the scripts that build and send the Case A transaction.",
+  "devDependencies": {
+    "viem": "2.56.9"
+  }
+}

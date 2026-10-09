@@ -1,0 +1,21 @@
+{
+  "rpc_url": "https://sepolia.base.org",
+  "chain_id": "0x14a34",
+  "head_block_at_fetch": {
+    "number": "0x2dacf8a",
+    "fetched_at": "2026-10-09T14:45:09.150Z"
+  },
+  "depth_blocks": 132,
+  "transaction": {
+    "method": "eth_getTransactionByHash",
+    "fetched_at": "2026-10-09T14:45:09.847Z"
+  },
+  "receipt": {
+    "method": "eth_getTransactionReceipt",
+    "fetched_at": "2026-10-09T14:45:10.269Z"
+  },
+  "block": {
+    "method": "eth_getBlockByNumber(<receipt blockNumber>, false)",
+    "fetched_at": "2026-10-09T14:45:10.614Z"
+  }
+}

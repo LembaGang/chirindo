@@ -1,0 +1,15 @@
+{
+  "rpc_url": "https://sepolia.base.org",
+  "transaction": {
+    "method": "eth_getTransactionByHash",
+    "fetched_at": "2026-10-09T14:40:43.705Z"
+  },
+  "receipt": {
+    "method": "eth_getTransactionReceipt",
+    "fetched_at": "2026-10-09T14:40:44.116Z"
+  },
+  "block": {
+    "method": "eth_getBlockByNumber(<receipt blockNumber>, false)",
+    "fetched_at": "2026-10-09T14:40:44.529Z"
+  }
+}

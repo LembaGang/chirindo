@@ -1,0 +1,8 @@
+{
+  "case": "b",
+  "description": "DENY: the gate refused mock_swap; nothing was forwarded and no transaction exists.",
+  "session_id": "ordering-evidence-case-b-1",
+  "hash_chain": "ordering-evidence-case-b-1.jsonl",
+  "witness_sidecar": "ordering-evidence-case-b-1.jsonl.witness.ndjson",
+  "expect_decision": "deny"
+}

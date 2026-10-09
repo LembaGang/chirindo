@@ -1,0 +1,36 @@
+{
+  "case": "a",
+  "description": "ALLOW: the gate forwarded mock_swap and wrote the receipt after the downstream answered; a separate Base Sepolia payment carries the receipt's entry hash as its EIP-3009 nonce.",
+  "session_id": "ordering-evidence-case-a-1",
+  "hash_chain": "ordering-evidence-case-a-1.jsonl",
+  "witness_sidecar": "ordering-evidence-case-a-1.jsonl.witness.ndjson",
+  "expect_decision": "allow",
+  "cited_seq": 0,
+  "transaction": {
+    "chain_id": 84532,
+    "rpc_url": "https://sepolia.base.org",
+    "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "payer": "0xE65E3dE1493171dCF0A706a3f407d7DdB38C5673",
+    "pay_to": "0xd8e1d2Faf5e4509EE295C50E0f5E369e71861215",
+    "settled_by": "https://x402.org/facilitator",
+    "tx_hash": "0x30ca156899828709dac13ade34a3b2f2689bc9f2eb7690467a49c2fcaed55ce3",
+    "explorer": "https://sepolia.basescan.org/tx/0x30ca156899828709dac13ade34a3b2f2689bc9f2eb7690467a49c2fcaed55ce3",
+    "tx_file": "rpc/transaction.sealed.json",
+    "receipt_file": "rpc/receipt.sealed.json",
+    "block_file": "rpc/block.sealed.json",
+    "fetch_log": "rpc/fetched.sealed.json",
+    "facilitator_files": [
+      "facilitator/request.json",
+      "facilitator/verify.response.json",
+      "facilitator/settle.response.json",
+      "facilitator/fetched.json"
+    ],
+    "preseal": {
+      "note": "Fetched about 0.4 s after inclusion, before the block was sealed (block hash null / zero). Kept unedited; check.mjs confirms they agree with the sealed copies on tx hash, input, status and the AuthorizationUsed log.",
+      "tx_file": "rpc/transaction.json",
+      "receipt_file": "rpc/receipt.json",
+      "block_file": "rpc/block.json",
+      "fetch_log": "rpc/fetched.json"
+    }
+  }
+}

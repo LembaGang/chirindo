@@ -1,0 +1,13 @@
+{
+  "facilitator": "https://x402.org/facilitator",
+  "verify": {
+    "http_status": 200,
+    "requested_at": "2026-10-09T14:40:41.286Z",
+    "received_at": "2026-10-09T14:40:42.375Z"
+  },
+  "settle": {
+    "http_status": 200,
+    "requested_at": "2026-10-09T14:40:42.377Z",
+    "received_at": "2026-10-09T14:40:43.294Z"
+  }
+}
