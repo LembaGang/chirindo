@@ -10,8 +10,12 @@
 //   node examples/ordering-evidence/case-a/pay.mjs --dry-run   # build + sign + local checks, contact no facilitator
 //   node examples/ordering-evidence/case-a/pay.mjs             # POST /verify; only if valid, POST /settle; save the evidence
 //
-// The payer's secret is read from a file outside the repository and is never
-// printed or sent; only the signed authorization leaves the machine.
+// The payer's secret is read from the file named by CHIRINDO_Y2_PAYER_FILE
+// (outside the repository) and is never printed or sent; only the signed
+// authorization leaves the machine.
+//
+// Edited after the run: the wait for a sealed block before saving, and reading
+// the payer file path from the environment. This version was not re-run.
 
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -21,8 +25,13 @@ import { createPublicClient, http, parseAbi, recoverTypedDataAddress } from "vie
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
 
+const { env } = process;
+const PAYER_SECRET_FILE = env.CHIRINDO_Y2_PAYER_FILE;
+if (!PAYER_SECRET_FILE) {
+  process.stderr.write("[pay] CHIRINDO_Y2_PAYER_FILE is not set: set it to the file (outside this repository) holding the payer's hex secret\n");
+  process.exit(2);
+}
 const HERE = dirname(fileURLToPath(import.meta.url));
-const PAYER_SECRET_FILE = "C:/Users/User/.chirindo-y2/eth-throwaway.hex";
 const PAY_TO = "0xd8e1d2Faf5e4509EE295C50E0f5E369e71861215"; // second throwaway address (address only)
 const FACILITATOR = "https://x402.org/facilitator";
 const RPC_URL = "https://sepolia.base.org";

@@ -36,7 +36,7 @@ receipt's `gate_receipt` is `sha256:998f342e…5e74`.
 
 | Path | What it is |
 |---|---|
-| `client.mjs` | A minimal MCP client: starts `node dist/cli.js proxy` (this repository's gate, with an explicit `--dir`) in front of `examples/observe-only-agent/downstream-mcp-server.mjs`, makes one `tools/call` of `mock_swap`, and exits. |
+| `client.mjs` | A minimal MCP client: starts `node dist/cli.js proxy` (this repository's gate, with an explicit `--dir` taken from `CHIRINDO_Y2_OPERATOR_DIR`) in front of `examples/observe-only-agent/downstream-mcp-server.mjs`, makes one `tools/call` of `mock_swap`, and exits. Edited after the runs only to read that directory from the environment instead of a fixed path; not re-run. |
 | `keys/operator-identity.json`, `keys/operator-jwks.json` | The example operator's public key (identity file without its secret, and the JWK from `chirindo export-jwks`). The secret is not in this repository. |
 | `keys/witness-key.jwk.json` | The witness public key, pinned from `https://api.headlessoracle.com/v5/keys` (`key_2026_v1`). |
 | `keys/witness-key.pin.json`, `keys/v5-keys.response.json` | Where and when that key was fetched, the SHA-256 of its 32 raw bytes, and the response it was taken from. |
@@ -46,7 +46,8 @@ receipt's `gate_receipt` is `sha256:998f342e…5e74`.
 | `case-a/facilitator/` | The x402 payment request sent to the facilitator, its `/verify` and `/settle` responses, and their times. |
 | `case-a/rpc/*.sealed.json` | The transaction, its receipt and its block as `https://sepolia.base.org` returned them once the block was sealed and at least 5 blocks deep. These are the copies `check.mjs` checks. |
 | `case-a/rpc/transaction.json`, `receipt.json`, `block.json`, `fetched.json` | The first snapshots, kept unedited (see below). |
-| `case-a/pay.mjs` | The script that built the payment and settled it (uses `viem`, a dev dependency of this directory only). |
+| `case-a/pay.mjs` | The script that built the payment and settled it (uses `viem`, a dev dependency of this directory only). pay.mjs is shown as edited after the run: the wait for a sealed block, reading the payer file from `CHIRINDO_Y2_PAYER_FILE`, and one comment's wording were changed afterwards, and it was not re-run. fetch-sealed.mjs is the script that fetched the sealed copies the checker reads. |
+| `case-a/fetch-sealed.mjs` | The text that fetched `rpc/*.sealed.json`, committed as it ran: it was run inline with `node --input-type=module -e` from `case-a/`, so its output paths are relative to that directory. |
 | `case-a/case.json`, `case-b/case.json` | Which file is which, for `check.mjs`. |
 | `case-b/policy.json` | `{"deny":[{"tool":"mock_swap"}]}`: the gate refuses the call. |
 | `case-b/ordering-evidence-case-b-1.jsonl`, `…witness.ndjson` | One signed DENY receipt, and the witnessed checkpoint covering it. |

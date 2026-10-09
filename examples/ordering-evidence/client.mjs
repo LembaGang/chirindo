@@ -10,14 +10,21 @@
 // signed receipt to --chain: ALLOW after the downstream answered, or DENY with
 // nothing forwarded.
 //
-// The identity dir is always passed explicitly: the gate's default data dir in
-// the repo root holds a different, published operator key.
+// The identity dir is always passed explicitly, from CHIRINDO_Y2_OPERATOR_DIR
+// (a directory made with `chirindo init --dir`, outside the repository): the
+// gate's default data dir in the repo root holds a different, published
+// operator key.
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 
-const OPERATOR_DIR = "C:/Users/User/.chirindo-y2/operator";
+const { env } = process;
+const OPERATOR_DIR = env.CHIRINDO_Y2_OPERATOR_DIR;
+if (!OPERATOR_DIR) {
+  process.stderr.write("[client] CHIRINDO_Y2_OPERATOR_DIR is not set: set it to the operator identity directory (made with `chirindo init --dir <dir>`, outside this repository)\n");
+  process.exit(2);
+}
 
 const { values } = parseArgs({
   options: {
