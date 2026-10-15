@@ -94,3 +94,40 @@ targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''(^|/)test/byte-invariance-payment-ref\.test\.ts$''']
 regexes = ['''^--6IM5l0OosLj9yWskISYhUA3n_3CURQkmrYMSha_ck$''']
+
+[[allowlists]]
+# examples/ordering-evidence, Case A (ALLOW): the gate's hash chain, one signed
+# receipt on line 1. Its `key_thumbprint` and the thumbprint inside its `iss`
+# ("urn:chirindo:key:<thumbprint>") are the RFC 7638 thumbprint of the example
+# operator's PUBLIC key, committed beside it in keys/operator-jwks.json (a
+# public JWK, no private "d" member) and keys/operator-identity.json (the
+# identity file without its secret, which is not in this repository).
+# sha256(JCS({crv,kty,x})) of that key reproduces this value. A verifier needs
+# it to match the receipt to its key, so it is public by design.
+description = "Ordering-evidence Case A receipt: RFC 7638 thumbprint of the example operator's public key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)examples/ordering-evidence/case-a/ordering-evidence-case-a-1\.jsonl$''']
+regexes = ['''^D8WTDAY8BnSSusV5d-jWRKXEatX7-8iWQm4txYYYJ9U$''']
+
+[[allowlists]]
+# examples/ordering-evidence, Case B (DENY): same operator key, same public
+# thumbprint in `key_thumbprint` and `iss` on line 1. Same rationale as Case A.
+description = "Ordering-evidence Case B receipt: RFC 7638 thumbprint of the example operator's public key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)examples/ordering-evidence/case-b/ordering-evidence-case-b-1\.jsonl$''']
+regexes = ['''^D8WTDAY8BnSSusV5d-jWRKXEatX7-8iWQm4txYYYJ9U$''']
+
+[[allowlists]]
+# examples/ordering-evidence: the pin for the witness PUBLIC key (key_2026_v1,
+# fetched from https://api.headlessoracle.com/v5/keys). Its
+# `sha256_of_raw_32_key_bytes` is the SHA-256 of the 32 public key bytes given
+# in the same file as `public_key_hex`; recomputing it reproduces this value.
+# A hash of a public key, published so a reader can check the pinned key, not a
+# credential.
+description = "Ordering-evidence witness key pin: SHA-256 of the witness public key bytes"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)examples/ordering-evidence/keys/witness-key\.pin\.json$''']
+regexes = ['''^c9ea3bc503e2b8ef4b260f78324313c1b0b07f25cdfd95a04a8b900e2a00e158$''']
