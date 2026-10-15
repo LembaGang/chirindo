@@ -7,7 +7,7 @@
 // receipt this gate writes carries:
 //
 //   gate.request_commitment == record.request_commitment   (continuity invariant)
-//   gate.gate_receipt       == record's own entry_hash      (self-anchored ref)
+//   gate.gate_receipt       == hash taken while it held "self"; NOT the entry_hash
 //   gate.gate_family        == "permit"                     (policy permit family)
 //   gate.result             == "act" | "halt"               (allow / deny)
 //
@@ -159,8 +159,8 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
 
   // We build the gate block such that:
   //   gate.request_commitment == record.request_commitment
-  // (the continuity invariant). The gate_receipt is a self-reference — for
-  // the spike, the receipt's own entry_hash, which a verifier can recompute.
+  // (the continuity invariant). gate_receipt is the hash taken while it held
+  // "self"; it is NOT the entry_hash (see the two-pass note below).
   // Productization: gate_receipt becomes a hash of an external pre-action
   // attestation bundle (resolved via the JWKS path), not the record itself.
   //
@@ -181,7 +181,7 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
     request_commitment: commitment,
     gate: {
       request_commitment: commitment,
-      gate_receipt: "self", // placeholder; rewritten below to the entry_hash
+      gate_receipt: "self", // placeholder; rewritten below (not to the entry_hash)
       gate_family: "permit",
       result: inputs.decision.kind === "allow" ? "act" : "halt",
     },
@@ -197,9 +197,9 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
     kid: inputs.identity.kid,
   };
 
-  // Two-pass: first canonicalize+hash with placeholder gate_receipt to
-  // derive the record's entry_hash; then rewrite gate_receipt to that hash
-  // (so the receipt anchors to itself); then re-canonicalize + sign.
+  // Two-pass: hash the record with gate_receipt "self", write that hash into
+  // gate_receipt, then re-canonicalize + sign. That rewrite changes the bytes,
+  // so the entry_hash is entryHashOfCanonical(jcsBytes(content)), not this.
   const provisionalEntryHash = entryHashOfCanonical(jcsBytes(partial));
   const content: RecordContent = {
     ...partial,

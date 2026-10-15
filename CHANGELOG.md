@@ -5,7 +5,14 @@ Published versions and their dates are listed on npm
 Releases before 0.5.1 have no entry here; their notes are their commit
 messages.
 
-## Unreleased
+## 0.5.2 — 2026-10-15
+
+Docs only. `test/` is unchanged from 0.5.1 and `src/` changes only in
+comments. In the package, `README.md`, `dist/receipt.js`,
+`dist/receipt.js.map` and the version in `package.json` differ from 0.5.1.
+This package is packed from an LF checkout, so `README.md`, `LICENSE`,
+`NOTICE`, `package.json` and `dist/cli.js` no longer carry the CR line
+endings 0.5.1 had.
 
 - Corrects the 0.5.1 README and the 0.5.1 entry below, which say
   `gate_receipt` is the receipt's entry hash. It is not: `gate_receipt` (in
@@ -15,6 +22,10 @@ messages.
   record's `prev_hash` carries, and that computed value is what ordering
   evidence should carry. The README's field notes and "Showing a gate ran
   before an action" now say so; the 0.5.1 entry is left as published.
+- `src/receipt.ts` comments on `gate_receipt` now match the README.
+- Corrects the 0.5.1 publication record below, which says `chirindo --help`
+  prints CRLF. It does not: JavaScript reads a CRLF inside a template
+  literal as LF, so the 0.5.1 help text was already printed with LF.
 - New `examples/ordering-evidence/`: an ALLOW receipt and a DENY receipt,
   each with a checkpoint witnessed on production, a Base Sepolia payment
   whose EIP-3009 nonce is the ALLOW receipt's entry hash, and an offline
