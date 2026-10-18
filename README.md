@@ -86,10 +86,37 @@ forwarded:
   in it and one `-32600` error (MCP removed batching in its 2025-06-18
   revision);
 - a line that is not JSON (`-32700`), or that has a carriage return
-  inside it or a member name twice in one object (`-32600`). These get
-  no receipt.
+  inside it (`-32600`);
+- a message that names a member twice in one object, or whose top-level
+  members include `jsonrpc`, `id`, `method` or `params` in another case
+  (`"Method"`, or `"paramſ"` with U+017F), or that has two members
+  differing only in case at the top level or in `params`; and a
+  `tools/call` whose `params` holds `name`, `arguments` or `_meta` in
+  another case: `-32600` with `id: null`. A decoder that matches member
+  names without regard to case, as Go's `encoding/json` does for a
+  struct, could read these differently from the gate;
+- a `tools/call` with an integer outside JavaScript's safe range (beyond
+  2^53 - 1), or a number too large for a double (such as `1e400`),
+  anywhere in it: `-32600` with `id: null`. The gate forwards an allowed
+  call re-encoded from its parsed value, which would change such a
+  number (`1e400` would become `null`);
+- a `tools/call` with the `id` of a `tools/call` still waiting for its
+  result: `-32600` with that id;
+- a `tools/call` whose `params` is not an object, or whose `params.name`
+  is not a non-empty string: `-32602` with its id; its DENY receipt names
+  the tool `""`.
 
-Each refusal writes one line to stderr.
+Each refusal writes one line to stderr. Every refused line that is a
+`tools/call`, or that a case-insensitive decoder could read as one, gets
+one DENY receipt (a batch, one per such element); lines that are not
+JSON or have a carriage return inside get none, nor does a `tools/call`
+whose arguments hold a number too large for a double, which no receipt
+can hash (its stderr line says so). A refusal's DENY receipt
+reads like a policy denial (`decision: "deny"`, `decision_source:
+"config"`): the reason is in the stderr line only. Member names inside
+`params.arguments` and `params._meta` are not checked for case; the
+receipt's `args_hash` covers the arguments as the gate parsed them,
+which is what it forwards.
 
 ## The signed receipt
 

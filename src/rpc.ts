@@ -12,8 +12,11 @@
 // fails to JSON-parse is passed to the client raw with a warning to stderr.
 // Some client lines are refused with a JSON-RPC error and never forwarded
 // (src/proxy.ts): a line that is not JSON, carries a carriage return inside
-// it, names a member twice in one object, or is a batch, and a tools/call
-// without a usable id.
+// it, names a member twice in one object, has member names a case-insensitive
+// reader could take for others, or is a batch; and a tools/call without a
+// usable id, with an integer outside the safe range or a number too large for
+// a double, with an id already in flight, or without a non-empty string
+// params.name.
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -82,11 +85,39 @@ export function isValidRequestId(id: unknown): id is string | number {
 // JSON-RPC 2.0 error codes the gate answers with when it refuses a client line.
 export const PARSE_ERROR = -32700;
 export const INVALID_REQUEST = -32600;
+export const INVALID_PARAMS = -32602;
 
-// An error response for a line whose id could not be used. JSON-RPC 2.0 sets
-// the id to null when it cannot be read from the request.
-export function errorResponse(code: number, message: string): JsonRpcResponse {
-  return { jsonrpc: "2.0", id: null, error: { code, message } };
+// An error response. JSON-RPC 2.0 sets the id to null when it cannot be read
+// from the request; a refusal that can name the request passes its id.
+export function errorResponse(
+  code: number,
+  message: string,
+  id: string | number | null = null,
+): JsonRpcResponse {
+  return { jsonrpc: "2.0", id, error: { code, message } };
+}
+
+// A JSON object, as JSON.parse returns one (not null, not an array).
+export function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+// Whether a value JSON.parse returned holds a number that is not finite. A
+// number token too large for a double (1e400) parses as Infinity, which
+// JSON.stringify writes as null and which RFC 8785 JCS cannot encode.
+export function hasNonFiniteNumber(value: unknown): boolean {
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const v = stack.pop();
+    if (typeof v === "number") {
+      if (!Number.isFinite(v)) return true;
+    } else if (Array.isArray(v)) {
+      for (const item of v) stack.push(item);
+    } else if (typeof v === "object" && v !== null) {
+      for (const key of Object.keys(v)) stack.push((v as Record<string, unknown>)[key]);
+    }
+  }
+  return false;
 }
 
 export function isResponse(m: unknown): m is JsonRpcResponse {

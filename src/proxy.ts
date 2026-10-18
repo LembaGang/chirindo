@@ -28,7 +28,27 @@
 //   - a JSON array (a JSON-RPC batch): a DENY receipt for each tools/call in
 //     it and one -32600 error with id null. MCP removed batching in 2025-06-18;
 //   - a line that is not JSON: -32700; a line with a carriage return inside
-//     it, or with a member name twice in one object: -32600.
+//     it, or with a member name twice in one object: -32600;
+//   - a message with a top-level member that is jsonrpc, id, method or params
+//     in another case ("Method", "paramſ"), or with two top-level members or
+//     two params members that differ only in case, and a tools/call whose
+//     params has name, arguments or _meta in another case: -32600 with id
+//     null (src/member-names.ts says why);
+//   - a tools/call with an integer outside the JavaScript safe range, or a
+//     number too large for a double (1e400), anywhere in it: -32600 with id
+//     null (an allowed call is forwarded re-encoded from JSON.parse's value,
+//     which would change that number; 1e400 would become null);
+//   - a tools/call whose id is already in flight: -32600 with that id;
+//   - a tools/call whose params is not an object, or whose params.name is not
+//     a non-empty string: -32602 with its id.
+//
+// Every refused line that is a tools/call, or that a reader matching member
+// names without regard to case could take for one, also gets a DENY receipt
+// (a batch, one per such element); a line that is not JSON or has a carriage
+// return inside it gets none, nor does a tools/call whose arguments hold a
+// number too large for a double, which no receipt can hash. A refusal's
+// DENY receipt reads like a policy deny (decision_source "config"): the
+// reason is in the stderr line only.
 //
 // A tools/call is recognised by its method alone (src/rpc.ts isToolsCall).
 //
@@ -41,13 +61,23 @@ import type { LoadedFullIdentity } from "./vendor/recorder/index.js";
 import { type Policy, type PolicyDecision, evaluate } from "./policy.js";
 import { ProxyCheckpointer } from "./checkpoint.js";
 import { appendReceipt, type GateDecision } from "./receipt.js";
-import { findDuplicateMember } from "./vendor/recorder/index.js";
+import { findDuplicateMember, findUnsafeInteger } from "./vendor/recorder/index.js";
 import {
+  ENVELOPE_MEMBERS,
+  TOOLS_CALL_PARAMS_MEMBERS,
+  caseVariant,
+  foldCollision,
+  toolsCallClaims,
+} from "./member-names.js";
+import {
+  INVALID_PARAMS,
   INVALID_REQUEST,
   PARSE_ERROR,
   denyToolResult,
   encodeMessage,
   errorResponse,
+  hasNonFiniteNumber,
+  isPlainObject,
   isToolsCall,
   isValidRequestId,
   splitLines,
@@ -163,27 +193,90 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
         continue;
       }
 
+      if (Array.isArray(parsed)) {
+        refuseBatch(line, parsed);
+        continue;
+      }
+      if (!isPlainObject(parsed)) {
+        downstream.stdin.write(line + "\n");
+        continue;
+      }
+
       // A member name twice in one object: JSON.parse keeps the last value,
       // another parser may keep the first (a "method" of tools/call, say).
       const duplicate = findDuplicateMember(line);
       if (duplicate !== null) {
-        refuseLine(
-          INVALID_REQUEST,
+        refuseMessage(
+          line,
+          parsed,
           "Invalid Request: a member name appears twice in one object",
           `with a duplicate member ${JSON.stringify(duplicate.detail)}`,
         );
         continue;
       }
 
-      if (Array.isArray(parsed)) {
-        refuseBatch(parsed);
-      } else if (isToolsCall(parsed)) {
-        gateToolsCall(parsed);
+      // Member names that a reader matching names without regard to case
+      // could take for others: "Method" for method, say.
+      const caseClash = caseProblem(parsed);
+      if (caseClash !== null) {
+        refuseMessage(
+          line,
+          parsed,
+          "Invalid Request: member names that differ only in case",
+          caseClash,
+        );
+        continue;
+      }
+
+      if (isToolsCall(parsed)) {
+        gateToolsCall(line, parsed);
       } else {
         downstream.stdin.write(line + "\n");
       }
     }
   };
+
+  // The member names of a message, at the top level and in params, that a
+  // reader matching names without regard to case could read differently from
+  // JSON.parse (src/member-names.ts). Returns the stderr wording, or null.
+  // Members below params (inside arguments or _meta) are not checked.
+  function caseProblem(msg: Record<string, unknown>): string | null {
+    const keys = Object.keys(msg);
+    const variant = caseVariant(keys, ENVELOPE_MEMBERS);
+    if (variant !== null) {
+      return `with the member ${quote(variant.key)}, which is ${quote(variant.of)} in another case`;
+    }
+    const pair = foldCollision(keys);
+    if (pair !== null) {
+      return `with the members ${quote(pair[0])} and ${quote(pair[1])}, which differ only in case`;
+    }
+    const params = msg["params"];
+    if (!isPlainObject(params)) return null;
+    const paramKeys = Object.keys(params);
+    if (isToolsCall(msg)) {
+      const paramVariant = caseVariant(paramKeys, TOOLS_CALL_PARAMS_MEMBERS);
+      if (paramVariant !== null) {
+        return `with the params member ${quote(paramVariant.key)}, which is ${quote(paramVariant.of)} in another case`;
+      }
+    }
+    const paramPair = foldCollision(paramKeys);
+    if (paramPair !== null) {
+      return `with the params members ${quote(paramPair[0])} and ${quote(paramPair[1])}, which differ only in case`;
+    }
+    return null;
+  }
+
+  // Text from the client in a stderr line: JSON-quoted (one line) and cut at
+  // 64 characters.
+  function quote(text: string): string {
+    return JSON.stringify(text.length > 64 ? `${text.slice(0, 64)}...` : text);
+  }
+
+  // A scanner message that quotes a number token from the client, cut at 120
+  // characters.
+  function short(text: string): string {
+    return text.length > 120 ? `${text.slice(0, 120)}...` : text;
+  }
 
   // Tool name and arguments per MCP spec §"Calling Tools". Arguments stay the
   // structured value: the receipt's args_hash is RFC 8785 JCS over it, so we
@@ -197,12 +290,66 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
   }
 
   // Every tools/call passes here, whatever its id. Only a string or integer
-  // id reaches handleToolsCall (policy, then forward or deny). Any other is
-  // refused before policy is consulted: DENY receipt, never forwarded.
-  function gateToolsCall(msg: Record<string, unknown>): void {
+  // id reaches handleToolsCall (policy, then forward or deny), and only when
+  // the call holds no integer outside the safe range and no number too large
+  // for a double, its id is not already in flight, and params.name is a
+  // non-empty string. Anything else is refused before policy is consulted:
+  // DENY receipt, never forwarded.
+  function gateToolsCall(line: string, msg: Record<string, unknown>): void {
     const hasId = Object.prototype.hasOwnProperty.call(msg, "id");
     const id = msg["id"];
     if (hasId && isValidRequestId(id)) {
+      // JSON.parse has already rounded an integer outside the safe range, and
+      // an allowed call is forwarded re-encoded from its value, so the
+      // downstream would get another number than the client sent.
+      const unsafe = findUnsafeInteger(line);
+      if (unsafe !== null) {
+        refuseToolsCall(
+          msg,
+          INVALID_REQUEST,
+          "Invalid Request: an integer outside the JavaScript safe range",
+          null,
+          `has an integer outside the JavaScript safe range (${short(unsafe.detail)})`,
+        );
+        return;
+      }
+      // A number too large for a double (1e400) parses as Infinity: an
+      // allowed call would reach the downstream with null in its place, and
+      // its ALLOW receipt could not be written (JCS has no form for it).
+      if (hasNonFiniteNumber(msg)) {
+        refuseToolsCall(
+          msg,
+          INVALID_REQUEST,
+          "Invalid Request: a number too large for a double",
+          null,
+          "has a number too large for a double (JSON.parse reads it as Infinity)",
+        );
+        return;
+      }
+      // A second call with the id of one still in flight: the downstream's
+      // two answers could not be told apart, nor matched to their receipts.
+      if (pendingAllows.has(id)) {
+        refuseToolsCall(
+          msg,
+          INVALID_REQUEST,
+          "Invalid Request: a tools/call with this id is already in flight",
+          id,
+          `has the id ${JSON.stringify(id)} of a tools/call still in flight`,
+        );
+        return;
+      }
+      const params = msg["params"];
+      if (!isPlainObject(params) || typeof params["name"] !== "string" || params["name"] === "") {
+        refuseToolsCall(
+          msg,
+          INVALID_PARAMS,
+          "Invalid params: tools/call needs params with a non-empty string name",
+          id,
+          "has no params object with a non-empty string name",
+          "",
+        );
+        return;
+      }
       handleToolsCall(msg as unknown as JsonRpcRequest);
       return;
     }
@@ -219,13 +366,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
         ? "has a null id"
         : `has an id that is neither a string nor an integer (${kind})`;
     const { toolName, toolArgs } = toolOf(msg);
-    const written = writeReceiptSafely({
-      decisionForReceipt: { kind: "deny", reason: `tools/call ${problem}; refused (fail-closed)` },
-      server: deps.serverLabel,
-      toolName,
-      toolArgs,
-      toolResult: undefined,
-    });
+    const receipt = writeRefusalReceipt(toolName, toolArgs, `tools/call ${problem}`);
     // A message without an id is a notification: JSON-RPC 2.0 sends no reply.
     if (hasId) {
       deps.clientOut.write(
@@ -237,31 +378,81 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
     deps.log(
       `[proxy] REFUSE tool=${JSON.stringify(toolName)}: tools/call ${problem}; not forwarded; ` +
         `${hasId ? "-32600 sent" : "no reply (notification)"}; ` +
-        `DENY receipt ${written ? "written" : "NOT written"}`,
+        `DENY receipt ${receipt}`,
     );
   }
 
+  // The DENY receipt of a refused tools/call. Returns how it went, for the
+  // refusal's stderr line: "written", "NOT written" (the write failed and
+  // was logged), or not written because the arguments hold a number that no
+  // receipt can hash (JCS has no form for Infinity).
+  function writeRefusalReceipt(toolName: string, toolArgs: unknown, why: string): string {
+    if (hasNonFiniteNumber(toolArgs)) {
+      return "not written: its arguments hold a number too large for a double, which no receipt can hash";
+    }
+    const written = writeReceiptSafely({
+      decisionForReceipt: { kind: "deny", reason: `${why}; refused (fail-closed)` },
+      server: deps.serverLabel,
+      toolName,
+      toolArgs,
+      toolResult: undefined,
+    });
+    return written ? "written" : "NOT written";
+  }
+
+  // A tools/call refused after its id was found usable: a DENY receipt, the
+  // error with `replyId`, one stderr line. `toolName` replaces the name read
+  // from params when given.
+  function refuseToolsCall(
+    msg: Record<string, unknown>,
+    code: number,
+    message: string,
+    replyId: string | number | null,
+    problem: string,
+    toolName?: string,
+  ): void {
+    const tool = toolOf(msg);
+    const name = toolName ?? tool.toolName;
+    const receipt = writeRefusalReceipt(name, tool.toolArgs, `tools/call ${problem}`);
+    deps.clientOut.write(encodeMessage(errorResponse(code, message, replyId)));
+    deps.log(
+      `[proxy] REFUSE tool=${JSON.stringify(name)}: tools/call ${problem}; not forwarded; ` +
+        `${code} sent with id ${JSON.stringify(replyId)}; ` +
+        `DENY receipt ${receipt}`,
+    );
+  }
+
+  // A client message refused before the tools/call rules: -32600 with id null
+  // and one stderr line, plus a DENY receipt when the line holds a tools/call
+  // as a reader matching member names without regard to case could take it
+  // (src/member-names.ts toolsCallClaims).
+  function refuseMessage(
+    line: string,
+    msg: Record<string, unknown>,
+    message: string,
+    what: string,
+  ): void {
+    let receipt = "no receipt (not a tools/call)";
+    if (toolsCallClaims(line)[0] === true) {
+      const { toolName, toolArgs } = toolOf(msg);
+      receipt = `DENY receipt ${writeRefusalReceipt(toolName, toolArgs, `client line ${what}`)} (tool ${JSON.stringify(toolName)})`;
+    }
+    deps.clientOut.write(encodeMessage(errorResponse(INVALID_REQUEST, message)));
+    deps.log(`[proxy] REFUSE client line ${what}: not forwarded; ${INVALID_REQUEST} sent; ${receipt}`);
+  }
+
   // A JSON-RPC batch is never forwarded, whatever it holds: each tools/call in
-  // it gets a DENY receipt, and the client gets one -32600 error.
-  function refuseBatch(batch: unknown[]): void {
+  // it (as toolsCallClaims reads it) gets a DENY receipt, and the client gets
+  // one -32600 error.
+  function refuseBatch(line: string, batch: unknown[]): void {
+    const claims = toolsCallClaims(line);
     let calls = 0;
     let written = 0;
-    for (const element of batch) {
-      if (!isToolsCall(element)) continue;
+    for (const [k, element] of batch.entries()) {
+      if (claims[k] !== true) continue;
       calls += 1;
-      const { toolName, toolArgs } = toolOf(element);
-      if (
-        writeReceiptSafely({
-          decisionForReceipt: {
-            kind: "deny",
-            reason: "tools/call inside a JSON-RPC batch; batches are refused (fail-closed)",
-          },
-          server: deps.serverLabel,
-          toolName,
-          toolArgs,
-          toolResult: undefined,
-        })
-      ) {
+      const { toolName, toolArgs } = toolOf(element as { params?: unknown });
+      if (writeRefusalReceipt(toolName, toolArgs, "tools/call inside a JSON-RPC batch") === "written") {
         written += 1;
       }
     }
@@ -275,7 +466,7 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
     );
     deps.log(
       `[proxy] REFUSE JSON-RPC batch (${batch.length} elements, ${calls} tools/call): ` +
-        `not forwarded; -32600 sent; ${written} DENY receipt(s) written`,
+        `not forwarded; -32600 sent; ${written} of ${calls} DENY receipt(s) written`,
     );
   }
 

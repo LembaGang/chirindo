@@ -30,6 +30,7 @@ export type {
 export { jcs, jcsBytes } from "./canonicalize.js";
 export {
   findDuplicateMember,
+  findUnsafeInteger,
   strictJsonParse,
   StrictJsonParseError,
 } from "./strict-json.js";

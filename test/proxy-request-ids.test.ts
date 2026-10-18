@@ -364,7 +364,7 @@ describe("proxy: every tools/call is gated, whatever its id", () => {
     await gate.stop();
   });
 
-  it("a member name twice in one object, at any depth: -32600, not forwarded, no receipt", async () => {
+  it("a member name twice in one object, at any depth: -32600, not forwarded, a DENY receipt only when a method member says tools/call", async () => {
     const gate = await startGate(tmp, { deny: [{ tool: "mock_swap" }] });
     // JSON.parse keeps the last "method" (ping); a first-wins parser keeps tools/call.
     const dupMethod =
@@ -379,7 +379,10 @@ describe("proxy: every tools/call is gated, whatever its id", () => {
       expect((m as { id: unknown }).id).toBeNull();
       expect((m as { error: { code: number } }).error.code).toBe(-32600);
     }
-    expect(receipts(gate)).toHaveLength(0);
+    const recs = receipts(gate);
+    expect(recs).toHaveLength(1);
+    expectDenyReceipt(recs[0]!, "mock_swap");
+    expectChainValid(gate, tmp);
     expect(refuseLogs(gate)).toHaveLength(2);
     await gate.stop();
   });
@@ -427,7 +430,8 @@ describe("proxy: every tools/call is gated, whatever its id", () => {
     const gate = await startGate(tmp, { deny: [] });
     const initialized = '{"jsonrpc":"2.0","method":"notifications/initialized"}';
     const list = '{"jsonrpc":"2.0","id":5,"method":"tools/list","params":{}}';
-    // An integer past 2^53 is not refused: only duplicate member names are (C1 (e)).
+    // An integer past 2^53 in a line that is not a tools/call is not refused:
+    // the line is forwarded byte for byte.
     const big = '{"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"n":12345678901234567890}}';
     const received = await send(gate, [initialized, list, big]);
 

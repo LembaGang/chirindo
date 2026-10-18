@@ -102,9 +102,10 @@ function readString(text: string, start: number): { value: string; next: number 
 
 // Scan raw JSON text for unsafe integers and duplicate member names at ANY
 // depth. Throws StrictJsonParseError on the first violation; otherwise returns.
-// With `unsafeNumbers` false only duplicate member names are reported; number
-// tokens are still stepped over the same way, so the scan stays aligned.
-function validate(text: string, unsafeNumbers = true): void {
+// With `unsafeNumbers` false only duplicate member names are reported, and
+// with `duplicateMembers` false only unsafe integers; tokens are still
+// stepped over the same way, so the scan stays aligned.
+function validate(text: string, unsafeNumbers = true, duplicateMembers = true): void {
   const n = text.length;
   const stack: Frame[] = [];
   // In an object, the next string literal is a KEY when positioned right after
@@ -149,7 +150,7 @@ function validate(text: string, unsafeNumbers = true): void {
         const { value, next } = readString(text, i);
         const top = stack[stack.length - 1];
         if (expectKey && top !== undefined && top.kind === "object") {
-          if (top.keys.has(value)) {
+          if (duplicateMembers && top.keys.has(value)) {
             throw new StrictJsonParseError(
               "duplicate_member",
               `member "${value}" appears more than once in the same object`,
@@ -188,6 +189,21 @@ function validate(text: string, unsafeNumbers = true): void {
 export function findDuplicateMember(text: string): StrictJsonParseError | null {
   try {
     validate(text, false);
+    return null;
+  } catch (e) {
+    if (e instanceof StrictJsonParseError) return e;
+    throw e;
+  }
+}
+
+// The unsafe-integer half of the gate on its own: the proxy refuses a
+// tools/call carrying an integer outside the safe range anywhere in it, because
+// it forwards an allowed call re-encoded from JSON.parse's value, which would
+// change that integer. Returns the unsafe_number error, or null. `text` must
+// already be valid JSON.
+export function findUnsafeInteger(text: string): StrictJsonParseError | null {
+  try {
+    validate(text, true, false);
     return null;
   } catch (e) {
     if (e instanceof StrictJsonParseError) return e;
