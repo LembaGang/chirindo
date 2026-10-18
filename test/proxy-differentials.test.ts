@@ -8,20 +8,23 @@
 // are refused and never forwarded, each with one stderr line:
 //
 //   (a) a top-level member that is jsonrpc, id, method or params in another
-//       case: -32600 with id null, and a DENY receipt when the exact method or
-//       such a member says "tools/call";
+//       case: -32600, and a DENY receipt when the exact method or such a
+//       member says "tools/call";
 //   (b) a tools/call whose params has name, arguments or _meta in another
-//       case: -32600 with id null, DENY receipt;
+//       case: -32600, DENY receipt;
 //   (c) two top-level members, or two params members, that differ only in
-//       case: -32600 with id null, DENY receipt when it is a tools/call;
+//       case: -32600, DENY receipt when it is a tools/call;
 //   (d) a tools/call whose params is not an object, or whose params.name is
-//       not a non-empty string: -32602 with its id, DENY receipt for tool "";
-//   (e) a tools/call whose id is already in flight: -32600 with that id, DENY
-//       receipt;
-//   (f) a tools/call with an integer outside the JavaScript safe range: -32600
-//       with id null, DENY receipt. The same for a number too large for a
-//       double (1e400, which JSON.parse reads as Infinity), except that no
-//       receipt can hash it when it sits in the arguments.
+//       not a non-empty string: -32602, DENY receipt for tool "";
+//   (e) a tools/call whose id is already in flight: -32600, DENY receipt;
+//   (f) a tools/call with an integer outside the JavaScript safe range: -32600,
+//       DENY receipt. The same for a number too large for a double (1e400,
+//       which JSON.parse reads as Infinity), except that no receipt can hash
+//       it when it sits in the arguments.
+//
+// Each error carries the message's id when the message is a request (a member
+// named method in any case), has one member named exactly "id", and that id
+// is a string or a safe integer; otherwise its id is null.
 //
 // Members inside params.arguments are not checked for case (a control below).
 
@@ -203,7 +206,7 @@ describe("proxy: lines the gate and a downstream could read differently are refu
   });
   afterEach(() => cleanupTmpDir(tmp));
 
-  it("(a) a tools/call carried by a case variant of method, or with params as paramſ: -32600, DENY receipt, not forwarded", async () => {
+  it("(a) a tools/call carried by a case variant of method, or with params as paramſ: -32600 with its id, DENY receipt, not forwarded", async () => {
     const gate = await startGate(tmp, { deny: [{ tool: "mock_swap" }] });
     const args = '{"name":"mock_swap","arguments":{"amount_in":1}}';
     const received = await send(gate, [
@@ -214,7 +217,7 @@ describe("proxy: lines the gate and a downstream could read differently are refu
     ]);
 
     expect(forwardedMethods(gate)).toEqual(["ping"]);
-    expectErrors(received, -32600, [null, null, null, null]);
+    expectErrors(received, -32600, [21, 22, 24, 25]);
     expect(denyReceiptTools(gate)).toEqual(["mock_swap", "mock_swap", "", "mock_swap"]);
     expectChainValid(gate, tmp);
     const refused = refuseLogs(gate);
@@ -249,14 +252,15 @@ describe("proxy: lines the gate and a downstream could read differently are refu
     ]);
 
     expect(forwardedMethods(gate)).toEqual(["ping"]);
-    expectErrors(received, -32600, [null, null, null, null]);
+    // No member is named exactly "id" in the first two, and the last is a notification.
+    expectErrors(received, -32600, [null, null, 7, null]);
     expect(receipts(gate)).toHaveLength(0);
     expect(refuseLogs(gate)).toHaveLength(4);
     for (const l of refuseLogs(gate)) expect(l).toContain("no receipt (not a tools/call)");
     await gate.stop();
   });
 
-  it("(b) a tools/call whose params has name, arguments or _meta in another case: -32600, DENY receipt, not forwarded", async () => {
+  it("(b) a tools/call whose params has name, arguments or _meta in another case: -32600 with its id, DENY receipt, not forwarded", async () => {
     const gate = await startGate(tmp, { deny: [{ tool: "mock_swap" }] });
     const env = '"method":"tools/call"';
     const received = await send(gate, [
@@ -268,7 +272,7 @@ describe("proxy: lines the gate and a downstream could read differently are refu
     ]);
 
     expect(forwardedMethods(gate)).toEqual(["ping"]);
-    expectErrors(received, -32600, [null, null, null, null]);
+    expectErrors(received, -32600, [23, 26, 27, 28]);
     expect(denyReceiptTools(gate)).toEqual(["get_quote", "", "echo", "echo"]);
     expectChainValid(gate, tmp);
     const refused = refuseLogs(gate);
@@ -277,7 +281,7 @@ describe("proxy: lines the gate and a downstream could read differently are refu
     await gate.stop();
   });
 
-  it("(c) two members that differ only in case, at the top level or in params: -32600, a DENY receipt only for a tools/call", async () => {
+  it("(c) two members that differ only in case, at the top level or in params: -32600 with its id, a DENY receipt only for a tools/call", async () => {
     const gate = await startGate(tmp, { deny: [] });
     const received = await send(gate, [
       call('"method":"tools/call","x":1,"X":2', 30, '{"name":"echo","arguments":{}}'),
@@ -286,7 +290,7 @@ describe("proxy: lines the gate and a downstream could read differently are refu
     ]);
 
     expect(forwardedMethods(gate)).toEqual(["ping"]);
-    expectErrors(received, -32600, [null, null, null]);
+    expectErrors(received, -32600, [30, 31, 32]);
     expect(denyReceiptTools(gate)).toEqual(["echo"]);
     expectChainValid(gate, tmp);
     const refused = refuseLogs(gate);
@@ -296,7 +300,7 @@ describe("proxy: lines the gate and a downstream could read differently are refu
     await gate.stop();
   });
 
-  it("(d) a tools/call whose params is not an object, or whose name is not a non-empty string: -32602 with its id, DENY receipt for tool \"\"", async () => {
+  it("(d) a tools/call whose params is not an object, or whose name is not a non-empty string: -32602 with its id (null when the id is no safe integer), DENY receipt for tool \"\"", async () => {
     const gate = await startGate(tmp, { deny: [{ tool: "mock_swap" }] });
     const env = '"method":"tools/call"';
     const received = await send(gate, [
@@ -308,13 +312,16 @@ describe("proxy: lines the gate and a downstream could read differently are refu
       call(env, 45, '{"name":["mock_swap"],"arguments":{}}'),
       call(env, 46, '{"name":"","arguments":{}}'),
       call(env, 47, '{"arguments":{}}'),
+      `{"jsonrpc":"2.0","id":"s-48","method":"tools/call","params":{"name":""}}`,
+      // An integer, but beyond the safe range (written with an exponent, so (f) does not apply).
+      `{"jsonrpc":"2.0","id":1e20,"method":"tools/call","params":"mock_swap"}`,
     ]);
 
     expect(forwardedMethods(gate)).toEqual(["ping"]);
-    expectErrors(received, -32602, [40, 41, 42, 43, 44, 45, 46, 47]);
-    expect(denyReceiptTools(gate)).toEqual(["", "", "", "", "", "", "", ""]);
+    expectErrors(received, -32602, [40, 41, 42, 43, 44, 45, 46, 47, "s-48", null]);
+    expect(denyReceiptTools(gate)).toEqual(["", "", "", "", "", "", "", "", "", ""]);
     expectChainValid(gate, tmp);
-    expect(refuseLogs(gate)).toHaveLength(8);
+    expect(refuseLogs(gate)).toHaveLength(10);
     await gate.stop();
   });
 
@@ -346,7 +353,7 @@ describe("proxy: lines the gate and a downstream could read differently are refu
     await gate.stop();
   });
 
-  it("(f) a tools/call with an integer outside the safe range, in its arguments or as its id: -32600 with id null, DENY receipt, not forwarded", async () => {
+  it("(f) a tools/call with an integer outside the safe range, in its arguments or as its id: -32600 with its id (null for the unsafe id), DENY receipt, not forwarded", async () => {
     const gate = await startGate(tmp, { deny: [] });
     const env = '"method":"tools/call"';
     const received = await send(gate, [
@@ -356,7 +363,7 @@ describe("proxy: lines the gate and a downstream could read differently are refu
     ]);
 
     expect(forwardedMethods(gate)).toEqual(["ping"]);
-    expectErrors(received, -32600, [null, null, null]);
+    expectErrors(received, -32600, [50, 51, null]);
     expect(denyReceiptTools(gate)).toEqual(["echo", "echo", "echo"]);
     expectChainValid(gate, tmp);
     const refused = refuseLogs(gate);
@@ -365,7 +372,7 @@ describe("proxy: lines the gate and a downstream could read differently are refu
     await gate.stop();
   });
 
-  it("(f) a number too large for a double in a tools/call: -32600 with id null, not forwarded; no receipt when it is in the arguments, a DENY receipt otherwise", async () => {
+  it("(f) a number too large for a double in a tools/call: -32600 with its id, not forwarded; no receipt when it is in the arguments, a DENY receipt otherwise", async () => {
     const gate = await startGate(tmp, { deny: [] });
     const env = '"method":"tools/call"';
     const received = await send(gate, [
@@ -375,7 +382,7 @@ describe("proxy: lines the gate and a downstream could read differently are refu
     ]);
 
     expect(forwardedMethods(gate)).toEqual(["ping"]);
-    expectErrors(received, -32600, [null, null]);
+    expectErrors(received, -32600, [52, 53]);
     expect(denyReceiptTools(gate)).toEqual(["echo"]);
     expectChainValid(gate, tmp);
     const refused = refuseLogs(gate);
@@ -384,6 +391,29 @@ describe("proxy: lines the gate and a downstream could read differently are refu
     expect(refused[0]).toContain("DENY receipt not written: its arguments hold a number too large for a double");
     expect(refused[1]).toContain("DENY receipt written");
     expect(gate.logs.filter((l) => l.includes("receipt write FAILED"))).toHaveLength(0);
+    await gate.stop();
+  });
+
+  it("error ids: a refused request's error carries its id when that is a string or a safe integer; any other id, a notification and a client's response get id null", async () => {
+    const gate = await startGate(tmp, { deny: [] });
+    const received = await send(gate, [
+      '{"jsonrpc":"2.0","id":"q-1","Method":"tools/call","params":{"name":"echo","arguments":{}}}',
+      '{"jsonrpc":"2.0","id":9007199254740991,"method":"tools/list","Params":{}}',
+      '{"jsonrpc":"2.0","id":9007199254740993,"method":"tools/list","Params":{}}',
+      '{"jsonrpc":"2.0","id":1.5,"method":"tools/list","Params":{}}',
+      '{"jsonrpc":"2.0","id":true,"method":"tools/list","Params":{}}',
+      '{"jsonrpc":"2.0","id":[1],"method":"tools/list","Params":{}}',
+      '{"jsonrpc":"2.0","method":"notifications/initialized","PARAMS":{}}',
+      // Responses to the server's requests: their ids are the server's, not the client's.
+      '{"jsonrpc":"2.0","id":8,"result":{},"Result":{}}',
+      '{"jsonrpc":"2.0","id":9,"ID":10,"result":{}}',
+    ]);
+
+    expect(forwardedMethods(gate)).toEqual(["ping"]);
+    expectErrors(received, -32600, ["q-1", 9007199254740991, null, null, null, null, null, null, null]);
+    expect(denyReceiptTools(gate)).toEqual(["echo"]);
+    expectChainValid(gate, tmp);
+    expect(refuseLogs(gate)).toHaveLength(9);
     await gate.stop();
   });
 

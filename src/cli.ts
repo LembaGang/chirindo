@@ -6,6 +6,7 @@
 //       Generate the gate's signing identity (reuses recorder's runInit).
 //
 //   chirindo proxy --policy <file> --server-label <name> \
+//                  [--allow-nonstandard-tool-names] \
 //                  -- <downstream-command> [<args>...]
 //       Launch the proxy: spawn the downstream MCP server, mediate every
 //       JSON-RPC frame, enforce policy at tools/call. Run by the MCP client
@@ -89,6 +90,7 @@ Usage:
                        [--checkpoint-every <N>] [--witness <base-url>]
                        [--witness-key <hex|jwk-file>] [--witness-name <name>]
                        [--witness-account-key-file <path>]
+                       [--allow-nonstandard-tool-names]
                        -- <downstream-command> [<args>...]
   chirindo checkpoint  <chain-file> [--dir <path>] [--witness <base-url>]
                        [--witness-key <hex|jwk-file>] [--witness-name <name>]
@@ -108,6 +110,14 @@ Defaults:
   --key    = <data-dir>/${IDENTITY_FILENAME}
   --jwks   = $${JWKS_URL_ENV_VAR} or ${DEFAULT_JWKS_URL}
   --out    (export-jwks) = <data-dir>/jwks.json
+
+Tool names:
+  By default \`proxy\` refuses a tools/call whose name is outside MCP's rule
+  for tool names (1 to 128 characters, each an ASCII letter, a digit, _, -
+  or .): a JSON-RPC error -32602 and a DENY receipt. A downstream could read
+  another name into it (NFKC, dropped invisible or combining characters).
+  --allow-nonstandard-tool-names forwards such names instead and prints a
+  warning at start; deny rules then compare them without regard to case only.
 
 Self-describing receipts:
   --jwks-uri <https-url> on \`proxy\` stamps the operator's published JWKS
@@ -211,7 +221,7 @@ interface ParsedArgs {
 // <chain>` would swallow the chain path as the flag's value and the command
 // would fail with a confusing usage error — the flag must work in any
 // position, because a scripted caller will not be careful about ordering.
-const BOOLEAN_FLAGS = new Set(["allow-unproven-delivery"]);
+const BOOLEAN_FLAGS = new Set(["allow-unproven-delivery", "allow-nonstandard-tool-names"]);
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command = argv[0];
@@ -437,6 +447,14 @@ function cmdProxy(args: ParsedArgs): number {
   const witness = parseWitnessTarget(args, "proxy");
   if (witness === null) return 2;
 
+  // --allow-nonstandard-tool-names takes no value.
+  const nonstandardFlag = args.flags.get("allow-nonstandard-tool-names");
+  if (nonstandardFlag !== undefined && nonstandardFlag !== true) {
+    process.stderr.write("[chirindo] --allow-nonstandard-tool-names takes no value\n");
+    return 2;
+  }
+  const allowNonstandardToolNames = nonstandardFlag === true;
+
   // Log the resolved absolute paths and the cwd we were spawned with. This
   // is the single most useful diagnostic when a host (Cursor / Claude
   // Desktop) launches us from an unexpected directory.
@@ -498,6 +516,7 @@ function cmdProxy(args: ParsedArgs): number {
     ...(jwksUri !== undefined ? { jwksUri } : {}),
     ...(checkpointEvery !== undefined ? { checkpointEvery } : {}),
     ...(witness !== undefined ? { witness } : {}),
+    ...(allowNonstandardToolNames ? { allowNonstandardToolNames: true } : {}),
     log: (m) => process.stderr.write(m + "\n"),
   });
 

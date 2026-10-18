@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseChainJsonl, runVerify } from "../src/vendor/recorder/index.js";
+import { argsHash, parseChainJsonl, runVerify } from "../src/vendor/recorder/index.js";
 import type { SignedRecord } from "../src/vendor/recorder/index.js";
 import { loadPolicy, type Policy } from "../src/policy.js";
 import { runProxy, type ProxyHandle } from "../src/proxy.js";
@@ -364,26 +364,28 @@ describe("proxy: every tools/call is gated, whatever its id", () => {
     await gate.stop();
   });
 
-  it("a member name twice in one object, at any depth: -32600, not forwarded, a DENY receipt only when a method member says tools/call", async () => {
+  it("a member name twice in one object, at any depth: -32600 with its id (null when the id is the member named twice), not forwarded, a DENY receipt only when a method member says tools/call", async () => {
     const gate = await startGate(tmp, { deny: [{ tool: "mock_swap" }] });
     // JSON.parse keeps the last "method" (ping); a first-wins parser keeps tools/call.
     const dupMethod =
       '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"mock_swap","arguments":{"amount_in":7}},"method":"ping"}';
     const dupNested =
       '{"jsonrpc":"2.0","id":15,"method":"tools/list","params":{"cursor":{"a":1,"a":2}}}';
-    const received = await send(gate, [dupMethod, dupNested]);
+    // Which id this request has depends on the parser.
+    const dupId = '{"jsonrpc":"2.0","id":16,"method":"tools/list","id":17}';
+    const received = await send(gate, [dupMethod, dupNested, dupId]);
 
     expect(forwardedMethods(gate)).toEqual(["ping"]);
-    expect(received).toHaveLength(3);
-    for (const m of received.slice(0, 2)) {
-      expect((m as { id: unknown }).id).toBeNull();
+    expect(received).toHaveLength(4);
+    expect(received.slice(0, 3).map((m) => (m as { id: unknown }).id)).toEqual([14, 15, null]);
+    for (const m of received.slice(0, 3)) {
       expect((m as { error: { code: number } }).error.code).toBe(-32600);
     }
     const recs = receipts(gate);
     expect(recs).toHaveLength(1);
     expectDenyReceipt(recs[0]!, "mock_swap");
     expectChainValid(gate, tmp);
-    expect(refuseLogs(gate)).toHaveLength(2);
+    expect(refuseLogs(gate)).toHaveLength(3);
     await gate.stop();
   });
 
@@ -401,6 +403,64 @@ describe("proxy: every tools/call is gated, whatever its id", () => {
     expect(err.error.code).toBe(-32600);
     expect(receipts(gate)).toHaveLength(0);
     expect(refuseLogs(gate)).toHaveLength(1);
+    await gate.stop();
+  });
+
+  // A pinning test: it documents behaviour that 0.5.3 keeps, and it passes
+  // without any change to src/. The gate ends a message only at a line feed,
+  // as the MCP stdio transport delimits messages by newlines (revision
+  // 2026-07-28, basic/transports/stdio). U+2028, U+2029 and U+0085 are legal
+  // raw inside a JSON string, and JSON.stringify writes them raw, so the gate
+  // forwards them; a downstream that also ended messages at them would see
+  // other boundaries than the gate (CHANGELOG, limits of 0.5.3).
+  it("U+2028, U+2029 and U+0085 inside a string end no message: an allowed tools/call that carries them raw is forwarded byte for byte with its ALLOW receipt, and the same call for a denied tool gets a DENY receipt", async () => {
+    const gate = await startGate(tmp, { deny: [{ tool: "mock_swap" }] });
+    const args = { text: "a\u2028b\u2029c\u0085d" };
+    const call = (id: number, name: string) =>
+      JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+    const allowed = call(30, "echo");
+    // The same allowed call with the three written as \u escapes: an allowed
+    // call is forwarded re-encoded from its parsed value, so they arrive raw.
+    const escaped = call(31, "echo")
+      .replace("\u2028", "\\u2028")
+      .replace("\u2029", "\\u2029")
+      .replace("\u0085", "\\u0085");
+    const denied = call(32, "mock_swap");
+    for (const utf8 of ["e280a8", "e280a9", "c285"]) {
+      expect(Buffer.from(allowed, "utf8").includes(Buffer.from(utf8, "hex"))).toBe(true);
+      expect(Buffer.from(escaped, "utf8").includes(Buffer.from(utf8, "hex"))).toBe(false);
+    }
+    const received = await send(gate, [allowed, escaped, denied]);
+
+    // A reader that ends lines at a line feed only reads one message per call.
+    expect(forwardedMethods(gate)).toEqual(["tools/call", "tools/call", "ping"]);
+    expect(Buffer.from(gate.forwarded[0]!, "utf8").equals(Buffer.from(allowed, "utf8"))).toBe(true);
+    expect(gate.forwarded[1]).toBe(call(31, "echo"));
+    // A reader that also ended lines at the three would cut that call in four.
+    expect(gate.forwarded[0]!.split(/[\u2028\u2029\u0085]/u)).toHaveLength(4);
+    const byId = new Map(received.map((m) => [(m as { id: unknown }).id, m]));
+    expect((byId.get(30) as { result: { isError: boolean } }).result.isError).toBe(false);
+    expect((byId.get(31) as { result: { isError: boolean } }).result.isError).toBe(false);
+    expect((byId.get(32) as { result: { isError: boolean } }).result.isError).toBe(true);
+    const recs = receipts(gate);
+    expect(recs).toHaveLength(3);
+    for (const rec of recs) {
+      if (rec.event.type !== "mcp_call") throw new Error("expected mcp_call");
+      expect(rec.event.args_hash).toBe(argsHash(args));
+    }
+    const allows = recs.filter((r) => r.event.type === "mcp_call" && r.event.decision === "allow");
+    expect(allows).toHaveLength(2);
+    for (const rec of allows) {
+      if (rec.event.type !== "mcp_call") throw new Error("expected mcp_call");
+      expect(rec.event.tool_name).toBe("echo");
+      expect(rec.event.outcome).toBe("executed");
+      expect(rec.event.result_hash).toBeDefined();
+    }
+    const denies = recs.filter((r) => r.event.type === "mcp_call" && r.event.decision === "deny");
+    expect(denies).toHaveLength(1);
+    expectDenyReceipt(denies[0]!, "mock_swap");
+    expectChainValid(gate, tmp);
+    expect(refuseLogs(gate)).toHaveLength(0);
     await gate.stop();
   });
 

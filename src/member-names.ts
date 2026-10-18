@@ -10,6 +10,11 @@
 // (U+017F) as params, and params {"name": "a", "Name": "b"} as the name "b",
 // while the gate reads "a". The proxy refuses client lines where such a
 // reading could differ from its own (src/proxy.ts).
+//
+// Values a downstream may compare the same way are here too: a tool name for a
+// deny rule (src/policy.ts) and a method value (src/proxy.ts) are compared
+// without regard to case by caseKeys and sameUnderCase below, and a method
+// that is not a string is read as String() would read it.
 
 // The members of a JSON-RPC message the gate reads.
 export const ENVELOPE_MEMBERS: readonly string[] = ["jsonrpc", "id", "method", "params"];
@@ -86,6 +91,67 @@ export function foldCollision(keys: readonly string[]): [string, string] | null 
   return null;
 }
 
+// Two keys for a name; sameUnderCase holds when either key is equal. The first
+// is foldName: it puts together what Go's strings.EqualFold and Java's
+// equalsIgnoreCase match. The second applies toUpperCase and toLowerCase until
+// nothing changes, so that names equal after a full case mapping meet too:
+// "ß" and "ss", or the ligature "ﬁ" (U+FB01) and "fi", which a downstream
+// comparing upper-cased names, or Python's str.casefold(), takes for the same.
+export function caseKeys(name: string): [string, string] {
+  let full = name;
+  for (let k = 0; k < 8; k++) {
+    const next = full.toUpperCase().toLowerCase();
+    if (next === full) break;
+    full = next;
+  }
+  return [foldName(name), full];
+}
+
+export function sameUnderCase(a: string, b: string): boolean {
+  const ka = caseKeys(a);
+  const kb = caseKeys(b);
+  return ka[0] === kb[0] || ka[1] === kb[1];
+}
+
+// White space at either end (JavaScript's \s and Unicode White_Space), and a
+// control or format character (Unicode categories Cc and Cf).
+export const EDGE_WHITE_SPACE = /^[\s\p{White_Space}]|[\s\p{White_Space}]$/u;
+export const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/u;
+const EDGE_WHITE_SPACE_ALL = /^[\s\p{White_Space}]+|[\s\p{White_Space}]+$/gu;
+const CONTROL_OR_FORMAT_ALL = /[\p{Cc}\p{Cf}]/gu;
+
+// Whether a method value names tools/call for a downstream that drops control
+// and format characters, trims white space at either end and compares without
+// regard to case ("TOOLS/CALL", "tools/call ", "tools/call\u200b"). The exact
+// "tools/call" counts too.
+export function methodNamesToolsCall(value: string): boolean {
+  const bare = value.replace(CONTROL_OR_FORMAT_ALL, "").replace(EDGE_WHITE_SPACE_ALL, "");
+  return sameUnderCase(bare, "tools/call");
+}
+
+// Arrays nested deeper than this are not followed (see below).
+const MAX_METHOD_DEPTH = 64;
+
+// Whether a method value of any JSON type could be read as tools/call: a
+// string through methodNamesToolsCall; an array through each of its elements,
+// at any depth (a downstream may take method[0]). That covers what String()
+// makes of an array too, which a downstream reading the method as text or as
+// a key (HANDLERS[msg.method]) sees: String() joins the elements' texts with
+// commas, and dropping control and format characters, trimming white space
+// and folding case leave every comma in place, so an array's text reads as
+// tools/call only when the array has a single element whose text does. A
+// number, true, false, null or an object never reads as tools/call (an
+// object's text is "[object Object]"; String() throws for one with its own
+// toString member). Arrays nested deeper than MAX_METHOD_DEPTH count as
+// tools/call: such a line is refused whatever this says, and this only
+// decides whether the refusal gets a DENY receipt.
+export function methodValueNamesToolsCall(value: unknown, depth = 0): boolean {
+  if (typeof value === "string") return methodNamesToolsCall(value);
+  if (!Array.isArray(value)) return false;
+  if (depth >= MAX_METHOD_DEPTH) return true;
+  return value.some((element) => methodValueNamesToolsCall(element, depth + 1));
+}
+
 // ---- reading member names from the text ---------------------------------
 //
 // JSON.parse keeps only the last of two members with the same name, so it
@@ -97,11 +163,36 @@ export function foldCollision(keys: readonly string[]): [string, string] | null 
 
 const METHOD_FOLD = foldName("method");
 
+// The member names of the top-level object, in order and with any repeats
+// (JSON.parse keeps one of each); an empty list for any other value.
+export function topLevelMemberNames(text: string): string[] {
+  let i = skipWs(text, 0);
+  if (text[i] !== "{") return [];
+  const names: string[] = [];
+  i = skipWs(text, i + 1);
+  if (text[i] === "}") return names;
+  for (;;) {
+    const nameEnd = stringEnd(text, i);
+    names.push(JSON.parse(text.slice(i, nameEnd)) as string);
+    i = skipWs(text, skipWs(text, nameEnd) + 1); // past the colon
+    i = skipWs(text, valueEnd(text, i));
+    if (text[i] !== ",") return names;
+    i = skipWs(text, i + 1);
+  }
+}
+
+// Whether one of `names` folds to "method": a reader matching member names
+// without regard to case takes the message for a request or a notification.
+export function namesMethod(names: readonly string[]): boolean {
+  return names.some((n) => foldName(n) === METHOD_FOLD);
+}
+
 // Whether a line holds a tools/call as a case-insensitive reader could take
-// it: a top-level member whose name folds to "method" with the string value
-// "tools/call" (an exact "method" member counts, and so does one that a later
-// duplicate overwrote). For a top-level array, one answer per element; for
-// any other top-level value, an empty list.
+// it: a top-level member whose name folds to "method" with a value that
+// methodValueNamesToolsCall accepts (an exact "method" member with
+// "tools/call" counts, and so does one that a later duplicate overwrote, or a
+// method that is not a string but reads as tools/call). For a top-level array,
+// one answer per element; for any other top-level value, an empty list.
 export function toolsCallClaims(text: string): boolean[] {
   let i = skipWs(text, 0);
   if (text[i] === "{") return [claimsToolsCall(text, i)];
@@ -126,11 +217,7 @@ function claimsToolsCall(text: string, open: number): boolean {
     const name = JSON.parse(text.slice(i, nameEnd)) as string;
     i = skipWs(text, skipWs(text, nameEnd) + 1); // past the colon
     const end = valueEnd(text, i);
-    if (
-      text[i] === '"' &&
-      foldName(name) === METHOD_FOLD &&
-      JSON.parse(text.slice(i, end)) === "tools/call"
-    ) {
+    if (foldName(name) === METHOD_FOLD && methodValueNamesToolsCall(JSON.parse(text.slice(i, end)))) {
       claims = true;
     }
     i = skipWs(text, end);

@@ -92,29 +92,82 @@ forwarded:
   (`"Method"`, or `"paramſ"` with U+017F), or that has two members
   differing only in case at the top level or in `params`; and a
   `tools/call` whose `params` holds `name`, `arguments` or `_meta` in
-  another case: `-32600` with `id: null`. A decoder that matches member
-  names without regard to case, as Go's `encoding/json` does for a
+  another case: `-32600` with the request's id. A decoder that matches
+  member names without regard to case, as Go's `encoding/json` does for a
   struct, could read these differently from the gate;
+- a message with a member named `__proto__` at the top level or in
+  `params`: `-32600` with the request's id, and a DENY receipt when the
+  method of the message or of that member can be read as a `tools/call`.
+  `JSON.parse` keeps `__proto__` as an inert data member, so the gate
+  reads no method or name from it; but a downstream that copies the
+  message into a fresh object (`Object.assign({}, msg)`, a `for...in`
+  loop) sets that object's prototype from the member, so a method and
+  `params` carried inside it read as the message's own;
+- a message whose `method` is not a string (an array such as
+  `["tools/call"]`, an object, a number, `true`, `false` or `null`), or is
+  `tools/call` only after trimming white space or folding case
+  (`"TOOLS/CALL"`, `"tools/call "`), or holds a control or format
+  character: `-32600` with the request's id, and a DENY receipt when it
+  can be read as a `tools/call`. A downstream that trims or folds the
+  method, or that turns a method that is not a string into text
+  (`String(method)`, or a lookup in a table of handlers keyed by method),
+  could otherwise run a call the gate never checked;
 - a `tools/call` with an integer outside JavaScript's safe range (beyond
   2^53 - 1), or a number too large for a double (such as `1e400`),
-  anywhere in it: `-32600` with `id: null`. The gate forwards an allowed
-  call re-encoded from its parsed value, which would change such a
-  number (`1e400` would become `null`);
+  anywhere in it: `-32600` with the request's id. The gate forwards an
+  allowed call re-encoded from its parsed value, which would change such
+  a number (`1e400` would become `null`);
+- a `tools/call` nested more than 128 levels deep, too deep to
+  canonicalize for a receipt: `-32600` with the request's id, and a DENY
+  receipt whose `args_hash` is over the empty object. The gate computes a
+  call's `args_hash` and `request_commitment` before forwarding it, so a
+  call it could not record never reaches the downstream; a call at or
+  within the limit runs as before;
 - a `tools/call` with the `id` of a `tools/call` still waiting for its
-  result: `-32600` with that id;
+  result: `-32600` with the request's id;
 - a `tools/call` whose `params` is not an object, or whose `params.name`
-  is not a non-empty string: `-32602` with its id; its DENY receipt names
-  the tool `""`.
+  is not a non-empty string: `-32602` with the request's id; its DENY
+  receipt names the tool `""`;
+- a `tools/call` whose `params.name` begins or ends with white space, or
+  holds a control or format character (Unicode categories Cc and Cf, such
+  as NUL or a zero-width space) anywhere: `-32602` with the request's id.
+  A downstream that trims names, or drops such characters, could read the
+  name of a tool that a deny rule names;
+- unless the proxy runs with `--allow-nonstandard-tool-names`, a
+  `tools/call` whose `params.name` is outside MCP's rule for tool names:
+  `-32602` with the request's id. MCP's
+  [tools page](https://modelcontextprotocol.io/specification/2026-07-28/server/tools)
+  (revision 2026-07-28, "Tool Names") says tool names SHOULD be 1 to 128
+  characters long, and "The following SHOULD be the only allowed
+  characters": ASCII letters, digits, underscore (`_`), hyphen (`-`) and
+  dot (`.`). A downstream may normalize a name outside that rule into
+  the name of a tool a deny rule names (NFKC turns the fullwidth
+  `ｍｏｃｋ＿ｓｗａｐ` into `mock_swap`; invisible and combining characters
+  can be dropped). With the flag such names are forwarded, deny rules
+  compare them without regard to case only, and the proxy prints a
+  warning to stderr at start.
+
+"The request's id" is the message's `id` when the message is a request
+(it has a `method` member, in any case), has one member named exactly
+`id`, and that id is a string or an integer within JavaScript's safe
+range; otherwise the error has `id: null`. A client's response to a
+request from the server is answered with `id: null`, since its id is the
+server's.
 
 Each refusal writes one line to stderr. Every refused line that is a
-`tools/call`, or that a case-insensitive decoder could read as one, gets
-one DENY receipt (a batch, one per such element); lines that are not
-JSON or have a carriage return inside get none, nor does a `tools/call`
-whose arguments hold a number too large for a double, which no receipt
-can hash (its stderr line says so). A refusal's DENY receipt
-reads like a policy denial (`decision: "deny"`, `decision_source:
-"config"`): the reason is in the stderr line only. Member names inside
-`params.arguments` and `params._meta` are not checked for case; the
+`tools/call`, or that a downstream could read as one (matching member
+names without regard to case, trimming, folding the case of or dropping
+control and format characters from the method, reading a method that is
+not a string as text, or reading a `__proto__` member as the message's
+own members), gets one DENY receipt (a batch, one per such element);
+lines that are not JSON or have a carriage return inside get none, nor
+does a `tools/call` whose arguments hold a number too large for a
+double, which no receipt can hash (its stderr line says so). A
+`tools/call` refused for nesting too deep gets a DENY receipt over the
+empty object. A refusal's DENY receipt reads like a policy denial
+(`decision: "deny"`, `decision_source: "config"`): the reason is in the
+stderr line only. Member names inside `params.arguments` and
+`params._meta` are not checked for case or for a `__proto__` member; the
 receipt's `args_hash` covers the arguments as the gate parsed them,
 which is what it forwards.
 
@@ -206,6 +259,7 @@ chirindo proxy  --policy <file> --server-label <name>
                 [--checkpoint-every <N>] [--witness <base-url>]
                 [--witness-key <hex|jwk-file>] [--witness-name <name>]
                 [--witness-account-key-file <path>]
+                [--allow-nonstandard-tool-names]
                 -- <downstream-command> [<args>...]
 chirindo checkpoint <chain-file> [--dir <path>] [--witness <base-url>]
                 [--witness-key <hex|jwk-file>] [--witness-name <name>]
@@ -246,8 +300,15 @@ names an `http://` `jwks_uri` is malformed → `INVALID`.
 }
 ```
 
-A rule matches if `tool` matches the call's `name`, AND `server` (if
-present) matches the proxy's `--server-label`. Anything not matched by
+A rule matches if `tool` is the call's `name` without regard to case,
+AND `server` (if present) is the proxy's `--server-label` exactly.
+Without regard to case means under Unicode case folding and under the
+full case mappings of upper and lower case: a rule for `delete_file`
+also matches `DELETE_FILE`, `Delete_File` and `delete_ﬁle` (with the
+ligature U+FB01), which a downstream that looks tools up without
+regard to case could run as `delete_file`. Up to 0.5.2 the match was
+exact. By default a name outside MCP's rule for tool names is refused
+before any rule is applied (see the refusals above). Anything not matched by
 a deny rule is allowed. The shipped `policy.json` is `{"deny": []}` —
 records everything, blocks nothing, **observe-only by default**.
 Enforcement is opt-in (see step 6 below). **Fail-closed**: an

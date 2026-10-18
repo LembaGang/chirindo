@@ -16,6 +16,8 @@ import {
   caseVariant,
   foldCollision,
   foldName,
+  methodNamesToolsCall,
+  methodValueNamesToolsCall,
   toolsCallClaims,
 } from "../src/member-names.js";
 
@@ -74,10 +76,47 @@ describe("toolsCallClaims", () => {
     expect(toolsCallClaims('{"method":"tools/call","method":"ping"}')).toEqual([true]);
     expect(toolsCallClaims('{ "id" : 1 , "metho\\u0064" : "tools\\/call" }')).toEqual([true]);
     expect(toolsCallClaims('{"method":"ping"}')).toEqual([false]);
-    expect(toolsCallClaims('{"method":"TOOLS/CALL"}')).toEqual([false]);
+    // A method value that is tools/call after trimming, folding case or dropping
+    // control and format characters counts too.
+    expect(toolsCallClaims('{"method":"TOOLS/CALL"}')).toEqual([true]);
+    expect(toolsCallClaims('{"method":" Tools/Call\\t"}')).toEqual([true]);
+    expect(toolsCallClaims('{"method":"tools/call\\u200b"}')).toEqual([true]);
+    expect(toolsCallClaims('{"method":"tools/call\\u0000"}')).toEqual([true]);
+    expect(toolsCallClaims('{"method":"tools /call"}')).toEqual([false]);
+    expect(toolsCallClaims('{"method":"tools/list"}')).toEqual([false]);
     expect(toolsCallClaims('{"x":{"method":"tools/call"},"method":5}')).toEqual([false]);
     expect(toolsCallClaims('{"params":{"a":"}\\"{["},"method":"tools/call"}')).toEqual([true]);
     expect(toolsCallClaims("{}")).toEqual([false]);
+  });
+
+  it("reads a method that is not a string as String() would, and an array through each of its elements as well", () => {
+    expect(toolsCallClaims('{"method":["tools/call"]}')).toEqual([true]);
+    expect(toolsCallClaims('{"method":[["tools/call"]]}')).toEqual([true]);
+    expect(toolsCallClaims('{"method":[" TOOLS/CALL"]}')).toEqual([true]);
+    expect(toolsCallClaims('{"method":["ping","tools/call"]}')).toEqual([true]);
+    expect(toolsCallClaims('{"Method":["tools/call"]}')).toEqual([true]);
+    expect(toolsCallClaims('{"method":["tools","call"]}')).toEqual([false]);
+    expect(toolsCallClaims('{"method":{"tools/call":1}}')).toEqual([false]);
+    expect(toolsCallClaims('{"method":{"toString":"tools/call"}}')).toEqual([false]);
+    expect(toolsCallClaims('{"method":7}')).toEqual([false]);
+    expect(toolsCallClaims('{"method":true}')).toEqual([false]);
+    expect(toolsCallClaims('{"method":null}')).toEqual([false]);
+    expect(toolsCallClaims('[{"method":["tools/call"]},{"method":["ping"]}]')).toEqual([true, false]);
+    // Nested deeper than the gate follows: counted as a claim, and no crash.
+    const deep = "[".repeat(10000) + '"x"' + "]".repeat(10000);
+    expect(toolsCallClaims(`{"method":${deep}}`)).toEqual([true]);
+    // Every value that String(value), or the String() of one of its elements,
+    // makes tools/call is taken for one here as well; elements of elements are
+    // followed too ([["tools/call", "x"]]).
+    const literal = (v: unknown): boolean =>
+      methodNamesToolsCall(String(v)) || (Array.isArray(v) && v.some((e) => methodNamesToolsCall(String(e))));
+    const samples: unknown[] = [
+      ["tools/call"], [["tools/call"]], [" TOOLS/CALL"], ["ping", "tools/call"], [null, "tools/call"], ["tools/call", null],
+      [[], "tools/call"], [["tools/call", "x"]], ["tools", "call"], ["tools/call,"], [1, true, null], [], [[]], {}, { a: 1 },
+      7, -0, true, false, null, "tools/call", "ping",
+    ];
+    for (const v of samples) if (literal(v)) expect(methodValueNamesToolsCall(v)).toBe(true);
+    expect(samples.filter((v) => methodValueNamesToolsCall(v) && !literal(v))).toEqual([[["tools/call", "x"]]]);
   });
 
   it("answers per element for a top-level array, and with an empty list for any other value", () => {

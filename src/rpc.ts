@@ -13,10 +13,15 @@
 // Some client lines are refused with a JSON-RPC error and never forwarded
 // (src/proxy.ts): a line that is not JSON, carries a carriage return inside
 // it, names a member twice in one object, has member names a case-insensitive
-// reader could take for others, or is a batch; and a tools/call without a
-// usable id, with an integer outside the safe range or a number too large for
-// a double, with an id already in flight, or without a non-empty string
-// params.name.
+// reader could take for others, has a member named "__proto__" at the top
+// level or in params, has a method that is not a string, is tools/call only
+// after trimming or folding case or holds a control or format character, or is
+// a batch; and a tools/call without a usable id, with an integer outside the
+// safe range or a number too large for a double, nested deeper than
+// MAX_VALUE_DEPTH, with an id already in flight, without a non-empty string
+// params.name, whose params.name begins or ends with white space or holds a
+// control or format character, or (by default) whose params.name is outside
+// MCP's tool-name rule.
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -115,6 +120,31 @@ export function hasNonFiniteNumber(value: unknown): boolean {
       for (const item of v) stack.push(item);
     } else if (typeof v === "object" && v !== null) {
       for (const key of Object.keys(v)) stack.push((v as Record<string, unknown>)[key]);
+    }
+  }
+  return false;
+}
+
+// The deepest level a client message may nest before the gate refuses it. A
+// real tools/call nests a handful of levels (message, params, arguments, then
+// the argument values); 128 is far above any real tool. It is also far below
+// the few thousand levels at which the JCS canonicalizer's and JSON.stringify's
+// recursion overflow the Node.js stack, so the gate refuses such a message by
+// this rule, deterministically, rather than failing while hashing or encoding
+// it. The message object is level 0, its members level 1, and so on.
+export const MAX_VALUE_DEPTH = 128;
+
+// Whether a value JSON.parse returned nests deeper than `limit`. Iterative (an
+// explicit stack), so measuring the depth never overflows the stack itself.
+export function exceedsDepth(value: unknown, limit: number = MAX_VALUE_DEPTH): boolean {
+  const stack: Array<{ v: unknown; d: number }> = [{ v: value, d: 0 }];
+  while (stack.length > 0) {
+    const { v, d } = stack.pop()!;
+    if (d > limit) return true;
+    if (Array.isArray(v)) {
+      for (const item of v) stack.push({ v: item, d: d + 1 });
+    } else if (typeof v === "object" && v !== null) {
+      for (const key of Object.keys(v)) stack.push({ v: (v as Record<string, unknown>)[key], d: d + 1 });
     }
   }
   return false;
