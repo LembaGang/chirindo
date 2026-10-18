@@ -73,7 +73,23 @@ evaluated against the loaded policy:
   throws, DENY the call.
 
 All other frames (`initialize`, `tools/list`, responses,
-notifications) pass through unmodified.
+notifications) pass through unmodified, with these exceptions. A
+`tools/call` is recognised by its method alone, whatever its `id` or
+`jsonrpc` members say, and these client lines are refused, never
+forwarded:
+
+- a `tools/call` with no `id`: a DENY receipt and no reply (a message
+  without an id is a notification);
+- a `tools/call` whose `id` is `null`, or is not a string or an integer:
+  a DENY receipt and a JSON-RPC error `-32600` with `id: null`;
+- a JSON-RPC batch (a JSON array): a DENY receipt for each `tools/call`
+  in it and one `-32600` error (MCP removed batching in its 2025-06-18
+  revision);
+- a line that is not JSON (`-32700`), or that has a carriage return
+  inside it or a member name twice in one object (`-32600`). These get
+  no receipt.
+
+Each refusal writes one line to stderr.
 
 ## The signed receipt
 

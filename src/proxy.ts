@@ -17,7 +17,20 @@
 //     written, DENY the call. The agent does NOT get an ungated action.
 //
 // Every other frame (initialize, tools/list, responses, notifications,
-// cancellation) passes through unchanged.
+// cancellation) passes through unchanged, with these exceptions. These
+// client lines are refused, never forwarded, because a downstream could read
+// something in them that the gate did not check (each refusal writes one
+// stderr line):
+//
+//   - a tools/call with no id: DENY receipt, no reply (it is a notification);
+//   - a tools/call whose id is null or not a string or an integer: DENY
+//     receipt and a -32600 error with id null;
+//   - a JSON array (a JSON-RPC batch): a DENY receipt for each tools/call in
+//     it and one -32600 error with id null. MCP removed batching in 2025-06-18;
+//   - a line that is not JSON: -32700; a line with a carriage return inside
+//     it, or with a member name twice in one object: -32600.
+//
+// A tools/call is recognised by its method alone (src/rpc.ts isToolsCall).
 //
 // IMPORTANT: stderr is for logging only — MUST NOT carry MCP frames. We
 // log gate decisions to stderr; the client's stdout sees only valid MCP.
@@ -28,10 +41,15 @@ import type { LoadedFullIdentity } from "./vendor/recorder/index.js";
 import { type Policy, type PolicyDecision, evaluate } from "./policy.js";
 import { ProxyCheckpointer } from "./checkpoint.js";
 import { appendReceipt, type GateDecision } from "./receipt.js";
+import { findDuplicateMember } from "./vendor/recorder/index.js";
 import {
+  INVALID_REQUEST,
+  PARSE_ERROR,
   denyToolResult,
   encodeMessage,
-  isRequest,
+  errorResponse,
+  isToolsCall,
+  isValidRequestId,
   splitLines,
   type JsonRpcRequest,
 } from "./rpc.js";
@@ -124,30 +142,153 @@ export function runProxy(deps: ProxyDeps): ProxyHandle {
       try {
         parsed = JSON.parse(line);
       } catch {
-        // Forward unparseable lines verbatim — the downstream may parse
-        // them or fail; either way, the proxy isn't authoritative over
-        // arbitrary JSON-RPC validity.
-        downstream.stdin.write(line + "\n");
-        deps.log(`[proxy] forwarding unparseable client line as-is`);
+        // Not JSON to the gate. Never forwarded: a downstream whose parser
+        // accepts more (NaN, comments, a byte order mark) could read a
+        // tools/call here that the gate never checked.
+        refuseLine(PARSE_ERROR, "Parse error: the line is not valid JSON", "that is not JSON");
         continue;
       }
 
-      if (isRequest(parsed) && parsed.method === "tools/call") {
-        handleToolsCall(parsed);
+      // A carriage return left inside the line (splitLines removed a final
+      // one). JSON.parse reads it as whitespace, but a reader that ends lines
+      // at a bare CR (Node readline, Python text I/O) splits the line in two
+      // and can find a whole tools/call inside a message the gate read as
+      // something else.
+      if (line.includes("\r")) {
+        refuseLine(
+          INVALID_REQUEST,
+          "Invalid Request: carriage return inside a message",
+          "with a carriage return inside it",
+        );
+        continue;
+      }
+
+      // A member name twice in one object: JSON.parse keeps the last value,
+      // another parser may keep the first (a "method" of tools/call, say).
+      const duplicate = findDuplicateMember(line);
+      if (duplicate !== null) {
+        refuseLine(
+          INVALID_REQUEST,
+          "Invalid Request: a member name appears twice in one object",
+          `with a duplicate member ${JSON.stringify(duplicate.detail)}`,
+        );
+        continue;
+      }
+
+      if (Array.isArray(parsed)) {
+        refuseBatch(parsed);
+      } else if (isToolsCall(parsed)) {
+        gateToolsCall(parsed);
       } else {
         downstream.stdin.write(line + "\n");
       }
     }
   };
 
-  function handleToolsCall(req: JsonRpcRequest): void {
-    // Extract tool name + arguments per MCP spec §"Calling Tools".
-    // Pass arguments through as the structured value — receipt's args_hash
-    // is RFC 8785 JCS over this object, so we deliberately avoid an
-    // intermediate JSON.stringify whose key order isn't canonical.
-    const params = (req.params ?? {}) as { name?: string; arguments?: unknown };
+  // Tool name and arguments per MCP spec §"Calling Tools". Arguments stay the
+  // structured value: the receipt's args_hash is RFC 8785 JCS over it, so we
+  // deliberately avoid an intermediate JSON.stringify whose key order isn't
+  // canonical.
+  function toolOf(msg: { params?: unknown }): { toolName: string; toolArgs: unknown } {
+    const params = (msg.params ?? {}) as { name?: string; arguments?: unknown };
     const toolName = typeof params.name === "string" ? params.name : "";
     const toolArgs = params.arguments ?? {};
+    return { toolName, toolArgs };
+  }
+
+  // Every tools/call passes here, whatever its id. Only a string or integer
+  // id reaches handleToolsCall (policy, then forward or deny). Any other is
+  // refused before policy is consulted: DENY receipt, never forwarded.
+  function gateToolsCall(msg: Record<string, unknown>): void {
+    const hasId = Object.prototype.hasOwnProperty.call(msg, "id");
+    const id = msg["id"];
+    if (hasId && isValidRequestId(id)) {
+      handleToolsCall(msg as unknown as JsonRpcRequest);
+      return;
+    }
+    const kind = Array.isArray(id)
+      ? "an array"
+      : typeof id === "number"
+        ? "a number that is not an integer"
+        : typeof id === "object"
+          ? "an object"
+          : `a ${typeof id}`;
+    const problem = !hasId
+      ? "has no id"
+      : id === null
+        ? "has a null id"
+        : `has an id that is neither a string nor an integer (${kind})`;
+    const { toolName, toolArgs } = toolOf(msg);
+    const written = writeReceiptSafely({
+      decisionForReceipt: { kind: "deny", reason: `tools/call ${problem}; refused (fail-closed)` },
+      server: deps.serverLabel,
+      toolName,
+      toolArgs,
+      toolResult: undefined,
+    });
+    // A message without an id is a notification: JSON-RPC 2.0 sends no reply.
+    if (hasId) {
+      deps.clientOut.write(
+        encodeMessage(
+          errorResponse(INVALID_REQUEST, "Invalid Request: tools/call needs a string or integer id"),
+        ),
+      );
+    }
+    deps.log(
+      `[proxy] REFUSE tool=${JSON.stringify(toolName)}: tools/call ${problem}; not forwarded; ` +
+        `${hasId ? "-32600 sent" : "no reply (notification)"}; ` +
+        `DENY receipt ${written ? "written" : "NOT written"}`,
+    );
+  }
+
+  // A JSON-RPC batch is never forwarded, whatever it holds: each tools/call in
+  // it gets a DENY receipt, and the client gets one -32600 error.
+  function refuseBatch(batch: unknown[]): void {
+    let calls = 0;
+    let written = 0;
+    for (const element of batch) {
+      if (!isToolsCall(element)) continue;
+      calls += 1;
+      const { toolName, toolArgs } = toolOf(element);
+      if (
+        writeReceiptSafely({
+          decisionForReceipt: {
+            kind: "deny",
+            reason: "tools/call inside a JSON-RPC batch; batches are refused (fail-closed)",
+          },
+          server: deps.serverLabel,
+          toolName,
+          toolArgs,
+          toolResult: undefined,
+        })
+      ) {
+        written += 1;
+      }
+    }
+    deps.clientOut.write(
+      encodeMessage(
+        errorResponse(
+          INVALID_REQUEST,
+          "Invalid Request: JSON-RPC batches are not accepted; send one message per line",
+        ),
+      ),
+    );
+    deps.log(
+      `[proxy] REFUSE JSON-RPC batch (${batch.length} elements, ${calls} tools/call): ` +
+        `not forwarded; -32600 sent; ${written} DENY receipt(s) written`,
+    );
+  }
+
+  // A client line the gate will not forward and cannot attribute to a tool:
+  // one JSON-RPC error with id null, one stderr line, no receipt. Text taken
+  // from the line is JSON-quoted so the log entry stays on one line.
+  function refuseLine(code: number, message: string, what: string): void {
+    deps.clientOut.write(encodeMessage(errorResponse(code, message)));
+    deps.log(`[proxy] REFUSE client line ${what}: not forwarded; ${code} sent`);
+  }
+
+  function handleToolsCall(req: JsonRpcRequest): void {
+    const { toolName, toolArgs } = toolOf(req);
     const decision = decide(toolName);
 
     if (decision.kind === "deny") {

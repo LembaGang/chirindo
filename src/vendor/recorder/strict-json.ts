@@ -102,7 +102,9 @@ function readString(text: string, start: number): { value: string; next: number 
 
 // Scan raw JSON text for unsafe integers and duplicate member names at ANY
 // depth. Throws StrictJsonParseError on the first violation; otherwise returns.
-function validate(text: string): void {
+// With `unsafeNumbers` false only duplicate member names are reported; number
+// tokens are still stepped over the same way, so the scan stays aligned.
+function validate(text: string, unsafeNumbers = true): void {
   const n = text.length;
   const stack: Frame[] = [];
   // In an object, the next string literal is a KEY when positioned right after
@@ -162,7 +164,7 @@ function validate(text: string): void {
         NUMBER_TOKEN.lastIndex = i;
         const m = NUMBER_TOKEN.exec(text);
         if (m !== null && m.index === i) {
-          if (isUnsafeIntegerToken(m[0])) {
+          if (unsafeNumbers && isUnsafeIntegerToken(m[0])) {
             throw new StrictJsonParseError(
               "unsafe_number",
               `integer ${m[0]} is outside the IEEE-754 safe range [-(2^53-1), 2^53-1]`,
@@ -175,6 +177,21 @@ function validate(text: string): void {
         break;
       }
     }
+  }
+}
+
+// The duplicate-member half of the gate on its own, for a caller that must not
+// change how numbers are treated: the proxy refuses a client line in which one
+// object names a member twice, because JSON.parse keeps the last value and
+// another parser may keep the first. Returns the duplicate_member error, or null
+// when no object repeats a member name. `text` must already be valid JSON.
+export function findDuplicateMember(text: string): StrictJsonParseError | null {
+  try {
+    validate(text, false);
+    return null;
+  } catch (e) {
+    if (e instanceof StrictJsonParseError) return e;
+    throw e;
   }
 }
 

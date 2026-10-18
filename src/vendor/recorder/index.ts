@@ -28,7 +28,11 @@ export type {
   ToolCallEvent,
 } from "./record.js";
 export { jcs, jcsBytes } from "./canonicalize.js";
-export { strictJsonParse, StrictJsonParseError } from "./strict-json.js";
+export {
+  findDuplicateMember,
+  strictJsonParse,
+  StrictJsonParseError,
+} from "./strict-json.js";
 export type { StrictJsonReason } from "./strict-json.js";
 export {
   argsHash,
