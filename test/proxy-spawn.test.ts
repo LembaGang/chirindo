@@ -2,6 +2,13 @@
 // production `spawnRealDownstream` path. This proves the proxy works
 // end-to-end with newline-framed stdio across a real OS pipe — not just
 // in-memory PassThroughs.
+//
+// The fake server is started the way the CLI e2e tests start the CLI (test/
+// helpers.ts tsxDownstream, B-329): node on tsx's CLI file, no npx, no shell.
+// Its answer is awaited for CLI_SPAWN_TIMEOUT_MS (25 s) within each test's
+// CLI_E2E_TIMEOUT_MS (30 s); a server that has not answered by then fails
+// the test as a named spawn timeout. Through npx (cmd.exe on Windows) and a
+// 10 s wait, a loaded Windows machine timed this test out (B-329).
 
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -10,11 +17,14 @@ import { parseChainJsonl, runVerify } from "../src/vendor/recorder/index.js";
 import { loadPolicy } from "../src/policy.js";
 import { runProxy, spawnRealDownstream } from "../src/proxy.js";
 import {
+  CLI_E2E_TIMEOUT_MS,
+  CLI_SPAWN_TIMEOUT_MS,
   cleanupTmpDir,
   collectJsonLines,
   initIdentity,
   makeClientPipes,
   makeTmpDir,
+  tsxDownstream,
   writeLine,
   writePolicy,
 } from "./helpers.js";
@@ -25,7 +35,20 @@ const FAKE_SERVER = resolve(
     "$1",
   ),
 );
-const IS_WIN = process.platform === "win32";
+const DOWNSTREAM = tsxDownstream(FAKE_SERVER);
+
+// The fake server's answer, or a named spawn timeout once CLI_SPAWN_TIMEOUT_MS
+// has passed without it.
+async function answer(collector: Promise<unknown[]>): Promise<unknown[]> {
+  try {
+    return await collector;
+  } catch (e) {
+    throw new Error(
+      `spawn timeout: the fake MCP server the proxy spawned did not answer within ` +
+        `${CLI_SPAWN_TIMEOUT_MS} ms (${(e as Error).message})`,
+    );
+  }
+}
 
 describe("proxy <-> real spawned fake server", () => {
   let tmp: string;
@@ -45,11 +68,7 @@ describe("proxy <-> real spawned fake server", () => {
       clientIn,
       clientOut,
       spawnDownstream: () =>
-        spawnRealDownstream(
-          IS_WIN ? "npx.cmd" : "npx",
-          ["tsx", FAKE_SERVER],
-          { shell: IS_WIN },
-        ),
+        spawnRealDownstream(DOWNSTREAM.command, DOWNSTREAM.args, DOWNSTREAM.options),
       loadPolicy: () => {
         try {
           return loadPolicy(policyPath);
@@ -72,7 +91,7 @@ describe("proxy <-> real spawned fake server", () => {
         typeof latest === "object" &&
         latest !== null &&
         (latest as { id?: unknown }).id === 11,
-      10_000,
+      CLI_SPAWN_TIMEOUT_MS,
     );
 
     writeLine(clientIn, {
@@ -82,7 +101,7 @@ describe("proxy <-> real spawned fake server", () => {
       params: { name: "echo", arguments: { text: "spawned" } },
     });
 
-    const received = (await collector) as Array<{
+    const received = (await answer(collector)) as Array<{
       id: number;
       result?: { content: Array<{ text: string }>; isError: boolean };
     }>;
@@ -99,7 +118,7 @@ describe("proxy <-> real spawned fake server", () => {
 
     clientIn.end();
     await handle.done;
-  }, 30_000);
+  }, CLI_E2E_TIMEOUT_MS);
 
   it("DENY path: delete tool is blocked before the fake server runs it", async () => {
     const identity = await initIdentity(tmp);
@@ -125,11 +144,7 @@ describe("proxy <-> real spawned fake server", () => {
         clientIn,
         clientOut,
         spawnDownstream: () =>
-          spawnRealDownstream(
-          IS_WIN ? "npx.cmd" : "npx",
-          ["tsx", FAKE_SERVER],
-          { shell: IS_WIN },
-        ),
+          spawnRealDownstream(DOWNSTREAM.command, DOWNSTREAM.args, DOWNSTREAM.options),
         loadPolicy: () => {
           try {
             return loadPolicy(policyPath);
@@ -152,7 +167,7 @@ describe("proxy <-> real spawned fake server", () => {
           typeof latest === "object" &&
           latest !== null &&
           (latest as { id?: unknown }).id === 22,
-        10_000,
+        CLI_SPAWN_TIMEOUT_MS,
       );
 
       writeLine(clientIn, {
@@ -162,7 +177,7 @@ describe("proxy <-> real spawned fake server", () => {
         params: { name: "delete", arguments: { path: "/etc" } },
       });
 
-      const received = (await collector) as Array<{
+      const received = (await answer(collector)) as Array<{
         id: number;
         result?: { content: Array<{ text: string }>; isError: boolean };
       }>;
@@ -179,5 +194,5 @@ describe("proxy <-> real spawned fake server", () => {
     } finally {
       process.stderr.write = origStderrWrite;
     }
-  }, 30_000);
+  }, CLI_E2E_TIMEOUT_MS);
 });

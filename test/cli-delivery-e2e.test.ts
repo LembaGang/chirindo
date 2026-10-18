@@ -4,29 +4,20 @@
 // actually reads: `$?`. A scripted caller that gates on exit 0 must NOT be told
 // "success" for a receipt that referenced a payment and committed to no output.
 
-import { spawnSync } from "node:child_process";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   IDENTITY_FILENAME,
   paymentRefFromArtifacts,
 } from "../src/vendor/recorder/index.js";
 import { appendReceipt } from "../src/receipt.js";
-import { cleanupTmpDir, initIdentity, makeTmpDir } from "./helpers.js";
-
-const CLI_ENTRY = resolve(import.meta.dirname, "..", "src", "cli.ts");
-const IS_WIN = process.platform === "win32";
-
-function runCli(args: string[]): {
-  stdout: string;
-  status: number | null;
-} {
-  const r = spawnSync(IS_WIN ? "npx.cmd" : "npx", ["tsx", CLI_ENTRY, ...args], {
-    encoding: "utf8",
-    shell: IS_WIN,
-  });
-  return { stdout: r.stdout ?? "", status: r.status };
-}
+import {
+  CLI_E2E_TIMEOUT_MS,
+  cleanupTmpDir,
+  initIdentity,
+  makeTmpDir,
+  runCli,
+} from "./helpers.js";
 
 const PAYMENT_REF = paymentRefFromArtifacts(
   {
@@ -87,7 +78,7 @@ describe("chirindo verify — delivery exit codes (CLI end-to-end)", () => {
       "DELIVERY UNPROVEN (payment referenced, no output commitment)",
     );
     expect(r.status).toBe(1);
-  });
+  }, CLI_E2E_TIMEOUT_MS);
 
   it("--allow-unproven-delivery exits 0 but still prints the verdict", async () => {
     const { chainPath, identityPath } = await buildUnprovenChain();
@@ -103,7 +94,7 @@ describe("chirindo verify — delivery exit codes (CLI end-to-end)", () => {
     expect(r.stdout).toContain("DELIVERY UNPROVEN");
     expect(r.stdout).not.toContain("DELIVERY PROVEN");
     expect(r.status).toBe(0);
-  });
+  }, CLI_E2E_TIMEOUT_MS);
 
   it("a delivered paid call exits 0 and reads DELIVERY PROVEN", async () => {
     const identity = await initIdentity(tmp);
@@ -127,5 +118,5 @@ describe("chirindo verify — delivery exit codes (CLI end-to-end)", () => {
     ]);
     expect(r.stdout).toContain("DELIVERY PROVEN");
     expect(r.status).toBe(0);
-  });
+  }, CLI_E2E_TIMEOUT_MS);
 });

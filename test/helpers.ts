@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -125,4 +126,65 @@ export async function initIdentity(dir: string) {
 // that spawn the real downstream).
 export function fakeServerPath(): string {
   return resolve(dirname(new URL(import.meta.url).pathname), "..", "scripts", "fake-mcp-server.ts");
+}
+
+// ---- the chirindo CLI as a child process (CLI end-to-end tests) -----------
+//
+// One launcher for the CLI end-to-end tests (cli-verify-e2e, cli-delivery-e2e,
+// cli-export-jwks-e2e): node itself running tsx's CLI file on src/cli.ts, the
+// form test/witness.test.ts uses. No npx, no .cmd shim and no shell on
+// Windows, where `npx tsx` through cmd.exe pushed one CLI start past vitest's
+// default 5000 ms test timeout (B-329). test/witness.test.ts keeps its own
+// asynchronous launcher of the same form: its stub witness runs in the test
+// process, which a spawnSync would block.
+const REPO_ROOT = resolve(import.meta.dirname, "..");
+export const CLI_ENTRY = join(REPO_ROOT, "src", "cli.ts");
+export const TSX_CLI = join(REPO_ROOT, "node_modules", "tsx", "dist", "cli.mjs");
+
+// Each CLI spawn is killed after this long, below the per-test budget, so a
+// hung child fails the test as a named spawn timeout, not as a test timeout.
+export const CLI_SPAWN_TIMEOUT_MS = 25_000;
+// Per-test budget for every CLI e2e test (the third argument to `it`).
+export const CLI_E2E_TIMEOUT_MS = 30_000;
+
+export interface CliResult {
+  stdout: string;
+  stderr: string;
+  status: number | null;
+}
+
+export function runCli(
+  args: string[],
+  opts: { timeoutMs?: number } = {},
+): CliResult {
+  const timeoutMs = opts.timeoutMs ?? CLI_SPAWN_TIMEOUT_MS;
+  const r = spawnSync(process.execPath, [TSX_CLI, CLI_ENTRY, ...args], {
+    encoding: "utf8",
+    timeout: timeoutMs,
+  });
+  if (r.error !== undefined) {
+    const code = (r.error as NodeJS.ErrnoException).code;
+    if (code === "ETIMEDOUT") {
+      throw new Error(
+        `spawn timeout: \`chirindo ${args.join(" ")}\` did not exit within ` +
+          `${timeoutMs} ms and was killed (${r.signal ?? "no signal"}); ` +
+          `this is the CLI child, not an assertion`,
+      );
+    }
+    throw new Error(`spawn failed: \`chirindo ${args.join(" ")}\`: ${r.error.message}`);
+  }
+  return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", status: r.status };
+}
+
+// The same launcher form for a downstream the proxy spawns itself
+// (test/proxy-spawn.test.ts): node on tsx's CLI file, no npx, no .cmd shim
+// and no shell (spawnRealDownstream would default to a shell on Windows).
+// Its first answer is awaited for CLI_SPAWN_TIMEOUT_MS, inside the
+// CLI_E2E_TIMEOUT_MS per-test budget, as for the CLI e2e tests.
+export function tsxDownstream(script: string): {
+  command: string;
+  args: string[];
+  options: { shell: false };
+} {
+  return { command: process.execPath, args: [TSX_CLI, script], options: { shell: false } };
 }

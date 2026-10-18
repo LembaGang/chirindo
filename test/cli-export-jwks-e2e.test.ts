@@ -4,31 +4,15 @@
 // the contract an adopter relies on: chirindo init → chirindo export-jwks →
 // upload that file to your HTTPS host → verifiers can resolve.
 
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanupTmpDir, makeTmpDir } from "./helpers.js";
-
-const CLI_ENTRY = resolve(import.meta.dirname, "..", "src", "cli.ts");
-const IS_WIN = process.platform === "win32";
-
-function runCli(args: string[]): {
-  stdout: string;
-  stderr: string;
-  status: number | null;
-} {
-  const r = spawnSync(
-    IS_WIN ? "npx.cmd" : "npx",
-    ["tsx", CLI_ENTRY, ...args],
-    { encoding: "utf8", shell: IS_WIN },
-  );
-  return {
-    stdout: r.stdout ?? "",
-    stderr: r.stderr ?? "",
-    status: r.status,
-  };
-}
+import {
+  CLI_E2E_TIMEOUT_MS,
+  cleanupTmpDir,
+  makeTmpDir,
+  runCli,
+} from "./helpers.js";
 
 describe("chirindo export-jwks (CLI end-to-end)", () => {
   let tmp: string;
@@ -66,7 +50,7 @@ describe("chirindo export-jwks (CLI end-to-end)", () => {
     ) as { kid: string; public_key_b64url: string };
     expect(jwk.kid).toBe(identity.kid);
     expect(jwk.x).toBe(identity.public_key_b64url);
-  }, 20_000);
+  }, CLI_E2E_TIMEOUT_MS);
 
   it("defaults --out to <dir>/jwks.json when omitted", () => {
     const dir = join(tmp, "gate");
@@ -78,12 +62,12 @@ describe("chirindo export-jwks (CLI end-to-end)", () => {
       keys: unknown[];
     };
     expect(Array.isArray(jwks.keys)).toBe(true);
-  }, 20_000);
+  }, CLI_E2E_TIMEOUT_MS);
 
   it("fails (exit 1) when no identity has been initialized", () => {
     const dir = join(tmp, "gate-empty");
     const expR = runCli(["export-jwks", "--dir", dir]);
     expect(expR.status).toBe(1);
     expect(expR.stderr).toMatch(/cannot read identity/);
-  }, 20_000);
+  }, CLI_E2E_TIMEOUT_MS);
 });

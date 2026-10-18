@@ -5,46 +5,25 @@
 // test uses. We do not exercise the live JWKS network path here; the
 // engine is the recorder's, already covered by the recorder suite.
 
-import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseChainJsonl, serializeChainJsonl } from "../src/vendor/recorder/index.js";
 import { appendReceipt } from "../src/receipt.js";
 import { loadPolicy } from "../src/policy.js";
 import { runProxy } from "../src/proxy.js";
 import {
+  CLI_E2E_TIMEOUT_MS,
   cleanupTmpDir,
   collectJsonLines,
   initIdentity,
   makeClientPipes,
   makeFakeDownstream,
   makeTmpDir,
+  runCli,
   writeLine,
   writePolicy,
 } from "./helpers.js";
-
-const CLI_ENTRY = resolve(import.meta.dirname, "..", "src", "cli.ts");
-const IS_WIN = process.platform === "win32";
-
-function runCli(args: string[]): {
-  stdout: string;
-  stderr: string;
-  status: number | null;
-} {
-  // tsx via npx — same pattern the recorder uses for its CLI e2e tests.
-  // shell:true on Windows is required for the .cmd shim.
-  const r = spawnSync(
-    IS_WIN ? "npx.cmd" : "npx",
-    ["tsx", CLI_ENTRY, ...args],
-    { encoding: "utf8", shell: IS_WIN },
-  );
-  return {
-    stdout: r.stdout ?? "",
-    stderr: r.stderr ?? "",
-    status: r.status,
-  };
-}
 
 // Drive one ALLOW round-trip through the proxy to produce a real signed
 // chain on disk. Returns the chain path + the identity path the CLI needs
@@ -128,7 +107,7 @@ describe("chirindo verify (CLI end-to-end)", () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/^VALID — \d+ entries, chain intact/);
     expect(r.stdout).toContain("session sess-verify-e2e");
-  });
+  }, CLI_E2E_TIMEOUT_MS);
 
   it("reports TAMPERED + exit 1 when the chain has been mutated", async () => {
     const { chainPath, identityPath } = await buildAllowChain(tmp);
@@ -144,7 +123,7 @@ describe("chirindo verify (CLI end-to-end)", () => {
     const r = runCli(["verify", chainPath, "--key", identityPath]);
     expect(r.status).toBe(1);
     expect(r.stdout).toMatch(/^TAMPERED — entry 0:/);
-  });
+  }, CLI_E2E_TIMEOUT_MS);
 
   it("names the verifying key on VALID and honors --expect-thumbprint", async () => {
     const { chainPath, identityPath } = await buildAllowChain(tmp);
@@ -181,7 +160,7 @@ describe("chirindo verify (CLI end-to-end)", () => {
     ]);
     expect(fail.status).toBe(1);
     expect(fail.stdout).toMatch(/^INVALID — entry chain: untrusted_key/);
-  });
+  }, CLI_E2E_TIMEOUT_MS);
 
   it("present-but-down embedded jwks_uri → UNVERIFIABLE, no fallback (spec E/F)", async () => {
     // A self-describing receipt whose jwks_uri resolves inward. Run verify with
@@ -204,7 +183,7 @@ describe("chirindo verify (CLI end-to-end)", () => {
     const r = runCli(["verify", chainPath]);
     expect(r.status).toBe(1);
     expect(r.stdout).toMatch(/^UNVERIFIABLE —/);
-  });
+  }, CLI_E2E_TIMEOUT_MS);
 
   it("rejects --key and --jwks together as a usage error (exit 2)", () => {
     const r = runCli([
@@ -217,5 +196,5 @@ describe("chirindo verify (CLI end-to-end)", () => {
     ]);
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("alternative key sources");
-  });
+  }, CLI_E2E_TIMEOUT_MS);
 });
