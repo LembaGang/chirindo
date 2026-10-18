@@ -1,0 +1,95 @@
+{
+  "description": "Modelled on the check runs GitHub's API listed on 2026-10-16 for 52136e8 (v0.5.2), GET /repos/LembaGang/chirindo/commits/52136e8881434201e5a98dde4c569dc0e8a359c5/check-runs?per_page=100&filter=latest: two check suites, one from the push of main and one from the push of the tag v0.5.2, each with one run of each job, all completed with success. Trimmed to the members the gate reads. tag_ref stands for what git ls-remote origin refs/tags/v0.5.2^{} prints.",
+  "tag_ref": "52136e8881434201e5a98dde4c569dc0e8a359c5",
+  "responses": [
+    {
+      "total_count": 6,
+      "check_runs": [
+        {
+          "name": "audit",
+          "head_sha": "52136e8881434201e5a98dde4c569dc0e8a359c5",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-15T16:58:06Z",
+          "completed_at": "2026-10-15T16:58:22Z",
+          "check_suite": {
+            "id": 105076030518
+          },
+          "app": {
+            "slug": "github-actions"
+          }
+        },
+        {
+          "name": "scan",
+          "head_sha": "52136e8881434201e5a98dde4c569dc0e8a359c5",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-15T16:58:06Z",
+          "completed_at": "2026-10-15T16:58:14Z",
+          "check_suite": {
+            "id": 105076030643
+          },
+          "app": {
+            "slug": "github-actions"
+          }
+        },
+        {
+          "name": "build-test-conformance",
+          "head_sha": "52136e8881434201e5a98dde4c569dc0e8a359c5",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-15T16:58:06Z",
+          "completed_at": "2026-10-15T16:58:38Z",
+          "check_suite": {
+            "id": 105076030525
+          },
+          "app": {
+            "slug": "github-actions"
+          }
+        },
+        {
+          "name": "build-test-conformance",
+          "head_sha": "52136e8881434201e5a98dde4c569dc0e8a359c5",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-15T16:58:06Z",
+          "completed_at": "2026-10-15T16:58:38Z",
+          "check_suite": {
+            "id": 105076028942
+          },
+          "app": {
+            "slug": "github-actions"
+          }
+        },
+        {
+          "name": "scan",
+          "head_sha": "52136e8881434201e5a98dde4c569dc0e8a359c5",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-15T16:58:06Z",
+          "completed_at": "2026-10-15T16:58:14Z",
+          "check_suite": {
+            "id": 105076028803
+          },
+          "app": {
+            "slug": "github-actions"
+          }
+        },
+        {
+          "name": "audit",
+          "head_sha": "52136e8881434201e5a98dde4c569dc0e8a359c5",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-15T16:58:05Z",
+          "completed_at": "2026-10-15T16:58:20Z",
+          "check_suite": {
+            "id": 105076028314
+          },
+          "app": {
+            "slug": "github-actions"
+          }
+        }
+      ]
+    }
+  ]
+}
