@@ -1,0 +1,38 @@
+{
+  "source": "eth_getBlockByNumber from two of the built-in Base mainnet endpoints in lib/online.mjs, which returned the same header",
+  "method": "eth_getBlockByNumber",
+  "params": [
+    "0x323fd6b",
+    false
+  ],
+  "fetched_at": "2026-10-16T17:01:55.288Z",
+  "transactions_removed": 307,
+  "header": {
+    "baseFeePerGas": "0x4c4b40",
+    "blobGasUsed": "0x7b4e34",
+    "difficulty": "0x0",
+    "excessBlobGas": "0x0",
+    "extraData": "0x01000000640000000500000000004c4b40",
+    "gasLimit": "0x17d78400",
+    "gasUsed": "0x2d2c517",
+    "hash": "0xc7c83a86fec271e70355c470a1541400b606c61b566c1a6ff37da242ebd26ea1",
+    "logsBloom": "0x47f4c56215a3be78c3c470399b5b9ba3b57fb7a9e27dd91f2e84fa15f0528e31f9bd854a74e8f3a30e56caff4aaef71cd63db84f56d5a1efaf608e8ff0f5bf80164bfc96ccc10d4edf44c47d5299a5b65cf7947156ff9bfcbc43d50efd77f00eb5daafaf9aed95a5bf0e8af535ce5bbe77f25c27cf3c2e5c8ff3ce96cbda0ecf3c5ea73cbd4d7a08574e0b97f133686450378fc7bdefe878748e914ccd693ca892490157a2e9b5c855d0b39dc2c6f5277735d48b237a552e45eff365e8f72f9a5845962bff9b96e7597ddca62bacdada0608b8fcf72d32a4d62a15eb5ab9e5b70197ee80c69fbf4d37ce52685cae36a7a5a3a443dfd36ce77fbdb6d7e41e1a5c",
+    "miner": "0x4200000000000000000000000000000000000011",
+    "mixHash": "0xe8f83e6feeb55cf028ec225c0eb5dd6b5bfe5b898e9b14554871d5a08db19048",
+    "nonce": "0x0000000000000000",
+    "number": "0x323fd6b",
+    "parentBeaconBlockRoot": "0xce1fabb7868d3fac8f7265babd51ba9424e50f1a7f3db79ff8b5e37502c7b761",
+    "parentHash": "0xf6b9d0c2c9cea3687367b5bd986260d6d54f03a24f63024bd107cdb32c309fe0",
+    "receiptsRoot": "0x425709b288e6b0e3c1026ddd3b84c2798147d37af2a9ee1e474f1d3870948009",
+    "requestsHash": "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+    "size": "0x229a1",
+    "stateRoot": "0x4899b0d22b95e81a67c495cb51a6eae34a23076464e93236b6326f8960e58c0f",
+    "timestamp": "0x6ad257b9",
+    "transactionsRoot": "0x704f3bdfab061ea036037621dc80f96301761ca8aab5ce92dc8a81ba3bb51668",
+    "uncles": [],
+    "withdrawals": [],
+    "withdrawalsRoot": "0x489a748ebb12de2fe6f739b4278e3cc4fb07c0f06553a96632ca367efd36d633"
+  },
+  "note": "Header members only: the transactions list was removed after the fetch; the block hash depends only on the header. Both endpoints returned this header."
+}

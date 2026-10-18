@@ -1,0 +1,110 @@
+{
+  "id": "0x14a1b2b2761bca787e5f006a1e54d9bae21cd02f8bbfd81b55ec6e3a85b42c60",
+  "format_version": 1,
+  "signer": "0xb1D8225dcC14e967097369eaCff52788a386cDE1",
+  "label": "TEST issuer (fixture), not a real issuer",
+  "issued_at": "2026-10-16T05:53:20.417Z",
+  "ttl_seconds": 600,
+  "expires_at": 1792130600,
+  "sig": "0xef4eeb8bf4d2dbf3f6a020fd4d5bb88651a72bbe619465d7c0f8cae787642b7330a1faebccfe185b162fccd7bbfbfa5985d2af47fc19ce7f98f924723c2978161b",
+  "info_url": "https://test-issuer.invalid/receipts",
+  "payload": {
+    "decision": "PASS",
+    "testChain": 31337,
+    "action": "swap",
+    "sourceAsset": "eip155:31337/slip44:60",
+    "destinationAsset": "eip155:31337/erc20:0xc60207baa029bc276b75820aefe776f608449d92",
+    "testNotional": 2500000,
+    "riskScoreBps": 120,
+    "requestDigest": "0x4ad29fc5b6ca8a15a26a4c224d829d1c3f8ca50c39cd4be094dee244de8c3e0a",
+    "evaluatedAt": 1792130000,
+    "expiresAt": 1792130600,
+    "formatVersion": 1
+  },
+  "layout": {
+    "domain": {
+      "name": "Example Test Issuer Checks (TEST FIXTURE)",
+      "version": "1",
+      "chainId": 31337
+    },
+    "types": {
+      "TestTradeCheck": [
+        {
+          "name": "decision",
+          "type": "string"
+        },
+        {
+          "name": "testChain",
+          "type": "uint256"
+        },
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "sourceAsset",
+          "type": "string"
+        },
+        {
+          "name": "destinationAsset",
+          "type": "string"
+        },
+        {
+          "name": "testNotional",
+          "type": "uint256"
+        },
+        {
+          "name": "riskScoreBps",
+          "type": "uint256"
+        },
+        {
+          "name": "requestDigest",
+          "type": "bytes32"
+        },
+        {
+          "name": "evaluatedAt",
+          "type": "uint256"
+        },
+        {
+          "name": "expiresAt",
+          "type": "uint256"
+        },
+        {
+          "name": "formatVersion",
+          "type": "uint256"
+        }
+      ]
+    },
+    "primaryType": "TestTradeCheck",
+    "request_domain": {
+      "name": "Example Test Issuer Requests (TEST FIXTURE)",
+      "version": "1",
+      "chainId": 31337
+    },
+    "request_types": {
+      "TestTradeRequest": [
+        {
+          "name": "testChain",
+          "type": "uint256"
+        },
+        {
+          "name": "sourceAsset",
+          "type": "string"
+        },
+        {
+          "name": "destinationAsset",
+          "type": "string"
+        },
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "testNotional",
+          "type": "uint256"
+        }
+      ]
+    },
+    "request_primary_type": "TestTradeRequest"
+  }
+}

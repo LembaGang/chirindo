@@ -1,0 +1,15 @@
+{
+  "format": "chirindo-h4-pins/2",
+  "label": "Headless Oracle's pins for the H4 checker: Headless Oracle's witness key key_2026_v1, as fetched on 2026-10-16; no issuer profile is pinned here, the verifier adds the sha256 of each issuer profile it accepts",
+  "test": false,
+  "witness_keys": {
+    "file": "v5-keys.response.json",
+    "url": "https://api.headlessoracle.com/v5/keys",
+    "fetched_at": "2026-10-16T16:39:45.504Z",
+    "bytes": 1913,
+    "sha256": "642bc434c81092bb9f0103efc2478c0cf89fac330a4e1c049d2299e9c7b167b9",
+    "key_id": "key_2026_v1",
+    "public_key_hex": "03dc27993a2c90856cdeb45e228ac065f18f69f0933c917b2336c1e75712f178"
+  },
+  "issuer_profiles": []
+}

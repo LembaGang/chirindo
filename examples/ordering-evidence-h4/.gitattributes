@@ -1,0 +1,4 @@
+# Keep these files byte for byte as committed on every checkout and apply:
+# the fixtures are compared byte for byte with the output of
+# fixtures/make-fixtures.mjs, and the pinned documents by sha256.
+* -text

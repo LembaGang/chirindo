@@ -1,0 +1,20 @@
+{
+  "format": "chirindo-h4-pins/2",
+  "label": "TEST FIXTURE PINS: the TEST issuer profile and a STUB witness key, both from public seed strings in fixtures/make-fixtures.mjs; not a real issuer's and not Headless Oracle's keys",
+  "test": true,
+  "witness_keys": {
+    "file": "v5-keys.response.json",
+    "url": "https://test-fixture.invalid/v5/keys",
+    "fetched_at": "2026-10-16T00:00:00.000Z",
+    "bytes": 414,
+    "sha256": "7311ffbfbcd8a9790c25db027455c70b296ec17f59cb96e11ba8a8ecbfba7eef",
+    "key_id": "stub_test_v1",
+    "public_key_hex": "bea08e4dd79413b08a4b922e2200edd665e314051e7c40b9bcf07b096a5e0f64"
+  },
+  "issuer_profiles": [
+    {
+      "label": "the TEST FIXTURE issuer profile",
+      "sha256": "cfe939990da24f5dd03ebda17ef926f62f9062940d3afe8dd391d4b2dcad0c4f"
+    }
+  ]
+}

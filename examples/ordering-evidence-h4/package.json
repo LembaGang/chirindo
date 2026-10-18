@@ -1,0 +1,15 @@
+{
+  "name": "chirindo-ordering-evidence-h4",
+  "private": true,
+  "type": "module",
+  "description": "Checker for one ordering-evidence case on Base: two EIP-712 receipts from a pre-trade check issuer read through a pinned issuer profile, a hash-chained log, its witnessed checkpoint, and a transaction whose authorizer signed the later entry's hash. Not part of the npm package.",
+  "scripts": {
+    "test": "node --test --test-reporter=tap test/h4-checks.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "viem": "2.56.9"
+  }
+}

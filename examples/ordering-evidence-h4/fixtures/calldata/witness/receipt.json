@@ -1,0 +1,14 @@
+{
+  "checkpoint_sha256": "sha256:1d095651db97c1be575617fda4684dd805fcd868940f383935f8aced180f9f0a",
+  "checkpoint_ts": "2026-10-16T05:53:26.250Z",
+  "count": "2",
+  "fork": "false",
+  "kid": "f0bWYxR3RGxwPGJMiJYhmLJf14Kw3vqto1OV85TUwkY",
+  "last_entry_hash": "sha256:69c020781934a765ac35c1cc28dcaab390e674508bddfb3ce093e12a4faefbd5",
+  "public_key_id": "stub_test_v1",
+  "received_at": "2026-10-16T05:53:27.731Z",
+  "session_id": "h4-fixture-calldata-1",
+  "type": "witness.checkpoint/1",
+  "witness": "headlessoracle.com",
+  "signature": "fbcb7a0a972bbeb8b4a58b746cf4707d2e4edf439ab21b3a14dda165d48eb582e17239ba81e8cc7020b48095b96c0191d2156735ef15121ce3c028f27f695802"
+}

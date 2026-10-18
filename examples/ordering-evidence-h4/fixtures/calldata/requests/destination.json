@@ -1,0 +1,7 @@
+{
+  "testChain": 31337,
+  "sourceAsset": "eip155:31337/erc20:0xc60207baa029bc276b75820aefe776f608449d92",
+  "destinationAsset": "eip155:31337/slip44:60",
+  "action": "swap",
+  "testNotional": 2500000
+}

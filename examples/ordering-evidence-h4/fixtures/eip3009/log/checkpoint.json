@@ -1,0 +1,10 @@
+{
+  "v": "evidence.action/1",
+  "type": "checkpoint",
+  "session_id": "h4-fixture-eip3009-1",
+  "count": 2,
+  "last_entry_hash": "sha256:c811ae9fd719b2d156b251b6ba7af00ef1f3c14c6160a360a7d6b466b9484aee",
+  "ts": "2026-10-16T05:53:26.250Z",
+  "kid": "f0bWYxR3RGxwPGJMiJYhmLJf14Kw3vqto1OV85TUwkY",
+  "sig": "-_aUkBqMvPt9Ys-eUTASUuyL9nik48q4vdLrkR5LgLMZorD_4hyGHu4dPrieGr6WlK0za3akODCRzqOFYqxwAA"
+}

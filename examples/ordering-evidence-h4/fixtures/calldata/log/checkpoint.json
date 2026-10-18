@@ -1,0 +1,10 @@
+{
+  "v": "evidence.action/1",
+  "type": "checkpoint",
+  "session_id": "h4-fixture-calldata-1",
+  "count": 2,
+  "last_entry_hash": "sha256:69c020781934a765ac35c1cc28dcaab390e674508bddfb3ce093e12a4faefbd5",
+  "ts": "2026-10-16T05:53:26.250Z",
+  "kid": "f0bWYxR3RGxwPGJMiJYhmLJf14Kw3vqto1OV85TUwkY",
+  "sig": "uzy7IbLlh3FalPWdJJWGKe_6Wo0BYYFpcB_4Q-vIioqgqG7bMs0xMngqUUu4mAjvEr6J6ydyviv40wbEW6EWCw"
+}

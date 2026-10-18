@@ -1,0 +1,7 @@
+{
+  "format": "chirindo-h4-case/1",
+  "mode": "ordering",
+  "chain_id": 31337,
+  "tx_hash": "0xe19c3699ec8f275ec0f52c35c9a8a06e3178f580fe76e5cbed8f271cbc18729b",
+  "binding": "eip3009-nonce"
+}

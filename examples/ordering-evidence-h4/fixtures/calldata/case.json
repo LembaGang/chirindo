@@ -1,0 +1,7 @@
+{
+  "format": "chirindo-h4-case/1",
+  "mode": "ordering",
+  "chain_id": 31337,
+  "tx_hash": "0xfe658bf231c6305f15aa64d2c6e1836eeb68e6523b007096287e2314e07b9386",
+  "binding": "calldata"
+}
