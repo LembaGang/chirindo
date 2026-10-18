@@ -226,6 +226,10 @@ Field notes:
   (the operator's own domain, never Headless Oracle). For a v1 receipt
   `kid == key_thumbprint`: one key identity, reconcilable from the receipt
   alone.
+- **`agent`** names the gate software that wrote the receipt: `vendor` is
+  `chirindo` and, from 0.5.3, `version` is the version of the package that
+  wrote it. Receipts written by 0.5.2 and earlier, like the example above,
+  carry `"version": "0.0.1"` whatever the package version was.
 - **`event`**: this is an ALLOW receipt (`outcome: "executed"`,
   `decision: "allow"`, `gate.result: "act"`). A DENY receipt instead reads
   `denied` / `deny` / `halt` and omits `result_hash` — there was no

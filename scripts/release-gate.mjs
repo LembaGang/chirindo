@@ -176,6 +176,16 @@ try {
   record("SURFACE", absent.length === 0,
     absent.length ? `absent from artifact: ${absent.join(", ")}` : `${REQUIRED_SURFACE.length}/${REQUIRED_SURFACE.length} present`);
 
+  // --- AGENT-VERSION -------------------------------------------------------
+  // RED WHEN: receipts from the shipped build would name another version than
+  // the artifact's own package.json. Up to 0.5.2 every receipt said "0.0.1";
+  // from 0.5.3 dist/version.js reads ../package.json when it loads, and this
+  // check runs that read in the installed layout, not under tsx against src/.
+  const receiptModule = await import(pathToFileURL(join(installed, "dist", "receipt.js")).href);
+  const agentVersion = receiptModule.GATE_AGENT?.version;
+  record("AGENT-VERSION", agentVersion === meta.version,
+    `receipt agent.version=${agentVersion} artifact=${meta.version}`);
+
   // --- CORPUS/JCS ----------------------------------------------------------
   // RED WHEN: the shipped build canonicalizes differently from the frozen
   // corpus. Runs the CURRENT vectors against the artifact, so a corpus revision

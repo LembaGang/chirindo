@@ -19,7 +19,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   Chain,
   argsHash,
@@ -37,6 +37,13 @@ import {
   type ShellEvent,
 } from "../src/vendor/recorder/index.js";
 import { appendReceipt } from "../src/receipt.js";
+
+// EXPECTED_RECEIPT below was made before 0.5.3, when every receipt carried
+// agent.version "0.0.1". From 0.5.3 the gate reads its version from
+// package.json (src/version.ts), so it is pinned here to the value those
+// frozen bytes were made with. Only that member is pinned; every other byte
+// still comes from appendReceipt.
+vi.mock("../src/version.js", () => ({ GATE_VERSION: "0.0.1" }));
 
 const SEED = Buffer.alloc(32, 7);
 const SESSION = "byte-invariance-session";

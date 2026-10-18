@@ -36,6 +36,7 @@ import {
   type RecordContent,
   type SignedRecord,
 } from "./vendor/recorder/index.js";
+import { GATE_VERSION } from "./version.js";
 
 export interface GateDecisionAllow {
   kind: "allow";
@@ -92,9 +93,12 @@ export interface ReceiptInputs {
   ts?: string;
 }
 
+// `agent` in every receipt this gate writes: the vendor and the version of
+// the package that wrote it (src/version.ts reads it from package.json).
+// Receipts written before 0.5.3 carry the constant version "0.0.1".
 export const GATE_AGENT = {
   vendor: "chirindo",
-  version: "0.0.1",
+  version: GATE_VERSION,
 } as const;
 
 // Build the mcp_call event matching the recorder's adapter shape. Outcome
