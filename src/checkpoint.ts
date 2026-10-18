@@ -72,6 +72,9 @@ export class ProxyCheckpointer {
   // Checkpoints queued but not yet written to the sidecar.
   private readonly inflight = new Set<SignedCheckpoint>();
   private closed = false;
+  // Aborted at the shutdown deadline: a witness request still open then is
+  // ended, so that nothing keeps the process running after it (src/cli.ts).
+  private readonly stop = new AbortController();
   // At most one upgrade hint per process, however many checkpoints are refused.
   private upgradeHinted = false;
 
@@ -124,6 +127,7 @@ export class ProxyCheckpointer {
     await Promise.race([this.queue, deadline]);
     clearTimeout(timer);
     this.closed = true;
+    this.stop.abort();
     for (const cp of this.inflight) {
       this.record(cp, { receipt: null, error: "witness_timeout" });
     }
@@ -151,7 +155,7 @@ export class ProxyCheckpointer {
       const outcome: Recorded =
         this.o.witness === undefined
           ? { receipt: null, error: null }
-          : await witnessCheckpoint(cp, publicKeyFromPrivate(this.o.identity.privateKey), this.o.witness).catch(
+          : await witnessCheckpoint(cp, publicKeyFromPrivate(this.o.identity.privateKey), this.o.witness, undefined, this.stop.signal).catch(
               () => ({ receipt: null, error: "witness_unreachable" }) as WitnessOutcome,
             );
       if (this.closed) return;

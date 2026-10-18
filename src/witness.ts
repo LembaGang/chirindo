@@ -195,6 +195,40 @@ function errMessage(e: unknown): string {
   return err?.cause?.message ?? err?.message ?? String(e);
 }
 
+// One witness request, which leaves nothing open once it settles: it asks for
+// connection: close, reads the whole body, and clears its own timer (in place
+// of AbortSignal.timeout's, which outlives the request). `stop`, when given,
+// ends it early (the proxy's shutdown deadline). A process that has made one
+// therefore ends on its own, which src/cli.ts relies on: it never calls
+// process.exit() once a witness request has been made.
+async function witnessRequest(
+  url: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string },
+  timeoutMs: number,
+  stop?: AbortSignal,
+): Promise<{ status: number; text: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")),
+    timeoutMs,
+  );
+  const onStop = () => controller.abort(stop?.reason);
+  if (stop?.aborted) onStop();
+  else stop?.addEventListener("abort", onStop, { once: true });
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers: { ...(init.headers ?? {}), connection: "close" },
+      redirect: "error",
+      signal: controller.signal,
+    });
+    return { status: res.status, text: await res.text() };
+  } finally {
+    clearTimeout(timer);
+    stop?.removeEventListener("abort", onStop);
+  }
+}
+
 // Ed25519 over the JCS bytes of the receipt without `signature`; the signature
 // is lowercase hex, 128 chars (spec section 4).
 export function verifyWitnessSignature(receipt: Record<string, unknown>, pubObj: KeyObject): boolean {
@@ -213,16 +247,14 @@ export function verifyWitnessSignature(receipt: Record<string, unknown>, pubObj:
 export async function fetchWitnessKey(
   baseUrl: string,
   keyId: string,
+  stop?: AbortSignal,
 ): Promise<{ ok: true; raw: Buffer; url: string } | { ok: false; reason: string }> {
   const url = `${baseUrl}/v5/keys`;
   let body: unknown;
   try {
-    const res = await fetch(url, {
-      redirect: "error",
-      signal: AbortSignal.timeout(WITNESS_GET_TIMEOUT_MS),
-    });
+    const res = await witnessRequest(url, {}, WITNESS_GET_TIMEOUT_MS, stop);
     if (res.status !== 200) return { ok: false, reason: `GET ${url} returned ${res.status}` };
-    body = await res.json();
+    body = JSON.parse(res.text);
   } catch (e) {
     return { ok: false, reason: `GET ${url} failed: ${errMessage(e)}` };
   }
@@ -268,6 +300,7 @@ export async function witnessCheckpoint(
   gatePub: KeyObject,
   target: WitnessTarget,
   timeoutMs = WITNESS_POST_TIMEOUT_MS,
+  stop?: AbortSignal,
 ): Promise<WitnessOutcome> {
   const url = `${target.baseUrl}/v1/witness/checkpoints`;
   const body = JSON.stringify({
@@ -281,15 +314,9 @@ export async function witnessCheckpoint(
   let status: number;
   let text: string;
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers,
-      body,
-      redirect: "error",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    const res = await witnessRequest(url, { method: "POST", headers, body }, timeoutMs, stop);
     status = res.status;
-    text = await res.text();
+    text = res.text;
   } catch (e) {
     return { receipt: null, error: errMessage(e) === "timeout" ? "witness_timeout" : "witness_unreachable" };
   }
@@ -327,7 +354,7 @@ export async function witnessCheckpoint(
   if (target.pinned !== undefined) {
     pubObj = target.pinned.pubObj;
   } else {
-    const fetched = await fetchWitnessKey(target.baseUrl, obj["public_key_id"] ?? "");
+    const fetched = await fetchWitnessKey(target.baseUrl, obj["public_key_id"] ?? "", stop);
     if (!fetched.ok) return { receipt: null, error: "witness_key_unavailable" };
     pubObj = witnessPubFromRaw(fetched.raw);
   }
@@ -365,12 +392,9 @@ export async function collectReceiptsFromWitness(
     const url = `${baseUrl}/v1/witness/checkpoints?${q.toString()}`;
     let body: unknown;
     try {
-      const res = await fetch(url, {
-        redirect: "error",
-        signal: AbortSignal.timeout(WITNESS_GET_TIMEOUT_MS),
-      });
+      const res = await witnessRequest(url, {}, WITNESS_GET_TIMEOUT_MS);
       if (res.status !== 200) return { ok: false, reason: `GET ${url} returned ${res.status}` };
-      body = await res.json();
+      body = JSON.parse(res.text);
     } catch (e) {
       return { ok: false, reason: `GET ${url} failed: ${errMessage(e)}` };
     }

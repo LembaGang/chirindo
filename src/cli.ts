@@ -52,7 +52,7 @@ import {
   runVerify,
 } from "./vendor/recorder/index.js";
 import { loadPolicy } from "./policy.js";
-import { runProxy, spawnRealDownstream } from "./proxy.js";
+import { runProxy, spawnRealDownstream, type DownstreamProcess } from "./proxy.js";
 import { appendSidecarLine, buildCheckpoint } from "./checkpoint.js";
 import {
   DEFAULT_WITNESS_KEY_ID,
@@ -495,10 +495,11 @@ function cmdProxy(args: ParsedArgs): number {
   }
 
   const [downstreamCmd, ...downstreamArgs] = args.passthrough;
+  let downstream: DownstreamProcess | undefined;
   const handle = runProxy({
     clientIn: process.stdin,
     clientOut: process.stdout,
-    spawnDownstream: () => spawnRealDownstream(downstreamCmd!, downstreamArgs),
+    spawnDownstream: () => (downstream = spawnRealDownstream(downstreamCmd!, downstreamArgs)),
     loadPolicy: () => {
       try {
         return loadPolicy(resolvedPolicyPath);
@@ -535,7 +536,13 @@ function cmdProxy(args: ParsedArgs): number {
   }
 
   // The shutdown checkpoint (and its witness POST, capped at 5 s) must finish
-  // BEFORE process.exit, or the head of every session would go unwitnessed.
+  // BEFORE the process ends, or the head of every session would go unwitnessed.
+  // Then the process ends on its own, never by process.exit(): once a witness
+  // request has been made, process.exit() can trip a libuv assertion on
+  // Windows (Node 24) while fetch's handles are closing, as it did for
+  // scripts/release-gate.mjs. So nothing may keep it running: the client's
+  // stdin is closed and the downstream, already ended and killed by runProxy,
+  // is let go; each witness request leaves nothing open (src/witness.ts).
   handle.done.then(async () => {
     try {
       await handle.finalCheckpoint(SHUTDOWN_WITNESS_WAIT_MS);
@@ -545,7 +552,9 @@ function cmdProxy(args: ParsedArgs): number {
     process.stderr.write(
       `[chirindo] proxy exiting (${handle.receiptCount()} receipts written)\n`,
     );
-    process.exit(0);
+    process.exitCode = 0;
+    process.stdin.destroy();
+    downstream?.release?.();
   });
 
   // Keep the event loop alive — Node would otherwise exit once stdin/stdout

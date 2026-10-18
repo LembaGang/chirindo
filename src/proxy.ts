@@ -170,6 +170,10 @@ export interface DownstreamProcess {
   kill?: () => void;
   // Resolves when the child exits (any exit code).
   exited: Promise<number | null>;
+  // After the proxy is done: closes the child's pipes and stops it holding
+  // the event loop, so a process that ends on its own (src/cli.ts) is not
+  // kept running by a child that outlives its kill.
+  release?: () => void;
 }
 
 export interface ProxyHandle {
@@ -1051,6 +1055,10 @@ export function spawnRealDownstream(
       } catch {
         /* ignore */
       }
+    },
+    release: () => {
+      for (const s of [child.stdin, child.stdout, child.stderr]) s.destroy();
+      child.unref();
     },
     exited: new Promise((resolve) => {
       let resolved = false;
