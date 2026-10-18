@@ -5,6 +5,226 @@ Published versions and their dates are listed on npm
 Releases before 0.5.1 have no entry here; their notes are their commit
 messages.
 
+## 0.5.3 - 2026-10-18
+
+Security fix. In the package, `README.md`, the version in `package.json`
+and, in `dist/`, the CLI, the proxy, the policy evaluator, the JSON-RPC
+helpers, the receipt writer, the checkpoint writer, the witness client
+and the vendored strict-JSON scanner and its index differ from 0.5.2,
+and `dist/version.js` and `dist/member-names.js` (each with its `.d.ts`
+and `.map`) are new: 97 files.
+
+**Security.** In every version on npm, 0.1.0 to 0.5.2, a client could
+send a `tools/call` that a downstream server ran without the gate's
+policy check or past a deny rule for its tool, or without a receipt
+that matched what ran. Each item below was reproduced with both 0.1.0,
+the first version on npm, and 0.5.2:
+
+- The gate checked a line only when it parsed as a request with
+  `"jsonrpc": "2.0"`, a string `method` and an `id` member, and forwarded
+  anything else unchecked. Under a policy that denies `mock_swap`, a
+  `tools/call` for it with no `id`, without the `jsonrpc` member, or in a
+  line with a carriage return inside it, ran with no receipt; one whose
+  `id` was `null` or an object ran with no receipt when the policy
+  allowed it (the example downstream in `examples/observe-only-agent/`).
+- The gate reads member names exactly. A downstream may not: Go's
+  `encoding/json`, decoding into a struct, matches member names without
+  regard to case and lets a later member overwrite an earlier one. With
+  such a downstream and a policy that denies `mock_swap`, a line with
+  `"Method": "tools/call"`, or with `"method": "ping"` beside
+  `"METHOD": "tools/call"`, was no `tools/call` to the gate and ran
+  `mock_swap` with no receipt; a `tools/call` whose `params` held
+  `"name": "get_quote"` and `"Name": "mock_swap"`, or that spelled
+  `params` as `"paramſ"` (U+017F), got an ALLOW receipt for another
+  tool while `mock_swap` ran.
+- A deny rule matched the tool name exactly, and only a method of
+  exactly `tools/call` made a line a `tools/call` to the gate. With a
+  downstream that looks tools up without regard to case, or trims or
+  NFKC-normalizes the name first, and a policy that denies `mock_swap`,
+  a `tools/call` for `MOCK_SWAP`, `Mock_Swap`, `" mock_swap"` or the
+  fullwidth `ｍｏｃｋ＿ｓｗａｐ` ran `mock_swap` under an ALLOW receipt for
+  the name sent. With one that compares upper-cased names and a policy
+  that denies `delete_file`, `delete_ﬁle` (with the ligature U+FB01) ran
+  `delete_file`. With one that trims and lowercases the method, a line
+  whose method was `"TOOLS/CALL"` or `"tools/call "` was no `tools/call`
+  to the gate and ran `mock_swap` with no receipt. So did a line whose
+  method was not a string at all, such as `["tools/call"]`, with a
+  downstream that turns the method into text (`String(method)`) or looks
+  it up in a table of handlers keyed by method.
+- Two `tools/call` lines with the same `id`, sent together under a
+  policy that allows them, both ran, and the chain held one receipt.
+- The gate forwards an allowed call re-encoded from its parsed value. An
+  integer beyond JavaScript's safe range in it reached the downstream
+  changed (12345678901234567891 arrived as 12345678901234567000). A
+  number too large for a double, such as `1e400`, arrived as `null`, and
+  that call ran with no receipt, because none could be written for it.
+
+The forwarding behind each is in the `dist/proxy.js` and `dist/rpc.js`
+of all seven versions on npm, and the exact match of tool names in
+their `dist/policy.js`; git history traces both to the repository's
+first commit. From 0.5.3 a `tools/call` is recognised by its method
+alone, and these client lines are refused and never forwarded, each
+with one line on stderr:
+
+- a `tools/call` with no `id`: no reply (a message without an id is a
+  notification);
+- a `tools/call` whose `id` is `null`, or is not a string or an integer:
+  `-32600` with `id: null`;
+- a JSON-RPC batch: one `-32600` with `id: null` (MCP removed batching
+  in its 2025-06-18 revision);
+- a line that is not JSON (`-32700`), or that has a carriage return
+  inside it (`-32600`), with `id: null`;
+- a message that names a member twice in one object, has `jsonrpc`,
+  `id`, `method` or `params` in another case, or has two members that
+  differ only in case at the top level or in `params`, and a
+  `tools/call` whose `params` has `name`, `arguments` or `_meta` in
+  another case: `-32600`;
+- a message with a member named `__proto__` at the top level or in
+  `params`: `-32600`. `JSON.parse` keeps it as an inert member, but a
+  downstream that copies the message into a fresh object
+  (`Object.assign({}, msg)`, a `for...in` loop) sets that object's
+  prototype from it, so a method and `params` carried inside read as the
+  message's own;
+- a message whose `method` is not a string (an array, an object, a
+  number, `true`, `false` or `null`), is `tools/call` only after trimming
+  white space or folding case (`"TOOLS/CALL"`, `"tools/call "`), or holds
+  a control or format character: `-32600`;
+- a `tools/call` with an integer outside JavaScript's safe range, or a
+  number too large for a double, anywhere in it: `-32600`;
+- a `tools/call` nested more than 128 levels deep, too deep to
+  canonicalize for its receipt: `-32600`, its receipt's `args_hash` over
+  the empty object. The gate computes a call's `args_hash` and
+  `request_commitment` before forwarding it, so a call it could not
+  record never reaches the downstream; a call within the limit runs;
+- a `tools/call` with the `id` of a `tools/call` still in flight:
+  `-32600`;
+- a `tools/call` whose `params` is not an object, or whose `params.name`
+  is not a non-empty string, begins or ends with white space, or holds
+  a control or format character (Unicode categories Cc and Cf) anywhere,
+  and, unless the proxy runs with `--allow-nonstandard-tool-names`, one
+  whose `params.name` is outside MCP's rule for tool names: `-32602`.
+
+The errors for the last seven carry the request's id: the message's `id`
+when the message is a request (it has a `method` member, in any case),
+has one member named exactly `id`, and that id is a string or an
+integer within JavaScript's safe range. Otherwise the error has
+`id: null`, and so does the error for a client's response to a request
+from the server, since that id is the server's.
+
+Deny rules now match tool names regardless of case: a rule for
+`delete_file` also stops `DELETE_FILE`, `Delete_File` and `delete_ﬁle`,
+names equal to it under Unicode case folding or after the full upper-
+and lower-case mappings (which also make `ß` and `ss` equal). So a rule
+now also stops a tool whose name differs from it only in case. The
+server label still has to match exactly.
+
+MCP's tools page
+(https://modelcontextprotocol.io/specification/2026-07-28/server/tools,
+"Tool Names") says tool names SHOULD be 1 to 128 characters long, and
+"The following SHOULD be the only allowed characters": ASCII letters,
+digits, underscore (`_`), hyphen (`-`) and dot (`.`). From 0.5.3 the
+proxy refuses a `tools/call` whose name is outside that rule, so that a
+downstream cannot normalize such a name (NFKC, dropping invisible or
+combining characters) into the name of a tool a deny rule names. The
+proxy flag `--allow-nonstandard-tool-names` forwards such names instead,
+and the proxy then prints a warning to stderr at start.
+
+Every refused line that is a `tools/call`, or that a downstream could
+take for one (matching member names without regard to case, trimming,
+folding the case of or dropping control and format characters from the
+method, reading a method that is not a string as text, or reading a
+`__proto__` member as the message's own members), gets a DENY receipt
+(a batch, one for each such element). A line that is not JSON or has a
+carriage return inside it gets none, nor does a `tools/call` whose
+arguments hold a number too large for a double, which no receipt can
+hash; one refused for nesting too deep gets a receipt over the empty
+object. Lines that none of these rules refuse are gated and forwarded
+as before, except that deny rules now match tool names without regard
+to case (above).
+
+Limits of this release:
+
+- A refusal's DENY receipt reads like a policy denial: `decision`
+  `"deny"`, `decision_source` `"config"`. The reason for a refusal goes
+  to stderr only; a later release will record it in the receipt.
+- An allowed call is forwarded re-encoded from its parsed value, so a
+  number with a fraction or an exponent reaches the downstream as the
+  JavaScript number it parses to (`1.50` as `1.5`, `1e2` as `100`,
+  `12345678901234567891.5` as `12345678901234567000`). The receipt's
+  `args_hash` covers the arguments as forwarded.
+- An allowed call whose answer never arrives (the downstream exits or
+  never replies) leaves no receipt: the ALLOW receipt is written when
+  the answer comes back. Its id stays in flight, so a later `tools/call`
+  with that id is refused for the rest of the session.
+- The 128-level nesting limit is well above any real tool's arguments
+  (a handful of levels). A call within it runs; one past it is refused
+  (above), so the gate never tries to canonicalize a payload deep enough
+  to overflow the stack.
+- Member names inside `params.arguments` and `params._meta` are not
+  checked, for case or for a `__proto__` member: they are the tool's
+  arguments, not the gate's envelope. A downstream that merges a tool's
+  arguments into a prototype-bearing object is choosing how to read its
+  own arguments. The receipt's `args_hash` covers the arguments as the
+  gate parsed them, which is what it forwards.
+- Deny rules compare tool names without regard to case and in no other
+  way. A downstream that reads one name inside MCP's rule as another
+  (`mock-swap` as `mock_swap`, say) could run a tool a deny rule names,
+  under an ALLOW receipt for the name sent.
+- With `--allow-nonstandard-tool-names`, deny rules compare a name
+  outside MCP's rule without regard to case only. Compatibility forms
+  (the fullwidth `ｍｏｃｋ＿ｓｗａｐ`, which NFKC turns into `mock_swap`),
+  default-ignorable characters such as U+034F and combining marks are
+  compared as they are, so a downstream that normalizes names that way
+  could run a tool a deny rule names.
+- A method is refused when it is `tools/call` after trimming white space
+  at either end, folding case or dropping control and format characters.
+  A downstream that rewrites methods any further (removing white space
+  inside, NFKC) could still read a `tools/call` the gate did not.
+- The ALLOW and DENY lines on stderr print the tool name and a string id
+  as sent, so an id that holds a line feed splits its line; refusal lines
+  write such characters as `\u` escapes.
+- A refused line is not forwarded, so a refused response to a request
+  from the server leaves that request unanswered.
+- The gate ends a message only at a line feed, as the MCP stdio
+  transport defines (revision 2026-07-28,
+  https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio,
+  fetched 2026-10-17 07:00:02 UTC: "Messages are delimited by newlines,
+  and MUST NOT contain embedded newlines."); a well-formed message may
+  carry U+2028, U+2029 or U+0085 inside a string, and the gate forwards
+  it unchanged (an allowed `tools/call`, re-encoded as above, carries
+  them raw even where the client escaped them); a downstream that also
+  ends messages at those characters can see a different boundary than
+  the gate, so a downstream should end messages at line feed only.
+
+Also in this release:
+
+- **Whole characters across chunks.** Up to 0.5.2 the gate decoded each
+  chunk of its input on its own, so a character that a chunk boundary
+  cut became U+FFFD: in a `tools/call`'s arguments, in what the
+  downstream got and in `args_hash`; in an answer, in what the client
+  got. Reproduced with 0.1.0 and 0.5.2. Client stdin and downstream
+  stdout are now each read through one streaming UTF-8 decoder.
+- **Receipts name the gate's version.** A new receipt's `agent.version`
+  is the package version; up to 0.5.2 it was always `"0.0.1"`.
+- **CLI tests on Windows.** The `verify` and `export-jwks` CLI tests,
+  and the proxy test that spawns a real downstream server, share one
+  launcher (node and tsx, no shell) and have 30 s each.
+- **A CI gate before publish.** `scripts/release-gate.mjs --require-ci
+  <sha>` exits 0 only when the tag is at `<sha>` and its CI has passed.
+  It polls every 30 s for up to 20 minutes, at most 40 requests; a 401,
+  403 or 429 from GitHub fails it at once; it sends `GITHUB_TOKEN`, when
+  set, as a bearer token and never prints it. It ends by setting its
+  exit code (0 after `GATE PASS`, 1 after `GATE FAIL`), not with
+  `process.exit()`, and each of its requests leaves nothing open.
+- **The proxy ends on its own.** At shutdown, after its last checkpoint,
+  `chirindo proxy` sets exit code 0 and lets the process end instead of
+  calling `process.exit()`, which on Windows with Node 24 can fail after
+  network requests with exit code 0xC0000409 (a libuv assertion). It
+  closes its stdin and lets the downstream go; each witness request asks
+  for `connection: close`, reads the whole answer and clears its own
+  timer, and one still open when the 5 s shutdown wait runs out is ended
+  and recorded as `witness_timeout`, as before.
+
 ## 0.5.2 — 2026-10-15
 
 Docs only. `test/` is unchanged from 0.5.1 and `src/` changes only in
