@@ -8,10 +8,13 @@
 // It throws only on an internal error.
 
 import { createHash } from "node:crypto";
-import { isoUtc, isPlainObject, jcs, jcsSha256, parseStrictJson, quantity } from "../../ordering-evidence-h4/lib/formats.mjs";
+import { isoUtc, isPlainObject, jcs, jcsSha256, okpThumbprint, parseStrictJson, quantity } from "../../ordering-evidence-h4/lib/formats.mjs";
 import { parseErc8021 } from "../../ordering-evidence-h4/lib/evm.mjs";
 import { declaredShape, decodedShape } from "./allowlist.mjs";
+import { BUILT, built } from "./built.mjs";
 import { jcsJsonDigest, m0, m1 } from "./bundle.mjs";
+import { ANNEX_A, argsHashOf, bIns, capturedDigest, m6Instruction, resultHashOf } from "./instructions.mjs";
+import { m7Receipt, ownState, readIssuerProfile, reading } from "./receipts.mjs";
 import { LIMIT_TEXTS } from "./limits.mjs";
 import { analyseSearch, m5, readRpcJson, signerOfMatch } from "./payment.mjs";
 import {
@@ -20,8 +23,10 @@ import {
   m2ChirindoLog,
   m3Shape,
   m4Shape,
+  m2AnnexBLog,
   m9OperatorKey,
   operatorKeysByThumbprint,
+  parseAnnexBLog,
   parseChirindoLog,
   parseSidecar,
   receiptSigOk,
@@ -32,6 +37,8 @@ import {
 import { ALLOW_TRIPLE, BINDING_IDS, OUTPUT_TYPE, REFUSE_VALUES, THUMBPRINT_RE, VERDICT_TEXT } from "./table.mjs";
 import { eip3009Readable } from "./tx.mjs";
 
+export { BUILT };
+const ANNEX_B_LOG = "jcs-sha256-chain/0.1";
 export const VERIFIER = { name: "chirindo examples/evidence-bundle", version: "0.9.0", commit: "unrecorded" };
 
 const sha256Hex = (b) => createHash("sha256").update(b).digest("hex");
@@ -100,6 +107,8 @@ function decisionOf(rec) {
   return { vals, value: "not-read" };
 }
 
+built("S1.authorizer", "S2.tx", "M2.prefix", "M3.signature", "M3.history", "M8.arguments", "M9.witness-key");
+built("M8.result");
 export async function verifyBundle(bytes, stated, pins) {
   const checks = [];
   const flags = [];
@@ -140,7 +149,7 @@ export async function verifyBundle(bytes, stated, pins) {
   const opKeys = operatorKeysByThumbprint(opMembers.filter((o) => !o.error));
   const logs = byRole("gate-log").map((m) => {
     try {
-      const { records, checkpoint } = parseChirindoLog(decoded.get(m.id));
+      const { records, checkpoint } = (m.profile === ANNEX_B_LOG ? parseAnnexBLog : parseChirindoLog)(decoded.get(m.id));
       return { member: m.id, profile: m.profile, records, checkpoint, error: null };
     } catch (e) {
       return { member: m.id, profile: m.profile, records: [], checkpoint: null, error: e.message };
@@ -149,7 +158,7 @@ export async function verifyBundle(bytes, stated, pins) {
   for (const log of logs) {
     if (log.error) {
       log.m2 = { status: "FAIL", reason: null, detail: `the log does not read: ${log.error}`, flags: [], entryHashes: [] };
-    } else log.m2 = m2ChirindoLog(log, opKeys);
+    } else log.m2 = log.profile === ANNEX_B_LOG ? m2AnnexBLog(log, opKeys) : m2ChirindoLog(log, opKeys);
     flags.push(...log.m2.flags);
     add("M2.log", log.member, log.m2.status, log.m2.reason, log.m2.detail);
   }
@@ -183,6 +192,19 @@ export async function verifyBundle(bytes, stated, pins) {
     }
   }
   for (const e of sidecarErrors) add("M3.checkpoint", e.member, "FAIL", null, `the sidecar does not read: ${e.error}`);
+  // Checkpoints and witness receipts carried as members of their own, checked
+  // as a sidecar line's are (M3, M4) and read by B-CKP and B-WIT with them.
+  for (const m of byRole("checkpoint")) {
+    const v = tryParse(decoded.get(m.id));
+    if (v.error) add("M3.checkpoint", m.id, "FAIL", null, `the member does not read as strict JSON: ${v.error}`);
+    else checkpoints.push({ member: m.id, cp: v.value, where: m.id });
+  }
+  const receiptMemberErrors = [];
+  for (const m of byRole("witness-receipt")) {
+    const v = tryParse(decoded.get(m.id));
+    if (v.error) receiptMemberErrors.push({ member: m.id, error: v.error });
+    else receipts.push({ member: m.id, r: v.value, where: m.id });
+  }
   const logFor = (kid, sid) => logs.find((l) => !l.error && l.records[0]?.kid === kid && l.records[0]?.session_id === sid);
   for (const c of checkpoints) {
     const shape = m3Shape(c.cp);
@@ -234,6 +256,7 @@ export async function verifyBundle(bytes, stated, pins) {
     }
     carriedWitnessKeys.push({ member: m.id, error: v.error ?? (entries ? null : "the member has no readable keys list"), entries });
   }
+  for (const e of receiptMemberErrors) add("M4.witness-receipt", e.member, "FAIL", null, `the member does not read as strict JSON: ${e.error}`);
   for (const x of receipts) {
     const shape = m4Shape(x.r);
     if (shape) {
@@ -283,8 +306,48 @@ export async function verifyBundle(bytes, stated, pins) {
     checks.push(...pay.rows);
   }
 
+  // M6, each instruction in the profile of Annex A; the others are carried
+  // with their digests (B-INS PRESENT).
+  const insMembers = byRole("instruction").map((m) => {
+    const bytes = decoded.get(m.id);
+    if (m.profile !== ANNEX_A) return { member: m.id, profile: m.profile, digest: capturedDigest(bytes), value: null, m6: null };
+    const r = m6Instruction(bytes);
+    add("M6.instruction", m.id, r.problem ? "FAIL" : "PASS", null, r.problem ?? "the members of Annex A; principal.kid is its key's thumbprint; sig verifies; valid_from is not after valid_until");
+    return { member: m.id, profile: m.profile, digest: r.digest ?? null, value: r.value ?? null, m6: r.problem ? "FAIL" : "PASS" };
+  });
+
+  // M7, each gate receipt read through the issuer profile its member names
+  // (whose own check, M9.issuer-profile, is listed with M9). Two gate-receipt
+  // members with one uid FAIL M7.uid.
+  const profiles = byRole("issuer-profile").map((m) => {
+    const r = readIssuerProfile(decoded.get(m.id), m.profile, doc.subject);
+    const pin = pins.issuer_profiles.find((p) => "sha256:" + p.sha256 === m.sha256) ?? null;
+    if (r.profile?.test) flag("test-profile", `${m.id}: the profile's test member is true`);
+    return { member: m.id, profile: m.profile, P: r.profile ?? null, problem: r.problem ?? null, pin };
+  });
+  const M7_IDS = ["M7.envelope", "M7.uid", "M7.signature", "M7.signer-key"];
+  const grs = [];
+  for (const m of byRole("gate-receipt")) {
+    const prof = profiles.find((p) => p.member === m.issuer_profile);
+    if (!prof?.P) {
+      grs.push({ member: m.id, rows: M7_IDS.map((id) => [id, "NOT-EVALUATED", "prerequisite-failed:M9.issuer-profile", ""]), r: null, prof });
+      continue;
+    }
+    const { rows, r } = await m7Receipt(decoded.get(m.id), prof.P);
+    grs.push({ member: m.id, rows, r, prof });
+  }
+  for (const g of grs) {
+    const twin = grs.find((o) => o !== g && o.r && g.r && o.r.uid === g.r.uid);
+    if (twin && g.rows[1][1] === "PASS") g.rows = [g.rows[0], ["M7.uid", "FAIL", null, `${twin.member} has the same uid ${g.r.uid}`], ["M7.signature", "NOT-EVALUATED", "prerequisite-failed:M7.uid", ""], ["M7.signer-key", "NOT-EVALUATED", "prerequisite-failed:M7.signature", ""]];
+    for (const [id, status, reason, detail] of g.rows) add(id, g.member, status, reason, detail);
+    g.ok = g.rows.every((x) => x[1] === "PASS");
+    g.pin = g.prof?.pin ?? null;
+    // The records of the carried logs whose receipt_uid is this receipt's uid.
+    g.records = g.r ? logs.flatMap((l) => l.records.map((rec, k) => (rec.receipt_uid === g.r.uid ? { log: l.member, seq: k } : null)).filter(Boolean)) : [];
+  }
+
   // M8.arguments.
-  const argsHashes = new Set(logs.flatMap((l) => l.records.map((r) => (isPlainObject(r.event) ? r.event.args_hash : undefined))).filter(isStr));
+  const argsHashes = new Set(logs.flatMap((l) => l.records.map((r) => argsHashOf(r, l.profile))).filter(isStr));
   const argMembers = [];
   for (const m of byRole("action-arguments")) {
     let d;
@@ -300,6 +363,22 @@ export async function verifyBundle(bytes, stated, pins) {
       add("M8.arguments", m.id, "FAIL", null, "instruction_sha256 is not sha256: and 64 lowercase hex digits");
     } else if (argsHashes.has(d.digest)) add("M8.arguments", m.id, "PASS", null, `its JCS SHA-256 ${d.digest} is the args_hash of a carried record`);
     else add("M8.arguments", m.id, "FAIL", null, `its JCS SHA-256 ${d.digest} is the args_hash of no carried record`);
+  }
+
+  // M8.result: each action result's JCS SHA-256 is a carried record's result_hash.
+  const resultHashes = new Set(logs.flatMap((l) => l.records.map((r) => resultHashOf(r, l.profile))).filter(isStr));
+  for (const m of byRole("action-result")) {
+    let d;
+    try {
+      d = jcsJsonDigest(decoded.get(m.id));
+    } catch (e) {
+      add("M8.result", m.id, "FAIL", null, `the member does not read as jcs-json: ${e.message}`);
+      continue;
+    }
+    const v = d.value;
+    if (isPlainObject(v) && Object.keys(v).includes("instruction_sha256") && !(isStr(v.instruction_sha256) && /^sha256:[0-9a-f]{64}$/.test(v.instruction_sha256))) add("M8.result", m.id, "FAIL", null, "instruction_sha256 is not sha256: and 64 lowercase hex digits");
+    else if (resultHashes.has(d.digest)) add("M8.result", m.id, "PASS", null, `its JCS SHA-256 ${d.digest} is the result_hash of a carried record`);
+    else add("M8.result", m.id, "FAIL", null, `its JCS SHA-256 ${d.digest} is the result_hash of no carried record`);
   }
 
   // M9.
@@ -335,13 +414,15 @@ export async function verifyBundle(bytes, stated, pins) {
     for (const k of pins.witness_keys.keys) if (!w.entries.has(k.key_id)) flag("carried-key-lacks-id", `${w.member} has no entry for ${k.key_id}, which the verifier's history holds`);
     add("M9.witness-key", w.member, status, reason, detail);
   }
+  for (const p of profiles)
+    add("M9.issuer-profile", p.member, p.problem ? "FAIL" : "PASS", null, p.problem ?? `${p.profile}, chain ${p.P.chainId}; tokens: ${p.P.tokens.map((t) => `${t.address} (${t.name}, ${t.version})`).join(", ") || "none"} (reported, not used); sha256 ${p.pin ? "pinned" : "not pinned"}`);
 
   const cited = logs.find((l) => l.member === subject.cites.log);
   const citedRec = cited?.records[subject.cites.seq] ?? null;
   const H = citedRec && cited.m2.entryHashes[subject.cites.seq] ? cited.m2.entryHashes[subject.cites.seq].slice("sha256:".length) : null;
   const search = !card && pay?.supported && pay.tx && pay.rows.find((r) => r.id === "M5.transaction")?.status === "PASS" ? analyseSearch(pay.tx, pay.type, pay.call, H) : null;
 
-  const ctx = { base, checks, flags, doc, logs, cited, citedRec, H, pay, search, receipts, checkpoints, card, stated, pins, argMembers };
+  const ctx = { base, checks, flags, doc, logs, cited, citedRec, H, pay, search, receipts, checkpoints, card, stated, pins, argMembers, insMembers, grs, profiles, opMembers };
   if (firstFail()) return finish({ ...ctx, failAt: firstFail() });
 
   // (b2) the decoded shape.
@@ -350,6 +431,10 @@ export async function verifyBundle(bytes, stated, pins) {
 
   return finish(ctx);
 }
+
+// B-CKP TRUNCATED and B-WIT's TRUNCATED (spec 4.3, B-CKP and B-WIT rule 2),
+// read in finish below.
+built("B-CKP.truncated");
 
 // Bindings, decision, verdict and output. When a check FAILed (failAt), the
 // bindings that need the checks are not computed: each reads NOT EVALUATED
@@ -368,8 +453,10 @@ function finish(ctx) {
   const orderings = [];
   let payerDerived = false;
   let bpay = null;
+  let instructions = [];
+  let gateReceipts = [];
 
-  const { logs, cited, citedRec, H, pay, search, receipts = [], checkpoints = [], stated, pins } = ctx;
+  const { logs, cited, citedRec, H, pay, search, receipts = [], checkpoints = [], stated, pins, insMembers = [], grs = [], profiles = [] } = ctx;
   const seq = subject?.cites.seq;
 
   // B-LOG.
@@ -385,6 +472,7 @@ function finish(ctx) {
     const why = failAt ? `prerequisite-failed:${failAt}` : "prerequisite-failed:B-LOG";
     for (const id of BINDING_IDS.slice(1)) bind(id, "NOT-EVALUATED", why);
     payment.reason = why;
+    instructions = insMembers.map((i) => ({ member: i.member, cited: false, state: i.m6 === "FAIL" ? "FAIL" : "NOT-EVALUATED", exceeded: [], reason: i.m6 === "FAIL" ? null : why, uses: 0, records_without_arguments: 0 }));
   } else {
     const kid = citedRec.kid;
     const sid = citedRec.session_id;
@@ -428,27 +516,31 @@ function finish(ctx) {
     }
 
     // B-KEY.
-    const uri = Object.keys(citedRec).includes("jwks_uri") ? citedRec.jwks_uri : null;
-    if (uri === null) bind("B-KEY", "KEY-ONLY", null, { detail: "the records name no jwks_uri; one key signed every record" });
-    else {
-      const jwks = ctx.doc.members.filter((m) => m.role === "operator-key" && m.profile === "jwks");
-      if (!jwks.length) bind("B-KEY", "NOT-EVALUATED", "no-jwks-carried");
-      else bind("B-KEY", "SUPPLIED", null, { detail: "the carried JWKS holds the key; offline, the jwks_uri is not read" });
-    }
+    const uri = cited.profile !== ANNEX_B_LOG && Object.keys(citedRec).includes("jwks_uri") ? citedRec.jwks_uri : null;
+    if (cited.profile === ANNEX_B_LOG) bind("B-KEY", "KEY-ONLY", null, { detail: "an Annex B log, which defines no origin binding; one key signed every record" });
+    else if (uri === null) bind("B-KEY", "KEY-ONLY", null, { detail: "the records name no jwks_uri; one key signed every record" });
+    else bKey(ctx, citedRec.kid, bind);
 
-    // B-INS.
-    const argsHash = isPlainObject(citedRec.event) ? citedRec.event.args_hash : undefined;
-    const A = ctx.argMembers.find((a) => a.digest === argsHash) ?? null;
-    if (!A) bind("B-INS", "NOT-EVALUATED", "args-not-carried", { detail: "the cited record's arguments are not carried, and no instruction is" });
-    else {
-      const D = isPlainObject(A.value) && Object.keys(A.value).includes("instruction_sha256") ? A.value.instruction_sha256 : null;
-      if (D === null) bind("B-INS", "ABSENT", null, { detail: `${A.member} carries no instruction_sha256` });
-      else bind("B-INS", "WITHHELD", null, { detail: `${A.member} cites ${D}, which no carried instruction has` });
-    }
-
-    // B-GRC: no gate receipt is carried in the shape this build judges.
-    if (Object.keys(citedRec).includes("receipt_uid")) bind("B-GRC", "ABSENT", "receipt-missing", { detail: `the cited record names receipt ${citedRec.receipt_uid}, which the bundle does not carry` });
-    else bind("B-GRC", "ABSENT", null, { detail: "no gate receipt is carried or named" });
+    // B-GRC: the cited action's receipt decides its state; every other carried
+    // receipt is context, reported with its own state, and can make it FAIL
+    // only. The times are judged against a block timestamp M5.block-hash bound.
+    const boundTs = !card && checks.find((c) => c.id === "M5.block-hash")?.status === "PASS" && pay?.blockTs != null ? pay.blockTs : null;
+    const citedUid = Object.keys(citedRec).includes("receipt_uid") ? citedRec.receipt_uid : null;
+    const own = grs.map((g) => ({ g, s: ownState(g, boundTs) }));
+    const citedG = citedUid === null ? null : (own.find((x) => x.g.r.uid === citedUid) ?? null);
+    gateReceipts = own.map(({ g, s }) => {
+      const rec = g.records.length === 1 ? g.records[0] : null;
+      const isCited = citedG?.g === g;
+      return { member: g.member, uid: g.r.uid, log: rec?.log ?? null, seq: rec?.seq ?? null, at_or_before_cited: rec && rec.log === cited.member ? rec.seq <= seq : null, cited: isCited, state: s.state, reason: s.reason, flags: isCited ? s.flags : ["context-receipt", ...s.flags] };
+    });
+    const failing = own.find((x) => x.s.state === "FAIL");
+    if (failing) bind("B-GRC", "FAIL", null, { detail: `${failing.g.member}'s uid is the receipt_uid of ${failing.g.records.length} records of the carried logs, not exactly one` });
+    else if (citedUid !== null && !citedG) bind("B-GRC", "ABSENT", "receipt-missing", { detail: `the cited record names receipt ${citedUid}, which the bundle does not carry` });
+    else if (citedG) {
+      bind("B-GRC", citedG.s.state, citedG.s.reason, { detail: `${citedG.g.member}, the cited action's receipt, under ${citedG.g.prof.member}, whose sha256 the verifier ${citedG.g.pin ? "pins" : "does not pin"}${boundTs === null ? "; its times are reported, not judged" : ""}` });
+      if (citedG.s.flags.includes("after-receipt-expiry")) flag("after-receipt-expiry", `the block timestamp is after the valid-until time of ${citedG.g.member}, under a profile the verifier does not pin`);
+    } else bind("B-GRC", "ABSENT", null, { detail: grs.length ? "the cited record names no gate receipt; the carried ones are context" : "no gate receipt is carried or named" });
+    for (const x of own) if (x.g !== citedG?.g) flag("context-receipt", `${x.g.member} is not the cited action's receipt; its own state is ${x.s.state}`);
 
     // B-CHAIN.
     if (card) bind("B-CHAIN", "NOT-EVALUATED", "card-subject");
@@ -457,6 +549,13 @@ function finish(ctx) {
     // The cited decision's record source.
     const rd = decisionOf(citedRec);
     decision.record = { log: cited.member, seq, event_decision: rd.vals[0], event_outcome: rd.vals[1], gate_result: rd.vals[2], receipt_uid: Object.keys(citedRec).includes("receipt_uid") ? citedRec.receipt_uid : null };
+    // The cited action's gate receipt, as the pins read its verdict.
+    let receiptSource = null;
+    if (citedG) {
+      const rdg = reading(citedG.g.pin, citedG.g.r.verdict);
+      decision.receipt = { member: citedG.g.member, verdict: citedG.g.r.verdict, reading: rdg };
+      receiptSource = rdg === "permit" ? "allow" : rdg === "refuse" ? "refuse" : "not-read";
+    }
 
     // B-PAY and the search.
     if (card) bind("B-PAY", "NOT-EVALUATED", "card-subject");
@@ -482,13 +581,17 @@ function finish(ctx) {
       for (const l of logs) {
         if (l.m2.status === "FAIL") continue;
         l.records.forEach((r, k) => {
-          if (l === cited && k === seq) return;
+          // The cited entry itself, carried again in a prefix of its log, is not another record.
+          if ((l === cited && k === seq) || l.m2.entryHashes[k] === "sha256:" + H) return;
           const s = analyseSearch(pay.tx, pay.type, pay.call, l.m2.entryHashes[k].slice(7));
           if (!s || s.matches.length === 0) return;
           flag("other-entry-hash", `${l.member} record ${k}: its entry hash is in ${[...new Set(s.matches.map((m) => m.field))].join(", ")}`);
           const P = pay.signer;
           const signedByStated = stated.authorizer && s.binding.some((m) => signerOfMatch(m, pay.call, P, pay.sender) === stated.authorizer);
-          if (signedByStated && decisionOf(r).value === "refuse") decision.refusing_records.push({ log: l.member, seq: k, source: "record" });
+          const recRefuses = l.profile !== ANNEX_B_LOG && decisionOf(r).value === "refuse";
+          const ownRc = Object.keys(r).includes("receipt_uid") ? grs.find((g) => g.r?.uid === r.receipt_uid) : null;
+          const rcRefuses = !!ownRc && reading(ownRc.pin, ownRc.r.verdict) === "refuse";
+          if (signedByStated && (recRefuses || rcRefuses)) decision.refusing_records.push({ log: l.member, seq: k, source: recRefuses ? "record" : "receipt" });
         });
       }
       if (payerDerived) {
@@ -496,17 +599,34 @@ function finish(ctx) {
       } else payment.reason = bpay.reason ?? "no-payer-derived";
     }
     if (card) payment.reason = "card-subject";
-    const sources = [rd.value];
-    decision.value = sources.includes("refuse") || decision.refusing_records.length ? "refuse" : sources.every((v) => v === "allow") ? "allow" : "not-read";
+
+    // B-INS, which reads the payment values when a payer is derived.
+    const A = ctx.argMembers.find((a) => a.digest === argsHashOf(citedRec, cited.profile)) ?? null;
+    const pv = payerDerived ? { chain: subject.chain_id, movements: payment.movements.filter((m) => BigInt(m.amount) > 0n && m.payee !== payment.payer), blockTs: pay.blockTs, kid: citedRec.kid } : null;
+    const ins = bIns({ ins: insMembers, A, pv, bpayState: B.get("B-PAY").state, logs, argMembers: ctx.argMembers });
+    bind("B-INS", ins.agg.state, ins.agg.reason, { detail: ins.agg.detail });
+    instructions = ins.rows;
+    // An Annex B record states no decision of its own and is not a source.
+    const sources = [...(cited.profile === ANNEX_B_LOG ? [] : [rd.value]), ...(receiptSource ? [receiptSource] : [])];
+    decision.value = sources.includes("refuse") || decision.refusing_records.length ? "refuse" : sources.length > 0 && sources.every((v) => v === "allow") ? "allow" : "not-read";
 
     // Times (spec 4.5), each with its clock.
     const supplied = (id) => B.get(id).state === "SUPPLIED";
-    cited.records.forEach((r, k) => times.push({ what: `${cited.member} record ${k} ts`, value: r.ts, clock: "operator", as_supplied: false }));
+    cited.records.forEach((r, k) => {
+      if (tsMs(r.ts) !== null) times.push({ what: `${cited.member} record ${k} ts`, value: r.ts, clock: "operator", as_supplied: false });
+    });
     if (selectedCp) times.push({ what: `selected checkpoint ts (${selectedCp.where})`, value: selectedCp.cp.ts, clock: "operator", as_supplied: false });
     if (selectedRc) {
       times.push({ what: `selected witness receipt received_at (${selectedRc.where})`, value: selectedRc.r.received_at, clock: "headless-oracle", as_supplied: supplied("B-WIT") });
       times.push({ what: `selected witness receipt checkpoint_ts (${selectedRc.where})`, value: selectedRc.r.checkpoint_ts, clock: "headless-oracle", as_supplied: supplied("B-WIT") });
     }
+    for (const x of own) {
+      const F = x.g.prof.P.fields;
+      times.push({ what: `${x.g.member} ${F.checked_at} (check time)`, value: isoUtc(x.g.r.checkedAt), clock: "issuer", as_supplied: x.s.state === "SUPPLIED" });
+      times.push({ what: `${x.g.member} ${F.valid_until} (valid-until time)`, value: isoUtc(x.g.r.validUntil), clock: "issuer", as_supplied: x.s.state === "SUPPLIED" });
+    }
+    for (const i of insMembers.filter((x) => x.m6 === "PASS"))
+      for (const k of ["iat", "valid_from", "valid_until"]) times.push({ what: `${i.member} ${k}`, value: k === "iat" ? i.value.iat : i.value.constraints[k], clock: "principal", as_supplied: false });
     const blockTs = pay?.blockTs ?? null;
     if (blockTs !== null) times.push({ what: "block timestamp", value: isoUtc(blockTs), clock: "block-producer", as_supplied: supplied("B-CHAIN") });
     if (pay?.auth) {
@@ -532,10 +652,11 @@ function finish(ctx) {
       const blockOk = ["M5.block", "M5.block-hash"].every((id) => checks.find((c) => c.id === id)?.status === "PASS");
       orderings.push({ earlier: "the payment transaction", later: "its block", rests_on: "the block lists the transaction's hash and its hash recomputes from the header (as supplied: offline)", status: blockOk ? "SHOWN" : "NOT-EVALUATED" });
     }
-    orderings.push({ earlier: "an instruction", later: "the cited entry", rests_on: "the entry's arguments carry the instruction's digest (B-INS BOUND or EXCEEDS)", status: "NOT-EVALUATED" });
+    const insOrdered = ["BOUND", "EXCEEDS"].includes(B.get("B-INS").state);
+    orderings.push({ earlier: "an instruction", later: "the cited entry", rests_on: "the entry's arguments carry the instruction's digest (B-INS BOUND or EXCEEDS)", status: insOrdered ? "SHOWN" : "NOT-EVALUATED" });
 
     // Comparisons of two clocks, each reported as such (spec 4.5 and P7).
-    if (shownH && blockTs !== null) {
+    if (shownH && blockTs !== null && tsMs(citedRec.ts) !== null) {
       const t = tsMs(citedRec.ts);
       flag("two-clock-comparison", `the cited entry's ts (operator's clock) against the block timestamp (block producer's clock)`);
       if (t !== null && t > Number(blockTs) * 1000) flag("clock-contradiction", "the cited entry's ts is later than the block timestamp, while its hash sits in bytes signed for the payment");
@@ -543,6 +664,11 @@ function finish(ctx) {
     if (selectedCp && selectedRc) {
       flag("two-clock-comparison", "the selected checkpoint's ts (operator's clock) against the witness receipt's received_at (Headless Oracle's clock)");
       if (tsMs(selectedCp.cp.ts) > tsMs(selectedRc.r.received_at)) flag("clock-contradiction", "the selected checkpoint's ts is later than its receipt's received_at");
+    }
+    const citedIns = insOrdered ? insMembers.find((i) => instructions.some((r) => r.cited && r.member === i.member)) : null;
+    if (citedIns) {
+      flag("two-clock-comparison", `${citedIns.member}'s iat (principal's clock) against the cited entry's ts (operator's clock)`);
+      if (tsMs(citedIns.value.iat) > tsMs(citedRec.ts)) flag("clock-contradiction", `${citedIns.member}'s iat is later than the cited entry's ts, while the entry's arguments carry its digest`);
     }
     if (selectedRc && blockTs !== null) flag("two-clock-comparison", "the witness receipt's received_at (Headless Oracle's clock) against the block timestamp (block producer's clock); this orders the checkpoint against the payment's inclusion in its block, never against its signing");
   }
@@ -555,8 +681,9 @@ function finish(ctx) {
       off("O2.rpc", "offline: no endpoint is asked");
       off("O2.finality", "offline: no endpoint is asked");
     }
-    if (cited && cited.records.some((r) => Object.keys(r).includes("jwks_uri"))) off("O3.jwks", "offline: the jwks_uri is not read");
+    if (cited && cited.profile !== ANNEX_B_LOG && cited.records.some((r) => Object.keys(r).includes("jwks_uri"))) off("O3.jwks", "offline: the jwks_uri is not read");
     if (pay && pay.tokenPinned && pay.call && eip3009Readable(pay.call)) off("O5.token-domain-call", "offline: the token's own domain is not read");
+    for (const p of profiles) if (p.pin && p.P?.keyDocument) checks.push({ id: "O4.key-document", member: p.member, status: "NOT-EVALUATED", reason: "offline", detail: "offline: the pinned profile's key document is not read" });
     if (receipts.some((x) => x.r && isStr(x.r.public_key_id) && !pins.witness_keys.keys.some((k) => k.key_id === x.r.public_key_id))) off("O6.witness-keys", "offline: GET /v5/keys is not read");
     if (payerDerived) off("O7.account-code", "offline: the stated account's code at the end of blocks N-1 and N is not read; the payment transaction carries no authorization tuple and no account proof is carried");
   }
@@ -592,11 +719,14 @@ function finish(ctx) {
       if (cited?.profile === "chirindo-evidence.action/1") L.add("L11");
     }
     if (ms.some((m) => m.role === "instruction" && m.profile === "signed-instruction-ed25519/0.2")) L.add("L12");
+    const insProfile = (r) => ms.find((m) => m.id === r.member)?.profile;
+    if (instructions.some((r) => insProfile(r) === ANNEX_A && ["BOUND", "EXCEEDS", "MATCHED", "UNBOUND-OUTSIDE"].includes(r.state))) L.add("L13");
     if (cited && cited.records.length && pins.operator_key_ids.includes(cited.records[0].kid)) L.add("L14");
     if (payerDerived) L.add("L15");
     if (ms.some((m) => m.role === "gate-receipt")) L.add("L16");
     if (card) L.add("L17");
     if (subject?.chain_id === "eip155:84532") L.add("L19");
+    if (instructions.some((r) => ["MATCHED", "UNBOUND-OUTSIDE"].includes(r.state))) L.add("L18");
     if (bp.state === "UNSUPPORTED-PATH" && ["other-sender", "unsupported-call"].includes(bp.reason)) L.add("L20");
     if (bp.state === "BOUND" && bpay?.path === "calldata") L.add("L21");
     if (cited?.profile === "jcs-sha256-chain/0.1") L.add("L22");
@@ -617,8 +747,8 @@ function finish(ctx) {
     checks,
     bindings,
     decision,
-    gate_receipts: [],
-    instructions: [],
+    gate_receipts: gateReceipts,
+    instructions,
     payment,
     hash_search: hashSearch,
     times,
@@ -628,6 +758,18 @@ function finish(ctx) {
     limits,
   };
   return { kind: "verdict", output };
+}
+
+// B-KEY offline (spec 4.3) for records that name an https jwks_uri: SUPPLIED
+// when a carried JWKS holds the key whose thumbprint is the log's kid, FAIL
+// when the carried JWKS lacks it, NOT EVALUATED when no JWKS is carried.
+built("B-KEY.jwks");
+function bKey(ctx, kid, bind) {
+  const jwks = ctx.opMembers.filter((o) => o.profile === "jwks");
+  const holds = (o) => !o.error && isPlainObject(o.value) && Array.isArray(o.value.keys) && o.value.keys.some((k) => isPlainObject(k) && k.kty === "OKP" && k.crv === "Ed25519" && isStr(k.x) && okpThumbprint(k.x) === kid);
+  if (!jwks.length) bind("B-KEY", "NOT-EVALUATED", "no-jwks-carried", { detail: "the records name a jwks_uri, and no JWKS is carried" });
+  else if (jwks.some(holds)) bind("B-KEY", "SUPPLIED", null, { detail: "the carried JWKS holds the key; offline, the jwks_uri is not read" });
+  else bind("B-KEY", "FAIL", null, { detail: "the carried JWKS lacks the key whose thumbprint is the log's kid" });
 }
 
 // B-PAY (spec 4.3, rules 1 to 10), offline, for an evm-payment subject whose

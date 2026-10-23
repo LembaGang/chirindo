@@ -4,6 +4,7 @@
 import { keccak256 } from "viem";
 import { FormatError, hexBytes, isPlainObject, parseStrictJson, quantity } from "../../ordering-evidence-h4/lib/formats.mjs";
 import { address, AUTHORIZATION_USED_TOPIC, headerHash, recoverAuthorization, recoverSigner, TRANSFER_TOPIC } from "../../ordering-evidence-h4/lib/evm.mjs";
+import { built } from "./built.mjs";
 import { SUPPORTED_CHAINS, SUPPORTED_TYPES } from "./table.mjs";
 import { eip3009Readable, recogniseCall, searchHash, signedFields, txChainId, txHashOf, txSerialization } from "./tx.mjs";
 
@@ -34,6 +35,7 @@ function attempt(fn) {
 // Runs M5 on the carried payment members. `p` holds the parsed members
 // ({ tx, rc, blk, txId, rcId, blkId, parseErrors }) and returns the rows and
 // what later steps read (the call, the authorization, the payer, the times).
+built("M5.chain", "M5.receipt", "M5.block", "M5.support", "M5.transaction", "M5.sender", "M5.block-hash", "M5.call", "M5.token-domain", "M5.authorization", "M5.token-logs", "M5.validity-window");
 export async function m5(p, subject, pins) {
   const rows = [];
   const add = (id, member, status, reason, detail) => rows.push({ id, member, status, reason, detail });

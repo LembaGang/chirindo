@@ -33,12 +33,14 @@ export const ARGS_A_SHA256 = "7abf24ca72b407e2510f88c812b28f00845a4700f1263024cd
 
 export class SourceError extends Error {}
 
-export function readSource(rel) {
+// `root` is the directory the repository paths are read under (build-we1.mjs
+// --root); the repository root by default.
+export function readSource(rel, root = REPO_ROOT) {
   const want = SOURCES[rel];
   if (!want) throw new SourceError(`${rel} is not a source this builder reads`);
   let bytes;
   try {
-    bytes = readFileSync(path.join(REPO_ROOT, rel));
+    bytes = readFileSync(path.join(root, rel));
   } catch (e) {
     throw new SourceError(`${rel} cannot be read (${e.code ?? e.message})`);
   }
@@ -71,13 +73,16 @@ export function argsA() {
   return bytes;
 }
 
+// we1Members reads its sources under `root` through this name.
+const readSourceAt = (rel, root) => readSource(rel, root);
 const CASE_A = "examples/ordering-evidence/case-a/";
 const KEYS = "examples/ordering-evidence/keys/";
 const JSONL = "application/x-ndjson";
 const JSON_T = "application/json";
 
 // The eight members of spec section 7 (lines of the WE-1 members table), in order.
-export function we1Members() {
+export function we1Members(root = REPO_ROOT) {
+  const readSource = (rel) => readSourceAt(rel, root);
   return [
     member({ id: "log-a", role: "gate-log", profile: "chirindo-evidence.action/1", bytes: readSource(CASE_A + "ordering-evidence-case-a-1.jsonl"), source: CASE_A + "ordering-evidence-case-a-1.jsonl", fetched_at: BA15707_TIME, capture: "raw-response", media_type: JSONL }),
     member({ id: "args-a", role: "action-arguments", profile: "jcs-json", bytes: argsA(), source: "examples/ordering-evidence/client.mjs", fetched_at: BA15707_TIME, capture: "reconstructed-from examples/ordering-evidence/client.mjs:105", media_type: JSON_T }),

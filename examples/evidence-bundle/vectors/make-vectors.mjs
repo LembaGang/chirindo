@@ -17,6 +17,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildWe1 } from "../build-we1.mjs";
 import { bundleBytes, member, readSource, WE1_AUTHORIZER, WE1_TX } from "../lib/we1.mjs";
+import { ROWS_STEP0, ROWS_WA01, ROWS_WA02, ROWS_WA03, ROWS_WA04, ROWS_WA05, ROWS_WA06, ROWS_WA07, ROWS_WA08, ROWS_WA09, ROWS_WA10, ROWS_WA11 } from "./rows-a2.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const FOLDER = path.resolve(HERE, "..");
@@ -107,7 +108,9 @@ export const ADDRESS_FLIPS = [
 const stated = ["--authorizer", A, "--tx", T];
 
 // Each vector: id, description, recipe { base, change }, args (with a <pins>
-// placeholder), build() -> { doc, pins?, changed? }.
+// placeholder), build() -> { doc, pins?, changed?, argv? }. A vector whose
+// stated inputs are known only once it is built (a synthetic payment's hash)
+// returns them as argv; the file then records them.
 export const VECTORS = [
   { id: "R-01", description: "WE-1, offline, with its stated account and transaction", recipe: { base: "WE-1", change: "none" }, args: stated, build: () => ({ doc: we1() }) },
   { id: "R-02", description: "WE-1 with only the transaction stated", recipe: { base: "WE-1", change: "none" }, args: ["--tx", T], build: () => ({ doc: we1() }) },
@@ -248,6 +251,18 @@ export const VECTORS = [
       return { doc };
     },
   },
+  ...ROWS_STEP0,
+  ...ROWS_WA01,
+  ...ROWS_WA02,
+  ...ROWS_WA03,
+  ...ROWS_WA04,
+  ...ROWS_WA05,
+  ...ROWS_WA06,
+  ...ROWS_WA07,
+  ...ROWS_WA08,
+  ...ROWS_WA09,
+  ...ROWS_WA10,
+  ...ROWS_WA11,
 ];
 
 // Runs check-bundle.mjs on a bundle document (or on none) with arguments.
@@ -267,9 +282,10 @@ export function runCli(dir, name, doc, args, { pins, noBundle, missingBundle } =
 }
 
 // Builds a vector into dir and runs check-bundle.mjs on it.
-export function runVector(v, dir) {
-  const built = v.build();
-  return { ...runCli(dir, v.id, built.doc, v.args, { pins: built.pins, noBundle: v.noBundle, missingBundle: v.missingBundle }), built };
+export async function runVector(v, dir) {
+  const built = await v.build();
+  const args = built.argv ?? v.args;
+  return { ...runCli(dir, v.id, built.doc, args, { pins: built.pins, noBundle: v.noBundle, missingBundle: v.missingBundle }), built, args };
 }
 
 // Spec D.5, last paragraph: what every implementation must reproduce.
@@ -297,13 +313,18 @@ export function expectedOf(r) {
   return { exit: 0, projection: project(r.output) };
 }
 
-export function makeFile() {
+export async function makeFile() {
   const dir = mkdtempSync(path.join(os.tmpdir(), "eb-vectors-"));
   try {
+    const vectors = [];
+    for (const v of VECTORS) {
+      const r = await runVector(v, dir);
+      vectors.push({ id: v.id, description: v.description, recipe: v.recipe, args: r.args, mode: "offline", expected: expectedOf(r) });
+    }
     return {
       format: "evidence-bundle-vectors/0.9",
       note: "Offline vectors built from the repository's own bytes. Each recipe is applied at run time by vectors/make-vectors.mjs; no bundle bytes are stored here. The expected values are a snapshot of this verifier's own output, projected as spec D.5's last paragraph lists (detail fields, checked_at, verifier and bundle_sha256 left out).",
-      vectors: VECTORS.map((v) => ({ id: v.id, description: v.description, recipe: v.recipe, args: v.args, mode: "offline", expected: expectedOf(runVector(v, dir)) })),
+      vectors,
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -317,5 +338,5 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   if (args[0] !== "--write" || args.length > 2) {
     process.stderr.write("usage: node vectors/make-vectors.mjs --write [<file>]\n");
     process.exitCode = 2;
-  } else writeFileSync(args[1] ?? VECTOR_FILE, fileBytes(makeFile()));
+  } else writeFileSync(args[1] ?? VECTOR_FILE, fileBytes(await makeFile()));
 }

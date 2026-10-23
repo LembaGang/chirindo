@@ -59,13 +59,35 @@ test("the table has 45 rows: T-01 to T-36 and nine FAIL twins", () => {
   for (const t of ["T-11F", "T-12F", "T-13F", "T-14F", "T-15F", "T-18F", "T-19F", "T-22F", "T-25F"]) assert.ok(ids.includes(t), t);
 });
 
+// The verdict and states a case of a shape judged since gives.
+function judged(o, e) {
+  assert.deepEqual([o.verdict.code, o.verdict.rule, o.verdict.reason].slice(0, e.verdict.length), e.verdict);
+  for (const [b, [state, reason]] of Object.entries(e.bindings ?? {})) assert.deepEqual([o.bindings.find((x) => x.id === b).state, o.bindings.find((x) => x.id === b).reason], [state, reason], b);
+  for (const [id, member, status] of e.checks ?? []) assert.equal(o.checks.find((x) => x.id === id && x.member === member)?.status, status, `${id} on ${member}`);
+  for (const [m, want] of Object.entries(e.instructions ?? {})) {
+    const i = o.instructions.find((x) => x.member === m);
+    assert.deepEqual([i?.state, i?.exceeded, i?.reason], want, `instruction ${m}`);
+  }
+  for (const [m, want] of Object.entries(e.gateReceipts ?? {})) {
+    const g = o.gate_receipts.find((x) => x.member === m);
+    assert.deepEqual([g?.state, g?.reason, g?.flags, g?.cited], want, `gate receipt ${m}`);
+  }
+  for (const f of e.flagsHave ?? []) assert.ok(o.flags.some((x) => x.code === f), `flag ${f}`);
+  for (const l of e.limitsHave ?? []) assert.ok(o.limits.some((x) => x.id === l), `limit ${l}`);
+  if (e.decision) assert.equal(o.decision.value, e.decision);
+}
+
 for (const c of CASES) {
-  test(`${c.id}: ${c.code ? `exit 2, ${c.code}` : `FAILS, ${c.fails}`}`, async () => {
+  test(`${c.id}: ${c.code ? `exit 2, ${c.code}` : c.fails ? `FAILS, ${c.fails}` : `judged, ${c.judged.verdict.join(" ")}`}`, async () => {
     const { doc, args } = await c.build();
     const r = runCli(dir, c.id, doc, args);
     const o = parseArgs(["bundle.json", ...args]);
     const lib = await verifyBundle(bundleBytes(doc), { authorizer: o.authorizer, tx: o.tx }, pins);
-    if (c.code) {
+    if (c.judged) {
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(lib.kind, "verdict");
+      judged(r.output, c.judged);
+    } else if (c.code) {
       assert.equal(r.status, 2, r.stderr);
       assert.equal(r.stdout, "");
       assert.equal(r.stderr, `not supported in this build: ${c.code}\n`);

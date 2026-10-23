@@ -14,6 +14,7 @@ import {
   SHA256_RE,
   withoutMember,
 } from "../../ordering-evidence-h4/lib/formats.mjs";
+import { built } from "./built.mjs";
 import { LEGACY_KID_RE, THUMBPRINT_RE, TIME_RE, UID_RE } from "./table.mjs";
 
 const utf8 = (bytes) => new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
@@ -104,6 +105,7 @@ export const tsMs = (s) => (isStr(s) && TIME_RE.test(s) && Number.isFinite(Date.
 
 // M2 for one chirindo-evidence.action/1 log (spec 4.2). Returns
 // { status, reason, detail, flags[], entryHashes[] }.
+built("M2.log");
 export function m2ChirindoLog(log, opKeys) {
   const flags = [];
   const fail = (detail) => ({ status: "FAIL", reason: null, detail, flags, entryHashes: [] });
@@ -190,6 +192,7 @@ export function m2ChirindoLog(log, opKeys) {
 
 // M3.checkpoint: the eight members of the served submit.checkpoint and their
 // field rules (spec 4.2).
+built("M3.checkpoint");
 export function m3Shape(c) {
   if (!isPlainObject(c)) return "the checkpoint is not a JSON object";
   const want = ["v", "type", "session_id", "count", "last_entry_hash", "ts", "kid", "sig"];
@@ -216,6 +219,7 @@ const RECEIPT_FIELDS = ["type", "witness", "received_at", "kid", "session_id", "
 
 // M4's shape rules (spec 4.2): exactly twelve members, all strings, and the
 // field values the served spec fixes.
+built("M4.witness-receipt");
 export function m4Shape(r) {
   if (!isPlainObject(r)) return "the witness receipt is not a JSON object";
   const names = Object.keys(r);
@@ -262,6 +266,7 @@ export function witnessEntryShape(e) {
 
 // M9.operator-key (spec 4.2). `logKids` are the thumbprint kids of the carried
 // logs. Returns null when it passes, or the failure.
+built("M9.operator-key");
 export function m9OperatorKey(profile, value, logKids) {
   const jwkProblem = (k) => {
     if (!isPlainObject(k)) return "the JWK is not a JSON object";
@@ -288,4 +293,64 @@ export function m9OperatorKey(profile, value, logKids) {
   }
   if (held === 0) return "the JWKS holds the key of no carried log's kid";
   return null;
+}
+
+// An Annex B log (jcs-sha256-chain/0.1): one JSON object per line, LF with an
+// optional CR before it, one final LF optional; every line is a record, and a
+// blank line is an error (spec M2 and Annex B).
+export function parseAnnexBLog(bytes) {
+  const lines = utf8(bytes).split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  const records = lines.map((l, i) => {
+    const t = l.endsWith("\r") ? l.slice(0, -1) : l;
+    if (t.length === 0) throw new Error(`line ${i + 1} is blank`);
+    const obj = parseStrictJson(Buffer.from(t, "utf8"));
+    if (!isPlainObject(obj)) throw new Error(`line ${i + 1} is not a JSON object`);
+    return obj;
+  });
+  return { records, checkpoint: null };
+}
+
+// M2 for one Annex B log (spec 4.2 and Annex B): seq, v, session_id and kid,
+// the hash chain from the genesis hash, receipt_uid's form, and every sig
+// under the carried operator key whose thumbprint is kid. Returns the shape
+// of m2ChirindoLog's result; M2.log is registered there.
+export function m2AnnexBLog(log, opKeys) {
+  const fail = (detail) => ({ status: "FAIL", reason: null, detail, flags: [], entryHashes: [] });
+  const recs = log.records;
+  if (recs.length === 0) return fail("the log holds no record");
+  const r0 = recs[0];
+  if (!isStr(r0.v) || r0.v.length === 0) return fail("record 0: v is not a non-empty string");
+  if (!isStr(r0.session_id) || r0.session_id.length < 1 || r0.session_id.length > 128) return fail("record 0: session_id is not 1 to 128 characters");
+  if (!isStr(r0.kid) || !THUMBPRINT_RE.test(r0.kid)) return fail("record 0: kid is not an RFC 7638 thumbprint");
+  const hashes = [];
+  let prev = genesisHash(r0.v, r0.session_id);
+  for (let i = 0; i < recs.length; i++) {
+    const r = recs[i];
+    const at = `record ${i}`;
+    if (r.seq !== i) return fail(`${at}: seq is not ${i}`);
+    if (r.v !== r0.v || r.session_id !== r0.session_id || r.kid !== r0.kid) return fail(`${at}: v, session_id or kid differs from record 0`);
+    if (r.prev_hash !== prev) return fail(`${at}: prev_hash is not ${i === 0 ? "the genesis hash" : "the entry hash of the record before it"}`);
+    if (Object.keys(r).includes("receipt_uid") && !(isStr(r.receipt_uid) && UID_RE.test(r.receipt_uid))) return fail(`${at}: receipt_uid is not 0x and 64 lowercase hex digits`);
+    let h;
+    try {
+      h = entryHash(r);
+    } catch (e) {
+      return fail(`${at}: no RFC 8785 form (${e.message})`);
+    }
+    hashes.push(h);
+    prev = h;
+  }
+  const pub = opKeys.get(r0.kid);
+  if (!pub) return fail("kid is the thumbprint of no carried operator key");
+  for (let i = 0; i < recs.length; i++) {
+    let sig;
+    try {
+      sig = b64urlCanonical(recs[i].sig, 64, `record ${i} sig`);
+    } catch (e) {
+      return fail(e.message);
+    }
+    if (!ed25519Verify(pub, Buffer.from(jcs(withoutMember(recs[i], "sig")), "utf8"), sig)) return fail(`record ${i}: sig does not verify under the operator key`);
+  }
+  return { status: "PASS", reason: null, detail: `${recs.length} records of an Annex B log, hash chain from genesis, every sig verifies under the key whose thumbprint is kid`, flags: [], entryHashes: hashes };
 }

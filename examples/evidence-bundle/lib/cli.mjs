@@ -86,10 +86,10 @@ export function loadPins(dir = DEFAULT_PINS_DIR) {
   if (!Array.isArray(p.operator_key_ids) || !p.operator_key_ids.every(isStr)) bad("operator_key_ids is not a list of strings");
   if (!Array.isArray(p.issuer_profiles)) bad("issuer_profiles is not a list");
   for (const ip of p.issuer_profiles) {
-    if (!isPlainObject(ip) || !isStr(ip.sha256)) bad("an issuer profile pin has no sha256");
+    if (!isPlainObject(ip) || !isStr(ip.sha256) || !/^[0-9a-f]{64}$/.test(ip.sha256)) bad("an issuer profile pin has no sha256 of 64 lowercase hex digits");
     const permit = ip.permit ?? [];
     const refuse = ip.refuse ?? [];
-    if (!Array.isArray(permit) || !Array.isArray(refuse)) bad("an issuer profile's permit and refuse are not lists");
+    if (!Array.isArray(permit) || !Array.isArray(refuse) || !permit.every(isStr) || !refuse.every(isStr)) bad("an issuer profile's permit and refuse are not lists of strings");
     if (permit.some((x) => refuse.includes(x))) bad(`issuer profile ${ip.sha256}: a value is in both permit and refuse`);
   }
   if (!isPlainObject(p.tokens)) bad("tokens is not an object");

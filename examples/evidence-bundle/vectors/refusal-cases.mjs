@@ -35,24 +35,24 @@ import {
   testValue,
 } from "./synth.mjs";
 
-const T0 = 1792000000n;
+export const T0 = 1792000000n;
 const JSONL = "application/x-ndjson";
 const TIME = "2026-10-20T10:00:00Z";
-const add = (doc, m) => {
+export const add = (doc, m) => {
   const x = member({ source: "examples/evidence-bundle/vectors/refusal-cases.mjs", fetched_at: TIME, capture: "reconstructed-from examples/evidence-bundle/vectors/synth.mjs", media_type: "application/json", ...m });
   if (m.issuer_profile) x.issuer_profile = m.issuer_profile;
   doc.members.push(x);
 };
 
-const payerPk = testSecp("payer");
-const payer = testAccount("payer");
-const facilitatorPk = testSecp("facilitator");
-const payee = testAddress("payee");
+export const payerPk = testSecp("payer");
+export const payer = testAccount("payer");
+export const facilitatorPk = testSecp("facilitator");
+export const payee = testAddress("payee");
 
 // WE-1's stated inputs, for the cases that keep WE-1's payment.
-const A_STATED = ["--authorizer", "0xE65E3dE1493171dCF0A706a3f407d7DdB38C5673", "--tx", "0x30ca156899828709dac13ade34a3b2f2689bc9f2eb7690467a49c2fcaed55ce3"];
+export const A_STATED = ["--authorizer", "0xE65E3dE1493171dCF0A706a3f407d7DdB38C5673", "--tx", "0x30ca156899828709dac13ade34a3b2f2689bc9f2eb7690467a49c2fcaed55ce3"];
 
-function we1Parts() {
+export function we1Parts() {
   const doc = we1();
   const logA = JSON.parse(textOf(byId(doc, "log-a")).trim());
   const blk = JSON.parse(textOf(byId(doc, "blk-a")));
@@ -60,10 +60,10 @@ function we1Parts() {
 }
 
 // The test payer and a payment's hash as the stated inputs.
-const stated = (txHash) => ["--authorizer", payer.address, "--tx", txHash];
+export const stated = (txHash) => ["--authorizer", payer.address, "--tx", txHash];
 
 // Puts a payment (transaction, receipt, block) in place of WE-1's.
-function usePayment(doc, p, carriedAs, chainId = 84532) {
+export function usePayment(doc, p, carriedAs, chainId = 84532) {
   setBytes(doc, "tx-a", pretty(p.tx));
   setBytes(doc, "rc-a", pretty(p.receipt));
   setBytes(doc, "blk-a", pretty(p.block));
@@ -73,7 +73,7 @@ function usePayment(doc, p, carriedAs, chainId = 84532) {
 }
 
 // A synthetic EIP-3009 payment of the test payer, signed by test keys.
-async function eipPayment(blk, o = {}) {
+export async function eipPayment(blk, o = {}) {
   const chainId = o.chainId ?? 84532;
   const a = await authorization({
     token: PAY_CONTRACT,
@@ -102,7 +102,7 @@ function editTxInput(doc) {
 }
 
 // A test-key log added beside log-a, with its operator key.
-function addTestLog(doc, { label, sessionId, ...o }) {
+export function addTestLog(doc, { label, sessionId, ...o }) {
   const k = testEd(label);
   const log = chirindoLog({ k, sessionId, ...o });
   add(doc, { id: `log-${label}`, role: "gate-log", profile: "chirindo-evidence.action/1", bytes: log.bytes, media_type: JSONL });
@@ -117,13 +117,20 @@ async function t01() {
   return { doc, args: A_STATED, ins };
 }
 
-// Each case: id; code (the refusal expected) or fails (the check or binding
-// whose FAIL gives the verdict FAILS); build() -> { doc, args }.
+// Each case: id; code (the refusal expected), fails (the check or binding
+// whose FAIL gives the verdict FAILS) or, for a case of a shape judged since,
+// judged (the verdict and states it gives, as test/refusals.mjs reads them);
+// build() -> { doc, args }.
+const OFFLINE = ["PAYMENT-NOT-VERIFIED", "V3", "offline-chain-data"];
 export const CASES = [
-  { id: "T-01", code: "role:instruction", build: t01 },
+  {
+    id: "T-01",
+    judged: { verdict: OFFLINE, bindings: { "B-INS": ["UNBOUND-OUTSIDE", null] }, checks: [["M6.instruction", "ins-t", "PASS"]], instructions: { "ins-t": ["UNBOUND-OUTSIDE", ["payees"], null] }, limitsHave: ["L12", "L13", "L18"] },
+    build: t01,
+  },
   {
     id: "T-02",
-    code: "role:action-result",
+    judged: { verdict: OFFLINE, checks: [["M8.result", "result-t", "PASS"], ["M8.arguments", "args-a", "PASS"]], bindings: { "B-PAY": ["BOUND", null], "B-INS": ["ABSENT", null] } },
     build: async () => {
       const { doc, argsDigest } = we1Parts();
       const value = { note: "TEST FIXTURE result", ok: true };
@@ -134,7 +141,7 @@ export const CASES = [
   },
   {
     id: "T-03",
-    code: "role:gate-receipt",
+    judged: { verdict: OFFLINE, bindings: { "B-GRC": ["ABSENT", null], "B-PAY": ["BOUND", null] }, checks: [["M9.issuer-profile", "profile-t", "PASS"], ["M7.signer-key", "receipt-t", "PASS"], ["M2.log", "log-t03", "PASS"]], gateReceipts: { "receipt-t": ["SUPPLIED", null, ["context-receipt"], false] }, flagsHave: ["context-receipt", "test-profile"], limitsHave: ["L16"], decision: "allow" },
     build: async () => {
       const { doc } = we1Parts();
       const gr = await gateReceipt(testSecp("issuer"));
@@ -148,7 +155,7 @@ export const CASES = [
   },
   {
     id: "T-04",
-    code: "role:checkpoint",
+    judged: { verdict: OFFLINE, checks: [["M3.checkpoint", "cp-a", "PASS"], ["M3.signature", "cp-a", "PASS"], ["M3.history", "cp-a", "PASS"]], bindings: { "B-CKP": ["BOUND", null], "B-WIT": ["SUPPLIED", null], "B-PAY": ["BOUND", null] }, decision: "allow" },
     build: async () => {
       const { doc } = we1Parts();
       const line = JSON.parse(textOf(byId(doc, "sidecar-a")).trim());
@@ -158,7 +165,7 @@ export const CASES = [
   },
   {
     id: "T-05",
-    code: "role:witness-receipt",
+    judged: { verdict: OFFLINE, checks: [["M4.witness-receipt", "wr-a", "PASS"]], bindings: { "B-CKP": ["BOUND", null], "B-WIT": ["SUPPLIED", null], "B-PAY": ["BOUND", null] }, decision: "allow" },
     build: async () => {
       const { doc } = we1Parts();
       const line = JSON.parse(textOf(byId(doc, "sidecar-a")).trim());
@@ -203,7 +210,7 @@ export const CASES = [
   },
   {
     id: "T-09",
-    code: "role:supporting",
+    judged: { verdict: OFFLINE, checks: [["M1.member", "sup-t", "PASS"]], bindings: { "B-CKP": ["BOUND", null], "B-WIT": ["SUPPLIED", null], "B-PAY": ["BOUND", null] }, decision: "allow" },
     build: async () => {
       const { doc } = we1Parts();
       add(doc, { id: "sup-t", role: "supporting", profile: "opaque", bytes: Buffer.from("TEST FIXTURE supporting document\n", "utf8"), media_type: "text/plain" });
@@ -212,7 +219,7 @@ export const CASES = [
   },
   {
     id: "T-10",
-    code: "profile:gate-log",
+    judged: { verdict: OFFLINE, checks: [["M2.log", "log-t10", "PASS"], ["M2.log", "log-a", "PASS"]], bindings: { "B-LOG": ["BOUND", null], "B-CKP": ["BOUND", null], "B-WIT": ["SUPPLIED", null], "B-PAY": ["BOUND", null], "B-KEY": ["KEY-ONLY", null] }, decision: "allow" },
     build: async () => {
       const { doc } = we1Parts();
       const k = testEd("t10");
@@ -223,7 +230,7 @@ export const CASES = [
   },
   ...[false, true].map((twin) => ({
     id: twin ? "T-11F" : "T-11",
-    ...(twin ? { fails: "M9.operator-key" } : { code: "legacy-shape" }),
+    ...(twin ? { fails: "M9.operator-key" } : { judged: { verdict: OFFLINE, checks: [["M9.operator-key", "opkey-a", "PASS"], ["M2.log", "log-a", "PASS"]], bindings: { "B-CKP": ["BOUND", null], "B-WIT": ["SUPPLIED", null], "B-PAY": ["BOUND", null] }, decision: "allow" } }),
     build: async () => {
       const { doc } = we1Parts();
       const jwk = JSON.parse(textOf(byId(doc, "opkey-a"))).keys[0];
@@ -259,7 +266,7 @@ export const CASES = [
   },
   ...[false, true].map((twin) => ({
     id: twin ? "T-13F" : "T-13",
-    ...(twin ? { fails: "M2.log" } : { code: "jwks-uri" }),
+    ...(twin ? { fails: "M2.log" } : { judged: { verdict: OFFLINE, checks: [["M2.log", "log-t13", "PASS"], ["M2.log", "log-a", "PASS"]], bindings: { "B-KEY": ["KEY-ONLY", null], "B-CKP": ["BOUND", null], "B-WIT": ["SUPPLIED", null], "B-PAY": ["BOUND", null] }, decision: "allow" } }),
     build: async () => {
       const { doc, argsDigest } = we1Parts();
       addTestLog(doc, { label: twin ? "t13f" : "t13", sessionId: "test-t13", argsHash: argsDigest, jwksUri: `${twin ? "http" : "https"}://test-operator.invalid/.well-known/jwks.json` });
@@ -268,7 +275,7 @@ export const CASES = [
   })),
   {
     id: "T-14",
-    code: "log-prefix",
+    judged: { verdict: OFFLINE, checks: [["M2.prefix", "log-a", "PASS"]], bindings: { "B-CKP": ["BOUND", null], "B-WIT": ["SUPPLIED", null], "B-PAY": ["BOUND", null] }, decision: "allow" },
     build: async () => {
       const { doc } = we1Parts();
       doc.members.splice(1, 0, { ...byId(doc, "log-a"), id: "log-a2" });
@@ -288,7 +295,7 @@ export const CASES = [
   },
   {
     id: "T-15",
-    code: "truncated",
+    judged: { verdict: OFFLINE, checks: [["M3.history", "sidecar-t15", "PASS"]], bindings: { "B-CKP": ["BOUND", null], "B-WIT": ["SUPPLIED", null], "B-PAY": ["BOUND", null] }, decision: "allow" },
     build: async () => {
       const { doc, argsDigest } = we1Parts();
       const k = testEd("t15");
@@ -502,7 +509,7 @@ export const CASES = [
   },
   {
     id: "T-34",
-    code: "role:instruction",
+    fails: "M6.instruction",
     build: async () => {
       const { doc, args, ins } = await t01();
       ins.sig = ins.sig.slice(0, 10) + (ins.sig[10] === "A" ? "B" : "A") + ins.sig.slice(11);

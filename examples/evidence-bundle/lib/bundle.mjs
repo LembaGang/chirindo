@@ -3,6 +3,7 @@
 import canonicalize from "canonicalize";
 import { createHash } from "node:crypto";
 import { isPlainObject, parseStrictJson } from "../../ordering-evidence-h4/lib/formats.mjs";
+import { built } from "./built.mjs";
 import { BUNDLE_TYPE, PROFILES_OF } from "./table.mjs";
 
 export const EXPECTED_AUTHORIZER_TEXT = "the account the payment must come from is stated by the person running the verifier, never by the bundle";
@@ -23,6 +24,7 @@ const MEMBER_FIELDS = ["id", "role", "profile", "media_type", "sha256", "bytes_b
 // M0 (spec 4.2): strict JSON; the type; exactly the members of section 3; the
 // subject well formed for its kind; never an expected_authorizer. Returns
 // { doc } or { fail }.
+built("M0.bundle");
 export function m0(bytes) {
   let doc;
   try {
@@ -82,6 +84,7 @@ export function jcsJsonDigest(bytes) {
 // member's contents, what can be read of them: the kids of the carried logs,
 // the key ids of the carried witness receipts, the digests of jcs-json members.
 // A member that cannot be read here is left to its own check (M2 to M9).
+built("M1.member", "M1.manifest");
 export function m1(doc, peekFactory) {
   const rows = [];
   const decoded = new Map();

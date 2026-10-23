@@ -15,10 +15,10 @@ const file = path.join(FOLDER, "schema", "evidence-bundle-verdict-0.9.schema.jso
 const schema = JSON.parse(readFileSync(file, "utf8"));
 let dir;
 const outputs = [];
-before(() => {
+before(async () => {
   dir = mkdtempSync(path.join(os.tmpdir(), "eb-schema-"));
   for (const v of VECTORS) {
-    const r = runVector(v, dir);
+    const r = await runVector(v, dir);
     if (r.status === 0) outputs.push([v.id, r.output]);
   }
 });

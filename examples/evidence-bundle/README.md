@@ -51,6 +51,8 @@ node check-bundle.mjs we1.json --authorizer 0xE65E3dE1493171dCF0A706a3f407d7DdB3
 `build-we1.mjs` checks every source file against its committed sha256 before
 it writes anything, and exits 2 naming a file that differs (a checkout that
 rewrote line ends, for example); it refuses rather than repairs.
+`--root <dir>` reads the sources under another directory in place of the
+repository root; `test/builder.mjs` uses it to show both outcomes on a copy.
 
 ## Exit codes
 
@@ -60,7 +62,8 @@ rewrote line ends, for example); it refuses rather than repairs.
   `--online` or `--rpc`, a missing or unreadable bundle, invalid pins), or a
   bundle outside the shape this build judges (`not supported in this build:
   <code>`).
-- `1`: an internal error, with nothing on stdout.
+- `1`: an internal error, with nothing on stdout. No test reaches exit 1:
+  no input is known to cause one, here or in `build-we1.mjs`.
 
 ## What an offline run never says
 
@@ -86,12 +89,9 @@ order, that is outside it. A refusal is not a verdict and writes none.
 
 | code | the bundle must have |
 |---|---|
-| `role:<role>` | members of the roles `gate-log`, `action-arguments`, `witness-sidecar`, `operator-key`, `witness-key`, `payment-transaction`, `payment-receipt`, `payment-block` only |
-| `profile:<role>` | the profiles `chirindo-evidence.action/1`, `jcs-json`, `chirindo-witness-sidecar/1`, `jwks` (or `jwk-okp-ed25519` in the legacy shape), `ho-v5-keys`, `eth-rpc-json` |
-| `legacy-shape` | a log of `evidence.action/0` records (or a `jwk-okp-ed25519` key) only as exactly one legacy-kid log, one such key, no sidecar, and an EVM payment claimed as `none` |
-| `jwks-uri` | no record that names a `jwks_uri` |
-| `log-prefix` | no two logs with one kid and session id |
-| `truncated` | no checkpoint or witness receipt whose count is above its log's record count |
+| `role:<role>` | members of the roles `instruction`, `action-arguments`, `action-result`, `gate-log`, `gate-receipt`, `issuer-profile`, `witness-sidecar`, `checkpoint`, `witness-receipt`, `witness-key`, `operator-key`, `payment-transaction`, `payment-receipt`, `payment-block`, `supporting` only |
+| `profile:<role>` | the profiles of table 3-1 for those roles: `signed-instruction-ed25519/0.2` (checked, M6), `vi-0.1-draft` and `ap2-0.2` (carried as PRESENT, not checked); `chirindo-evidence.action/1` and `jcs-sha256-chain/0.1` (Annex B); `eip712-gate-receipt/0.1`, read through an issuer profile of `chirindo-h4-issuer-profile/2` or `/1`; `witness-spec-0.5-checkpoint`; `witness.checkpoint/1`; `jcs-json`; `chirindo-witness-sidecar/1`; `jwks`, `jwk-okp-ed25519`; `ho-v5-keys`; `eth-rpc-json`; `opaque` |
+| `legacy-shape` | a log of `evidence.action/0` records only as exactly one legacy-kid log, one `jwk-okp-ed25519` key, no sidecar, and an EVM payment claimed as `none` |
 | `chain` | an EVM payment on Base Sepolia (`eip155:84532`) |
 | `type` | a transaction of type `0x2` |
 | `call` | a top-level nine-argument `transferWithAuthorization` (the v, r, s form) to the token `0x036cbd53842c5426634e7929541ec2318f3dcf7e` |
@@ -99,6 +99,18 @@ order, that is outside it. A refusal is not a verdict and writes none.
 | `contract-signer` | an authorization signature that recovers to its `from` |
 | `unread-carrier` | the cited entry hash found only as the authorization's nonce, or not at all |
 | `no-payment` | an authorization of a value above 0 to an account other than its `from` |
+
+Judged since the first build, each with the checks it needs (`lib/unlocks.mjs`,
+tied by `test/unlocks.mjs`): instructions (M6 and B-INS, which compares an
+Annex A instruction's constraints with the payment from a derived payer),
+action results (M8.result), Annex B logs (M2), gate receipts and issuer
+profiles (M7, M9.issuer-profile, B-GRC, and the receipt's verdict in the cited
+decision under the pins' `permit` and `refuse` values: the shipped pins pin no
+issuer profile), checkpoints and witness receipts as members of their own,
+supporting members, an operator key as one JWK outside the legacy shape,
+records that name a `jwks_uri` (B-KEY offline: SUPPLIED or NOT-EVALUATED), two
+logs of one session (M2.prefix), and a log a checkpoint or witness receipt
+shows to be truncated (B-CKP or B-WIT TRUNCATED).
 
 A card subject skips the last seven rows. A row whose input does not exist (a
 cited record beyond the log's end, for example) does not apply.
@@ -121,13 +133,16 @@ cited record beyond the log's end, for example) does not apply.
 ## Tests, vectors and the sweep
 
 ```
-npm test             # reuse, jcs, cli, schema, we1, vectors, refusals
+npm test             # reuse, jcs, cli, schema, we1, vectors, refusals, unlocks, builder
 npm run test:sweep   # the WE-1 sweep (a few minutes)
 ```
 
 `vectors/evidence-bundle-0.9.json` lists each vector this folder builds from
-the repository's own bytes: a recipe (a base bundle and a change, never bundle
-bytes), its arguments, and the verifier's output projected to what every
+the repository's own bytes and from throwaway test keys derived from public
+seed strings (`vectors/synth.mjs`; the rows of the shapes judged since the
+first build are in `vectors/rows-a2.mjs`): a recipe (a base bundle and a
+change, never bundle bytes), its arguments, and the verifier's output
+projected to what every
 implementation must reproduce. It is a snapshot of this verifier's own output,
 written by `node vectors/make-vectors.mjs --write`; the tests rebuild it and
 compare. The independent checks are the tests' assertions of the values the

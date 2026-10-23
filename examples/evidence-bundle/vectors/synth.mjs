@@ -41,8 +41,9 @@ export const jwkOf = (k) => ({ kty: "OKP", crv: "Ed25519", x: k.x, kid: k.kid })
 export const jwksOf = (...ks) => json({ keys: ks.map(jwkOf) });
 
 // A chirindo-evidence.action/1 log signed by a test key. `edit(records)` may
-// change the unsigned records before they are linked and signed.
-export function chirindoLog({ k, sessionId, n = 1, argsHash, resultHash, jwksUri, receiptUid, edit, t0 = Date.parse("2026-10-20T10:00:00.000Z") }) {
+// change the unsigned records before they are linked and signed; record i
+// names receiptUids[i] when that is given.
+export function chirindoLog({ k, sessionId, n = 1, argsHash, resultHash, jwksUri, receiptUid, receiptUids = [], edit, t0 = Date.parse("2026-10-20T10:00:00.000Z") }) {
   let recs = [];
   for (let i = 0; i < n; i++) {
     const event = { type: "mcp_call", outcome: "executed", server: "evidence-bundle-test", tool_name: "test_tool", args_hash: argsHash, decision: "allow", decision_source: "config" };
@@ -63,6 +64,7 @@ export function chirindoLog({ k, sessionId, n = 1, argsHash, resultHash, jwksUri
     };
     if (jwksUri) r.jwks_uri = jwksUri;
     if (receiptUid && i === 0) r.receipt_uid = receiptUid;
+    if (receiptUids[i]) r.receipt_uid = receiptUids[i];
     recs.push(r);
   }
   if (edit) recs = edit(recs);
@@ -79,18 +81,25 @@ export function chirindoLog({ k, sessionId, n = 1, argsHash, resultHash, jwksUri
   return { records: out, hashes, bytes: Buffer.from(out.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8") };
 }
 
-// A jcs-sha256-chain/0.1 log (spec Annex B) signed by a test key.
-export function annexBLog({ k, sessionId, n = 1, receiptUid }) {
+// A jcs-sha256-chain/0.1 log (spec Annex B) signed by a test key. Record i
+// names receiptUids[i] when that is given; `edit(record, i)` may change a
+// record before it is linked and signed.
+export function annexBLog({ k, sessionId, n = 1, receiptUid, receiptUids = [], argsHash, edit }) {
   let prev = jcsSha256({ v: "test.annex-b/1", session_id: sessionId, marker: "genesis" });
   const out = [];
+  const hashes = [];
   for (let i = 0; i < n; i++) {
-    const e = { v: "test.annex-b/1", seq: i, session_id: sessionId, prev_hash: prev, kid: k.kid, note: "TEST FIXTURE record" };
+    let e = { v: "test.annex-b/1", seq: i, session_id: sessionId, prev_hash: prev, kid: k.kid, note: "TEST FIXTURE record" };
     if (receiptUid && i === 0) e.receipt_uid = receiptUid;
+    if (receiptUids[i]) e.receipt_uid = receiptUids[i];
+    if (argsHash) e.args_hash = argsHash;
+    if (edit) e = edit(e, i);
     e.sig = edSign(null, Buffer.from(jcs(e), "utf8"), k.priv).toString("base64url");
     prev = jcsSha256(withoutMember(e, "sig"));
+    hashes.push(prev);
     out.push(e);
   }
-  return { records: out, bytes: Buffer.from(out.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8") };
+  return { records: out, hashes, bytes: Buffer.from(out.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8") };
 }
 
 // A checkpoint signed by a test key (the served witness spec's shape).
@@ -101,14 +110,15 @@ export function checkpoint({ k, sessionId, count, lastEntryHash, ts = "2026-10-2
 }
 export const sidecarLine = (cp, receipt = null, error = receipt ? null : "TEST FIXTURE: not submitted to a witness") => Buffer.from(JSON.stringify({ checkpoint: cp, witness_receipt: receipt, witness_error: error }) + "\n", "utf8");
 
-// An Annex A instruction signed by a test principal key.
-export function instruction({ principal, agentKid, payee, token }) {
+// An Annex A instruction signed by a test principal key; `constraints`
+// replaces or adds constraint members.
+export function instruction({ principal, agentKid, payee, token, constraints = {} }) {
   const ins = {
     v: "signed-instruction-ed25519/0.2",
     principal: { kid: principal.kid, public_key_jwk: { kty: "OKP", crv: "Ed25519", x: principal.x } },
     agent_kid: [agentKid],
     text: "TEST FIXTURE instruction: pay up to 0.01 test USDC to one payee",
-    constraints: { chain_id: "eip155:84532", asset: token, max_amount: "10000", payees: [payee], valid_from: "2026-10-01T00:00:00Z", valid_until: "2026-12-31T00:00:00Z" },
+    constraints: { chain_id: "eip155:84532", asset: token, max_amount: "10000", payees: [payee], valid_from: "2026-10-01T00:00:00Z", valid_until: "2026-12-31T00:00:00Z", ...constraints },
     iat: "2026-10-01T00:00:00Z",
   };
   ins.sig = edSign(null, Buffer.from(jcs(ins), "utf8"), principal.priv).toString("base64url");
@@ -126,21 +136,23 @@ const CHECK_FIELDS = [
   ["formatVersion", "uint256"],
 ].map(([name, type]) => ({ name, type }));
 const CHECK_LAYOUT = { domain: { name: "Example Test Issuer Checks (TEST FIXTURE)", version: "1", chainId: 84532 }, types: { TestCheck: CHECK_FIELDS }, primaryType: "TestCheck" };
-export function issuerProfile(issuerAddress) {
+export function issuerProfile(issuerAddress, label = "TEST FIXTURE issuer profile; its signer is a throwaway test key") {
   return {
     format: "chirindo-h4-issuer-profile/1",
-    label: "TEST FIXTURE issuer profile; its signer is a throwaway test key",
+    label,
     test: true,
     issuer: "Example Test Issuer (TEST FIXTURE, not a real issuer)",
     chain_id: 84532,
-    tokens: [],
+    // The Base Sepolia test token the verifier's pins name: read and reported.
+    tokens: [{ address: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", name: "USDC", version: "2" }],
     receipt: { eip712: CHECK_LAYOUT, fields: { checked_at: "evaluatedAt", valid_until: "expiresAt", request_hash: "requestDigest", verdict: "decision", schema_version: "formatVersion" }, schema_version: 1 },
-    envelope: { unwrap: [], required: ["id", "format_version", "signer", "sig", "payload"], optional: [], uid: "id", signature: "sig", signer: "signer", message: "payload", schema_version: "format_version", valid_until: "expires_at", valid_for_seconds: "ttl_seconds", layout: "layout" },
+    envelope: { unwrap: [], required: ["id", "format_version", "signer", "sig", "payload"], optional: ["expires_at", "ttl_seconds", "layout"], uid: "id", signature: "sig", signer: "signer", message: "payload", schema_version: "format_version", valid_until: "expires_at", valid_for_seconds: "ttl_seconds", layout: "layout" },
     signers: [{ address: issuerAddress.toLowerCase(), key_id: "test-issuer-key-1", valid_from: "2026-01-01T00:00:00.000Z", valid_until: null }],
   };
 }
-export async function gateReceipt(issuerPk) {
-  const data = { decision: "allow", action: "test", requestDigest: testValue("request"), evaluatedAt: 1792000000, expiresAt: 1792000600, formatVersion: 1 };
+// `o` may set the signed decision, action, evaluatedAt and expiresAt.
+export async function gateReceipt(issuerPk, o = {}) {
+  const data = { decision: "allow", action: "test", requestDigest: testValue("request"), evaluatedAt: 1792000000, expiresAt: 1792000600, formatVersion: 1, ...o };
   const msg = {};
   for (const f of CHECK_FIELDS) msg[f.name] = f.type === "uint256" ? BigInt(data[f.name]) : data[f.name];
   const uid = hashTypedData({ ...CHECK_LAYOUT, message: msg });
