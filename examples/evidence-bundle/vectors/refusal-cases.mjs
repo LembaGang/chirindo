@@ -122,6 +122,7 @@ async function t01() {
 // judged (the verdict and states it gives, as test/refusals.mjs reads them);
 // build() -> { doc, args }.
 const OFFLINE = ["PAYMENT-NOT-VERIFIED", "V3", "offline-chain-data"];
+const UNSUPPORTED_CALL = { verdict: ["PAYMENT-NOT-VERIFIED", "V3", "unsupported-call"], checks: [["M5.call", "tx-a", "PASS"]], bindings: { "B-PAY": ["UNSUPPORTED-PATH", "unsupported-call"] }, limitsHave: ["L20"], decision: "allow" };
 export const CASES = [
   {
     id: "T-01",
@@ -175,7 +176,7 @@ export const CASES = [
   },
   {
     id: "T-06",
-    code: "role:payment-parent-block",
+    judged: { verdict: OFFLINE, checks: [["M5.parent-block", "parent-t", "PASS"], ["M5.block-hash", "blk-a", "PASS"]], bindings: { "B-PAY": ["BOUND", null] }, decision: "allow" },
     build: async () => {
       const { doc, blk, hA } = we1Parts();
       const parent = { ...blk, number: q(49999999n), timestamp: q(T0 - 2n), transactions: [testValue("parent tx")] };
@@ -189,7 +190,7 @@ export const CASES = [
   },
   {
     id: "T-07",
-    code: "role:account-proof",
+    judged: { verdict: OFFLINE, checks: [["M5.account-proof", "proof-t", "PASS"]], bindings: { "B-PAY": ["BOUND", null] }, decision: "allow" },
     build: async () => {
       const { doc, blk, hA } = we1Parts();
       const trie = singleAccountTrie({ address: payer.address, balance: 50000n });
@@ -201,7 +202,7 @@ export const CASES = [
   },
   {
     id: "T-08",
-    code: "role:payment-block-transactions",
+    judged: { verdict: OFFLINE, checks: [["M5.block-transactions", "btx-t", undefined]], bindings: { "B-PAY": ["BOUND", null] }, flagsHave: ["carried-transactions-mismatch"], decision: "allow" },
     build: async () => {
       const { doc, blk } = we1Parts();
       add(doc, { id: "btx-t", role: "payment-block-transactions", profile: "eth-raw-transactions", bytes: pretty({ block_hash: blk.hash, transactions: ["0x02c0"] }) });
@@ -335,7 +336,7 @@ export const CASES = [
   ].flatMap(([id, type]) =>
     [false, true].map((twin) => ({
       id: twin ? `${id}F` : id,
-      ...(twin ? { fails: "M5.transaction" } : { code: "type" }),
+      ...(twin ? { fails: "M5.transaction" } : { judged: { verdict: OFFLINE, checks: [["M5.transaction", "tx-a", "PASS"], ["M5.sender", "tx-a", "PASS"], ["M5.authorization", "tx-a", "PASS"]], bindings: { "B-PAY": ["BOUND", null] }, decision: "allow" } }),
       build: async () => {
         const { doc, blk, hA } = we1Parts();
         const p = await eipPayment(blk, { nonce: "0x" + hA, type });
@@ -347,7 +348,7 @@ export const CASES = [
   ),
   {
     id: "T-20",
-    code: "type",
+    judged: { verdict: ["PAYMENT-NOT-VERIFIED", "V3", "unsupported-type"], checks: [["M5.support", null, "NOT-EVALUATED"]], bindings: { "B-PAY": ["UNSUPPORTED-PATH", "unsupported-type"] }, decision: "allow" },
     build: async () => {
       const { doc, blk, hA } = we1Parts();
       const p = await eipPayment(blk, { nonce: "0x" + hA });
@@ -398,7 +399,7 @@ export const CASES = [
   },
   ...[false, true].map((twin) => ({
     id: twin ? "T-22F" : "T-22",
-    ...(twin ? { fails: "M5.transaction" } : { code: "type" }),
+    ...(twin ? { fails: "M5.transaction" } : { judged: { verdict: ["PAYMENT-NOT-VERIFIED", "V3", "account-has-code"], checks: [["M5.transaction", "tx-a", "PASS"], ["M5.sender", "tx-a", "PASS"]], bindings: { "B-PAY": ["NOT-EVALUATED", "account-has-code"] }, limitsHave: ["L23"], decision: "allow" } }),
     build: async () => {
       const { doc, blk, hA } = we1Parts();
       const tuple = await payer.signAuthorization({ address: testAddress("delegate contract"), chainId: 84532, nonce: 8 });
@@ -414,7 +415,7 @@ export const CASES = [
     ["T-25", "twaBytes65"],
   ].map(([id, kind]) => ({
     id,
-    code: "call",
+    ...(kind === "twaBytes65" ? { judged: { verdict: OFFLINE, checks: [["M5.call", "tx-a", "PASS"], ["M5.token-domain", null, "PASS"], ["M5.authorization", "tx-a", "PASS"], ["M5.token-logs", "rc-a", "PASS"], ["M5.validity-window", null, "PASS"]], bindings: { "B-PAY": ["BOUND", null] }, decision: "allow" } } : { judged: UNSUPPORTED_CALL }),
     build: async () => {
       const { doc, blk, hA } = we1Parts();
       const p = await eipPayment(blk, { nonce: "0x" + hA, kind });
@@ -435,7 +436,7 @@ export const CASES = [
   },
   {
     id: "T-26",
-    code: "call",
+    judged: UNSUPPORTED_CALL,
     build: async () => {
       const { doc, blk } = we1Parts();
       const tx = await signedTx({ type: "0x2", chainId: 84532, senderPk: payerPk, to: [...ENTRYPOINTS][1], input: callData("handleOps", null, { beneficiary: payer.address }) });
@@ -446,7 +447,7 @@ export const CASES = [
   },
   {
     id: "T-27",
-    code: "call",
+    judged: UNSUPPORTED_CALL,
     build: async () => {
       const { doc, blk } = we1Parts();
       const tx = await signedTx({ type: "0x2", chainId: 84532, senderPk: payerPk, to: null, input: "0x6080604052600080fd" });
@@ -457,7 +458,7 @@ export const CASES = [
   },
   ...[false, true].map((twin) => ({
     id: twin ? "T-33" : "T-28",
-    ...(twin ? { fails: "M5.transaction" } : { code: "call" }),
+    ...(twin ? { fails: "M5.transaction" } : { judged: { verdict: OFFLINE, checks: [["M5.call", "tx-a", "PASS"], ["M5.sender", "tx-a", "PASS"]], bindings: { "B-PAY": ["BOUND", null], "B-INS": ["ABSENT", null] }, limitsHave: ["L21"], decision: "allow" } }),
     build: async () => {
       const { doc, blk, hA } = we1Parts();
       const tx = await signedTx({ type: "0x2", chainId: 84532, senderPk: payerPk, to: testAddress("test contract"), value: 1n, input: encodeFunctionData({ abi: ROUTER_ABI, functionName: "testPull", args: ["0x" + hA] }) });
@@ -469,7 +470,7 @@ export const CASES = [
   })),
   {
     id: "T-29",
-    code: "trailer",
+    judged: { verdict: OFFLINE, bindings: { "B-PAY": ["CARRIED-BY-OTHER", null] }, flagsHave: ["trailer"], decision: "allow" },
     build: async () => {
       const { doc, blk, hA } = we1Parts();
       const p = await eipPayment(blk, { nonce: testValue("T-29 nonce"), trailer: hA + "80218021802180218021802180218021" });
@@ -479,7 +480,7 @@ export const CASES = [
   },
   {
     id: "T-30",
-    code: "contract-signer",
+    judged: { verdict: ["PAYMENT-NOT-VERIFIED", "V3", "contract-signer"], checks: [["M5.authorization", "tx-a", "NOT-EVALUATED"]], bindings: { "B-PAY": ["NOT-EVALUATED", "contract-signer"] }, limitsHave: ["L23"], decision: "allow" },
     build: async () => {
       const { doc, blk, hA } = we1Parts();
       const p = await eipPayment(blk, { nonce: "0x" + hA, signerPk: testSecp("an account other than from") });
@@ -489,7 +490,7 @@ export const CASES = [
   },
   {
     id: "T-31",
-    code: "unread-carrier",
+    judged: { verdict: ["PAYMENT-NOT-VERIFIED", "V3", "unread-carrier"], bindings: { "B-PAY": ["NOT-EVALUATED", "unread-carrier"] }, decision: "allow" },
     build: async () => {
       const { doc, blk, hA } = we1Parts();
       const p = await eipPayment(blk, { nonce: testValue("T-31 nonce"), validBefore: BigInt("0x" + hA) });
@@ -499,7 +500,7 @@ export const CASES = [
   },
   {
     id: "T-32",
-    code: "no-payment",
+    judged: { verdict: ["DOES-NOT-CONNECT", "V2"], bindings: { "B-PAY": ["NO-PAYMENT", null] }, decision: "allow" },
     build: async () => {
       const { doc, blk, hA } = we1Parts();
       const p = await eipPayment(blk, { nonce: "0x" + hA, value: 0n });

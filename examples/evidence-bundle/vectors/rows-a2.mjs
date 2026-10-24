@@ -195,7 +195,7 @@ export const ROWS_WA03 = [
 // A test-key Annex B log (members log-t and opkey-t), its record `seq` cited by
 // an EIP-3009 payment of the test payer whose nonce is that record's entry
 // hash, sent by the test facilitator; the claim eip3009-nonce.
-async function annexBCase({ log = {}, seq = 0, pay = {} } = {}) {
+export async function annexBCase({ log = {}, seq = 0, pay = {} } = {}) {
   const { doc, blk } = paymentOnly();
   const k = testEd("a2 annex-b operator");
   const l = annexBLog({ k, sessionId: "test-a2-annex-b", ...log });
@@ -224,7 +224,7 @@ export const ROWS_WA04 = [
 // A test issuer's profile (ip-t, unless `profileId` names another) and the
 // gate receipts `receipts` read through it, each { id, gr } with gr from
 // gateReceipt. `profileAs` is the profile name the member declares.
-function addReceipts(doc, receipts, { profileId = "ip-t", profileAs = "chirindo-h4-issuer-profile/1", label } = {}) {
+export function addReceipts(doc, receipts, { profileId = "ip-t", profileAs = "chirindo-h4-issuer-profile/1", label } = {}) {
   const bytes = json(issuerProfile(testAccount("issuer").address, label));
   add(doc, { id: profileId, role: "issuer-profile", profile: profileAs, bytes });
   for (const { id, gr } of receipts) add(doc, { id, role: "gate-receipt", profile: "eip712-gate-receipt/0.1", issuer_profile: profileId, bytes: json(gr.sealed) });
@@ -235,12 +235,12 @@ function addReceipts(doc, receipts, { profileId = "ip-t", profileAs = "chirindo-
 // permit?, refuse? }, a profile without permit and refuse being pinned
 // without verdict values. The values are a test's, and say so.
 const VALUES_SOURCE = { url: "examples/evidence-bundle/vectors/rows-a2.mjs", label: "TEST FIXTURE: verdict values set by this test, not taken from an issuer's documentation", fetched_at: null, sha256: null };
-const pinsFor = (profiles) =>
+export const pinsFor = (profiles) =>
   testPins((p) => {
     p.issuer_profiles = profiles.map(({ bytes, permit, refuse }) => ({ sha256: sha256Hex(bytes), label: "TEST FIXTURE issuer profile", ...(permit || refuse ? { permit: permit ?? [], refuse: refuse ?? [], values_source: VALUES_SOURCE } : {}) }));
   });
-const withPins = (argv) => [...argv, "--pins", "<pins>"];
-const PERMIT = { permit: ["allow"], refuse: ["deny"] };
+export const withPins = (argv) => [...argv, "--pins", "<pins>"];
+export const PERMIT = { permit: ["allow"], refuse: ["deny"] };
 
 // An Annex B log whose record names the uid of a test issuer's gate receipt
 // (gr-t, signed values `receipt`), carried with its profile (ip-t), cited by

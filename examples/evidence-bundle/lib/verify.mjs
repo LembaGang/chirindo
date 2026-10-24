@@ -13,9 +13,11 @@ import { parseErc8021 } from "../../ordering-evidence-h4/lib/evm.mjs";
 import { declaredShape, decodedShape } from "./allowlist.mjs";
 import { BUILT, built } from "./built.mjs";
 import { jcsJsonDigest, m0, m1 } from "./bundle.mjs";
+import { accountProof, blockTransactions, jsonTuples, parentBlockProblem, scanEarlier, tupleAuthority } from "./chain.mjs";
 import { ANNEX_A, argsHashOf, bIns, capturedDigest, m6Instruction, resultHashOf } from "./instructions.mjs";
 import { m7Receipt, ownState, readIssuerProfile, reading } from "./receipts.mjs";
 import { LIMIT_TEXTS } from "./limits.mjs";
+import { readOutflows } from "./outflow.mjs";
 import { analyseSearch, m5, readRpcJson, signerOfMatch } from "./payment.mjs";
 import {
   checkpointSigOk,
@@ -35,7 +37,7 @@ import {
   witnessKeyEntries,
 } from "./records.mjs";
 import { ALLOW_TRIPLE, BINDING_IDS, OUTPUT_TYPE, REFUSE_VALUES, THUMBPRINT_RE, VERDICT_TEXT } from "./table.mjs";
-import { eip3009Readable } from "./tx.mjs";
+import { eip3009Readable, txSerialization, unreadByRule2 } from "./tx.mjs";
 
 export { BUILT };
 const ANNEX_B_LOG = "jcs-sha256-chain/0.1";
@@ -109,7 +111,9 @@ function decisionOf(rec) {
 
 built("S1.authorizer", "S2.tx", "M2.prefix", "M3.signature", "M3.history", "M8.arguments", "M9.witness-key");
 built("M8.result");
-export async function verifyBundle(bytes, stated, pins) {
+// `onDecoded`, for test/unlocks.mjs only, receives the decoded state that the
+// shape of item 3 onward is judged on; it changes nothing.
+export async function verifyBundle(bytes, stated, pins, { onDecoded } = {}) {
   const checks = [];
   const flags = [];
   const add = (id, member, status, reason, detail) => checks.push({ id, member, status, reason, detail: detail ?? "" });
@@ -302,8 +306,25 @@ export async function verifyBundle(bytes, stated, pins) {
     }
     pay = await m5(p, subject, pins);
     pay.tx = p.tx;
+    pay.rc = p.rc;
     pay.to = p.tx?.to ?? null;
+    // M5 step 3's checks of the optional payment members, after M5.block-hash.
+    const bh = pay.rows.find((r) => r.id === "M5.block-hash");
+    if (bh) {
+      const txRow = pay.rows.find((r) => r.id === "M5.transaction");
+      const opt = m5Optional({ bh, txRow, tx: p.tx, blk: p.blk, parentM: one("payment-parent-block"), proofMs: byRole("account-proof"), btxM: one("payment-block-transactions"), decoded });
+      pay.rows.splice(pay.rows.indexOf(bh) + 1, 0, ...opt.rows);
+      pay.parent = opt.parent;
+      pay.proofs = opt.proofs;
+      if (opt.mismatch) flag("carried-transactions-mismatch", `${one("payment-block-transactions").id}: ${opt.mismatch}; the list is not used`);
+      // Rule 10e offline: the scan of a carried list that passed, for the stated account.
+      if (opt.list && stated.authorizer) pay.scan = await scanEarlier(opt.list, Number(quantity(p.tx.transactionIndex, "transactionIndex")), stated.authorizer);
+    }
     checks.push(...pay.rows);
+    // Rule 10e offline: the authorities of the payment transaction's own
+    // authorization tuples, read once M5.transaction has read its fields.
+    pay.authorities = [];
+    if (pay.type === "0x4" && pay.rows.find((r) => r.id === "M5.transaction")?.status === "PASS") pay.authorities = (await Promise.all(jsonTuples(p.tx.authorizationList).map(tupleAuthority))).filter(Boolean);
   }
 
   // M6, each instruction in the profile of Annex A; the others are carried
@@ -426,6 +447,7 @@ export async function verifyBundle(bytes, stated, pins) {
   if (firstFail()) return finish({ ...ctx, failAt: firstFail() });
 
   // (b2) the decoded shape.
+  onDecoded?.({ doc, logs, checkpoints, receipts, pay: pay ?? {}, search });
   const refused2 = decodedShape({ doc, logs, checkpoints, receipts, pay: pay ?? {}, search });
   if (refused2) return { kind: "refused", code: refused2, checks };
 
@@ -452,6 +474,7 @@ function finish(ctx) {
   const times = [];
   const orderings = [];
   let payerDerived = false;
+  let unreadOutflows = [];
   let bpay = null;
   let instructions = [];
   let gateReceipts = [];
@@ -596,6 +619,13 @@ function finish(ctx) {
       }
       if (payerDerived) {
         payment = { connected: true, reason: null, payer: stated.authorizer, movements: [bpay.movement], as_supplied: true };
+        // The outflow reading (spec 4.3, "Payment values"), on the calldata path only.
+        if (bpay.path === "calldata") {
+          const pinned = (pins.tokens[subject.chain_id.slice("eip155:".length)] ?? []).map((t) => t.address);
+          const of = readOutflows(pay.rc.logs, stated.authorizer, pinned);
+          payment.movements.push(...of.movements);
+          unreadOutflows = of.unread;
+        }
       } else payment.reason = bpay.reason ?? "no-payer-derived";
     }
     if (card) payment.reason = "card-subject";
@@ -603,7 +633,7 @@ function finish(ctx) {
     // B-INS, which reads the payment values when a payer is derived.
     const A = ctx.argMembers.find((a) => a.digest === argsHashOf(citedRec, cited.profile)) ?? null;
     const pv = payerDerived ? { chain: subject.chain_id, movements: payment.movements.filter((m) => BigInt(m.amount) > 0n && m.payee !== payment.payer), blockTs: pay.blockTs, kid: citedRec.kid } : null;
-    const ins = bIns({ ins: insMembers, A, pv, bpayState: B.get("B-PAY").state, logs, argMembers: ctx.argMembers });
+    const ins = bIns({ ins: insMembers, A, pv, bpayState: B.get("B-PAY").state, logs, argMembers: ctx.argMembers, unread: unreadOutflows });
     bind("B-INS", ins.agg.state, ins.agg.reason, { detail: ins.agg.detail });
     instructions = ins.rows;
     // An Annex B record states no decision of its own and is not a source.
@@ -774,6 +804,16 @@ function bKey(ctx, kid, bind) {
 
 // B-PAY (spec 4.3, rules 1 to 10), offline, for an evm-payment subject whose
 // cited record exists.
+built("B-PAY.rule2");
+// The calldata path: rules 5, 10c and 10d.
+built("B-PAY.calldata");
+// Rule 4's signer of the bytes that carry H when the sender alone signed them
+// (a facilitator's suffix), and rules 10a and 10b.
+built("B-PAY.rule4-sender");
+// Rule 6: H found only where it does not bind.
+built("B-PAY.rule6");
+// NO-PAYMENT: an authorization of 0, or from its payer to itself (rules 4, 10d).
+built("B-PAY.no-payment");
 function bPay(ctx) {
   const { checks, pay, search, stated, doc } = ctx;
   const out = { state: null, reason: null, carrier: null, signed_by: null, payerDerived: false, movement: null, path: null, flagAuthorizer: false, detail: "" };
@@ -783,7 +823,8 @@ function bPay(ctx) {
   const support = checks.find((c) => c.id === "M5.support");
   if (support?.status === "NOT-EVALUATED") return done("UNSUPPORTED-PATH", support.reason);
   const call = pay.call;
-  if (["receive9", "receiveBytes", "userop", "creation"].includes(call.kind) || (call.kind === "twaBytes" && !eip3009Readable(call))) return done("UNSUPPORTED-PATH", "unsupported-call");
+  // Rule 2: the claim is reported, not compared (rule 7).
+  if (unreadByRule2(call)) return done("UNSUPPORTED-PATH", "unsupported-call");
   const eip = eip3009Readable(call);
   out.path = eip ? "eip3009" : "calldata";
   out.carrier = search ? search.carrier : null;
@@ -821,21 +862,111 @@ function bPay(ctx) {
   }
   if (!stated.tx) return done("NOT-EVALUATED", "tx-not-stated");
   // Rule 10.
+  // Rule 10e, where S would be the derived payer: code or a tuple at S that
+  // what the bundle carries shows replaces the state of rules 10a and 10d.
+  const windowed = () => {
+    const w = codeWindow(pay, S);
+    if (!w) return null;
+    out.payerDerived = false;
+    return done("NOT-EVALUATED", w.reason, w.detail);
+  };
   if (eip && out.signed_by !== P) {
     // 10a: the sender alone signed the bytes that carry H.
     out.payerDerived = P === S && counted;
-    return done("CARRIED-BY-OTHER", null, out.payerDerived ? "a facilitator's bytes carry the hash of a payment the stated account authorized" : "the bytes that carry the hash were signed by the sender alone");
+    if (out.payerDerived) return windowed() ?? done("CARRIED-BY-OTHER", null, "a facilitator's bytes carry the hash of a payment the stated account authorized");
+    return done("CARRIED-BY-OTHER", null, "the bytes that carry the hash were signed by the sender alone");
   }
   if (eip && P !== S) return done("CARRIED-BY-OTHER", null, `the authorization's signer is not the stated account; the transaction moves value from ${P}`);
   if (!eip && sender !== S) return done("UNSUPPORTED-PATH", "other-sender");
   if (!eip && out.carrier === null) return done("ABSENT", null, "the cited hash is not in the calldata the stated account sent");
   if (counted) {
     out.payerDerived = true;
-    // Rule 10e offline: the payment transaction is of type 0x2 here (it carries
-    // no authorization tuple) and no account proof is carried, so the state of
-    // rule 10d stands, computed from the bundle's copies.
-    return done("BOUND", null, "the stated account signed the bytes that carry the cited hash, and the payment moves value from it");
+    // Rule 10e offline: without code or a tuple at S in what the bundle
+    // carries, the state of rule 10d stands, computed from the bundle's copies.
+    return windowed() ?? done("BOUND", null, "the stated account signed the bytes that carry the cited hash, and the payment moves value from it");
   }
   return eip ? done("NO-PAYMENT", null, "the authorization moves nothing out of the payer") : done("NOT-EVALUATED", "no-counted-movement");
+}
+
+// M5 step 3 for the optional payment members (spec 257): the payment block's
+// parent, the account proofs and the block's raw transactions. Each is NOT
+// EVALUATED with M5.block-hash's reason when that is; a list that does not
+// match is reported (`mismatch`), not listed as a check, and not used.
+function m5Optional({ bh, txRow, tx, blk, parentM, proofMs = [], btxM, decoded }) {
+  const rows = [];
+  const out = { parent: null, proofs: [], list: null, mismatch: null };
+  if (parentM) {
+    let status = "PASS";
+    let reason = null;
+    let detail = "its header hash recomputes; it is the payment block's parent, one number before it";
+    if (bh.status === "NOT-EVALUATED") [status, reason, detail] = ["NOT-EVALUATED", bh.reason, ""];
+    else {
+      let problem;
+      try {
+        const parent = readRpcJson(decoded.get(parentM.id));
+        problem = parentBlockProblem(parent, blk);
+        if (!problem) out.parent = parent;
+      } catch (e) {
+        problem = `the member does not read as strict JSON: ${e.message}`;
+      }
+      if (problem) [status, detail] = ["FAIL", problem];
+    }
+    rows.push({ id: "M5.parent-block", member: parentM.id, status, reason, detail });
+  }
+  // The headers a proof may name: the payment block, and its parent once it passed.
+  const headers = new Map();
+  if (isPlainObject(blk) && typeof blk.hash === "string") headers.set(blk.hash, blk);
+  if (out.parent) headers.set(out.parent.hash, out.parent);
+  for (const m of proofMs) {
+    if (bh.status === "NOT-EVALUATED") {
+      rows.push({ id: "M5.account-proof", member: m.id, status: "NOT-EVALUATED", reason: bh.reason, detail: "" });
+      continue;
+    }
+    let r;
+    try {
+      r = accountProof(parseStrictJson(decoded.get(m.id)), headers);
+    } catch (e) {
+      r = { problem: `the member does not read as strict JSON: ${e.message}` };
+    }
+    if (r.problem) rows.push({ id: "M5.account-proof", member: m.id, status: "FAIL", reason: null, detail: r.problem });
+    else {
+      out.proofs.push(r);
+      rows.push({ id: "M5.account-proof", member: m.id, status: "PASS", reason: null, detail: `${r.address} at block ${r.blockHash}: ${r.code ? "code" : "no code"}` });
+    }
+  }
+  if (btxM) {
+    if (bh.status === "NOT-EVALUATED") rows.push({ id: "M5.block-transactions", member: btxM.id, status: "NOT-EVALUATED", reason: bh.reason, detail: "" });
+    else if (txRow?.status !== "PASS") rows.push({ id: "M5.block-transactions", member: btxM.id, status: "NOT-EVALUATED", reason: "prerequisite-failed:M5.transaction", detail: "" });
+    else {
+      let r;
+      try {
+        r = blockTransactions(parseStrictJson(decoded.get(btxM.id)), blk, Number(quantity(tx.transactionIndex, "transactionIndex")), txSerialization(tx).signedHex);
+      } catch (e) {
+        r = { mismatch: `the member does not read as strict JSON: ${e.message}` };
+      }
+      if (r.mismatch) out.mismatch = r.mismatch;
+      else {
+        out.list = r.list;
+        rows.push({ id: "M5.block-transactions", member: btxM.id, status: "PASS", reason: null, detail: `${r.list.length} entries; their transactions root is the block's, and the entry at the payment's index is its encoding` });
+      }
+    }
+  }
+  return { rows, ...out };
+}
+
+// The code window of rule 10e offline (spec 4.3; D.1): what the bundle's
+// copies show of code at S during the payment. Returns { reason, detail } in
+// place of the state of rules 10a and 10d, or null.
+// Carried account proofs of S decide for their block; a proof of another
+// account decides nothing.
+built("B-PAY.10e-proofs");
+function codeWindow(pay, S) {
+  if (pay.authorities.includes(S)) return { reason: "account-has-code", detail: "an authorization tuple of the payment transaction has the stated account as its authority" };
+  const coded = (pay.proofs ?? []).find((x) => x.address === S && x.code);
+  if (coded) return { reason: "account-has-code", detail: `a carried account proof shows code at the stated account at the end of block ${coded.blockHash}` };
+  // The earlier transactions of a carried list that M5.block-transactions passed.
+  if (pay.scan?.tupleFor !== null && pay.scan?.tupleFor !== undefined) return { reason: "account-has-code", detail: `entry ${pay.scan.tupleFor} of the carried block transactions holds a tuple whose authority is the stated account` };
+  if (pay.scan?.unread) return { reason: "prerequisite-failed:O7.account-code", detail: pay.scan.unread };
+  return null;
 }
 

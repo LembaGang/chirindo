@@ -145,8 +145,9 @@ const present = (row) => Object.assign(row, { state: "PRESENT" });
 // B-INS (spec 4.3): per carried instruction, and the aggregate. `ins` are the
 // instruction members ({ member, profile, digest, value, m6 }); `A` the
 // cited record's carried arguments or null; `pv` the payment values, or null
-// when no payer is derived (then `bpay` names B-PAY's state).
-export function bIns({ ins, A, pv, bpayState, logs, argMembers }) {
+// when no payer is derived (then `bpay` names B-PAY's state); `unread` the
+// outflows the reading of the calldata path could not judge.
+export function bIns({ ins, A, pv, bpayState, logs, argMembers, unread = [] }) {
   const D = A && isPlainObject(A.value) && Object.keys(A.value).includes("instruction_sha256") ? A.value.instruction_sha256 : null;
   const rows = ins.map((i) => {
     const { uses, without } = usesOf(i.digest, logs, argMembers);
@@ -155,6 +156,8 @@ export function bIns({ ins, A, pv, bpayState, logs, argMembers }) {
   const compare = (row, inside, outside) => {
     if (!pv) return Object.assign(row, { state: "NOT-EVALUATED", reason: "no-payer-derived" });
     const ex = exceededBy(row.i.value, pv, row.uses);
+    // An incomplete outflow reading (step 5): what was read is judged first.
+    if (unread.length) return Object.assign(row, ex.length ? { state: outside, exceeded: ex, reason: "unread-outflow" } : { state: "NOT-EVALUATED", exceeded: [], reason: "unread-outflow" });
     return Object.assign(row, { state: ex.length ? outside : inside, exceeded: ex });
   };
   for (const row of rows) {
@@ -174,6 +177,13 @@ export function bIns({ ins, A, pv, bpayState, logs, argMembers }) {
   else {
     const first = ["UNBOUND-OUTSIDE", "MATCHED", "NOT-EVALUATED", "PRESENT"].map((s) => out.find((r) => r.state === s)).find(Boolean);
     agg = { state: first.state, reason: first.reason, detail: `no instruction is cited; ${first.member} is ${first.state}${why}` };
+  }
+  // The aggregate with an incomplete outflow reading: EXCEEDS when the cited
+  // instruction is, and otherwise NOT EVALUATED, whatever instructions are carried.
+  if (unread.length && agg.state !== "FAIL") {
+    const what = `the outflow reading is incomplete: ${unread.map((u) => `${u.event} (log ${u.log_index})`).join(", ")} not judged`;
+    const c = out.find((r) => r.cited);
+    agg = c && c.state === "EXCEEDS" ? { state: "EXCEEDS", reason: "unread-outflow", detail: `${c.member} is exceeded (${c.exceeded.join(", ")}); ${what}` } : { state: "NOT-EVALUATED", reason: "unread-outflow", detail: what };
   }
   return { agg, rows: out };
 }

@@ -89,16 +89,12 @@ order, that is outside it. A refusal is not a verdict and writes none.
 
 | code | the bundle must have |
 |---|---|
-| `role:<role>` | members of the roles `instruction`, `action-arguments`, `action-result`, `gate-log`, `gate-receipt`, `issuer-profile`, `witness-sidecar`, `checkpoint`, `witness-receipt`, `witness-key`, `operator-key`, `payment-transaction`, `payment-receipt`, `payment-block`, `supporting` only |
-| `profile:<role>` | the profiles of table 3-1 for those roles: `signed-instruction-ed25519/0.2` (checked, M6), `vi-0.1-draft` and `ap2-0.2` (carried as PRESENT, not checked); `chirindo-evidence.action/1` and `jcs-sha256-chain/0.1` (Annex B); `eip712-gate-receipt/0.1`, read through an issuer profile of `chirindo-h4-issuer-profile/2` or `/1`; `witness-spec-0.5-checkpoint`; `witness.checkpoint/1`; `jcs-json`; `chirindo-witness-sidecar/1`; `jwks`, `jwk-okp-ed25519`; `ho-v5-keys`; `eth-rpc-json`; `opaque` |
+| `role:<role>` | members of the roles of table 3-1 only: `instruction`, `action-arguments`, `action-result`, `gate-log`, `gate-receipt`, `issuer-profile`, `witness-sidecar`, `checkpoint`, `witness-receipt`, `witness-key`, `operator-key`, `payment-transaction`, `payment-receipt`, `payment-block`, `payment-parent-block`, `account-proof`, `payment-block-transactions`, `supporting` |
+| `profile:<role>` | the profiles of table 3-1 for those roles: `signed-instruction-ed25519/0.2` (checked, M6), `vi-0.1-draft` and `ap2-0.2` (carried as PRESENT, not checked); `chirindo-evidence.action/1` and `jcs-sha256-chain/0.1` (Annex B); `eip712-gate-receipt/0.1`, read through an issuer profile of `chirindo-h4-issuer-profile/2` or `/1`; `witness-spec-0.5-checkpoint`; `witness.checkpoint/1`; `jcs-json`; `chirindo-witness-sidecar/1`; `jwks`, `jwk-okp-ed25519`; `ho-v5-keys`; `eth-rpc-json`; `eth-proof-json`; `eth-raw-transactions`; `opaque` |
 | `legacy-shape` | a log of `evidence.action/0` records only as exactly one legacy-kid log, one `jwk-okp-ed25519` key, no sidecar, and an EVM payment claimed as `none` |
 | `chain` | an EVM payment on Base Sepolia (`eip155:84532`) |
-| `type` | a transaction of type `0x2` |
-| `call` | a top-level nine-argument `transferWithAuthorization` (the v, r, s form) to the token `0x036cbd53842c5426634e7929541ec2318f3dcf7e` |
-| `trailer` | nothing after the call's ABI-encoded arguments |
-| `contract-signer` | an authorization signature that recovers to its `from` |
-| `unread-carrier` | the cited entry hash found only as the authorization's nonce, or not at all |
-| `no-payment` | an authorization of a value above 0 to an account other than its `from` |
+| `type` | a transaction of type `0x0`, `0x1`, `0x2`, `0x3` or `0x4` (type `0x3` is UNSUPPORTED-PATH `unsupported-type`; the deposit type `0x7e` is refused) |
+| `call` | a `transferWithAuthorization` the EIP-3009 path reads (the nine-argument v, r, s form, or the `bytes signature` form with a 65-byte signature) only to the token `0x036cbd53842c5426634e7929541ec2318f3dcf7e`; any other call is judged: one that rule 2 does not read is UNSUPPORTED-PATH `unsupported-call`, and any other follows the calldata path |
 
 Judged since the first build, each with the checks it needs (`lib/unlocks.mjs`,
 tied by `test/unlocks.mjs`): instructions (M6 and B-INS, which compares an
@@ -110,9 +106,25 @@ issuer profile), checkpoints and witness receipts as members of their own,
 supporting members, an operator key as one JWK outside the legacy shape,
 records that name a `jwks_uri` (B-KEY offline: SUPPLIED or NOT-EVALUATED), two
 logs of one session (M2.prefix), and a log a checkpoint or witness receipt
-shows to be truncated (B-CKP or B-WIT TRUNCATED).
+shows to be truncated (B-CKP or B-WIT TRUNCATED). On the payment side:
+legacy (EIP-155), type `0x1` and EIP-7702 transactions, blob transactions as
+UNSUPPORTED-PATH; the cited hash as raw bytes anywhere in the calldata, and
+found only where it does not bind (B-PAY NOT-EVALUATED `unread-carrier`);
+bytes after a call's arguments, signed by the sender alone (a facilitator's
+suffix: CARRIED-BY-OTHER); the `bytes signature` form; the calls rule 2 does
+not read; the calldata path from the stated account, with the outflow reading
+of the receipt's logs that B-INS compares with the instruction (an outflow it
+cannot judge gives `unread-outflow`); an authorization that does not recover
+to its `from` (`contract-signer`) or that moves nothing (NO-PAYMENT); and the
+payment block's parent, account proofs and raw transactions (M5.parent-block,
+M5.account-proof, M5.block-transactions, which an offline run reads for the
+code window of B-PAY rule 10e with the payment's own authorization tuples:
+code or a tuple at the stated account gives `account-has-code`, an earlier
+entry this version cannot read gives `prerequisite-failed:O7.account-code`, and
+a carried list that does not match the block is flagged
+`carried-transactions-mismatch` and not used).
 
-A card subject skips the last seven rows. A row whose input does not exist (a
+A card subject skips the last three rows. A row whose input does not exist (a
 cited record beyond the log's end, for example) does not apply.
 
 ## WE-1's members, and where `fetched_at` comes from
@@ -140,7 +152,7 @@ npm run test:sweep   # the WE-1 sweep (a few minutes)
 `vectors/evidence-bundle-0.9.json` lists each vector this folder builds from
 the repository's own bytes and from throwaway test keys derived from public
 seed strings (`vectors/synth.mjs`; the rows of the shapes judged since the
-first build are in `vectors/rows-a2.mjs`): a recipe (a base bundle and a
+first build are in `vectors/rows-a2.mjs` and `vectors/rows-a2b.mjs`): a recipe (a base bundle and a
 change, never bundle bytes), its arguments, and the verifier's output
 projected to what every
 implementation must reproduce. It is a snapshot of this verifier's own output,

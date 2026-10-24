@@ -160,6 +160,11 @@ export function recogniseCall(tx, erc4337) {
 // form, or the bytes signature form with a 65-byte signature.
 export const eip3009Readable = (call) => call.kind === "twa9" || (call.kind === "twaBytes" && call.auth && call.auth.signature.length === 2 + 130);
 
+// The calls B-PAY rule 2 makes UNSUPPORTED-PATH (unsupported-call):
+// receiveWithAuthorization in either form, the bytes signature form with a
+// signature that is not 65 bytes, an ERC-4337 EntryPoint call, a contract creation.
+export const unreadByRule2 = (call) => ["receive9", "receiveBytes", "userop", "creation"].includes(call.kind) || (call.kind === "twaBytes" && !eip3009Readable(call));
+
 // Spec B-PAY rule 3 and D.1: the signed fields of a type, by member name, in
 // the order rule 3 lists them.
 export function signedFields(type) {

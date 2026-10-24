@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildWe1 } from "../build-we1.mjs";
 import { bundleBytes, member, readSource, WE1_AUTHORIZER, WE1_TX } from "../lib/we1.mjs";
 import { ROWS_STEP0, ROWS_WA01, ROWS_WA02, ROWS_WA03, ROWS_WA04, ROWS_WA05, ROWS_WA06, ROWS_WA07, ROWS_WA08, ROWS_WA09, ROWS_WA10, ROWS_WA11 } from "./rows-a2.mjs";
+import { ROWS_B0, ROWS_WB04, ROWS_WB06, ROWS_WB07, ROWS_WB08, ROWS_WB09, ROWS_WB10, ROWS_WB11, ROWS_WB12, ROWS_WB13, ROWS_WB14 } from "./rows-a2b.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const FOLDER = path.resolve(HERE, "..");
@@ -263,6 +264,17 @@ export const VECTORS = [
   ...ROWS_WA09,
   ...ROWS_WA10,
   ...ROWS_WA11,
+  ...ROWS_B0,
+  ...ROWS_WB04,
+  ...ROWS_WB06,
+  ...ROWS_WB07,
+  ...ROWS_WB08,
+  ...ROWS_WB09,
+  ...ROWS_WB10,
+  ...ROWS_WB11,
+  ...ROWS_WB12,
+  ...ROWS_WB13,
+  ...ROWS_WB14,
 ];
 
 // Runs check-bundle.mjs on a bundle document (or on none) with arguments.

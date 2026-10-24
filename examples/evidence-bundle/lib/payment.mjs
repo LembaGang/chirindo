@@ -234,6 +234,7 @@ export async function m5(p, subject, pins) {
 
 // B-PAY rule 3: the search, with the carrier and the matches that do not bind.
 // `h` is the cited entry hash (64 hex digits) or null.
+built("B-PAY.carrier");
 export function analyseSearch(tx, type, call, h) {
   if (h === null) return null;
   const matches = searchHash(tx, type, h);

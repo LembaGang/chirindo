@@ -197,13 +197,13 @@ export function callData(kind, a, extra = {}) {
 
 // A signed transaction of type 0x0 (EIP-155), 0x1, 0x2 or 0x4 in JSON-RPC
 // form, with its hash, from and the fields of its block.
-export async function signedTx({ type, chainId, senderPk, to, value = 0n, input, nonce = 7, authorizationList }) {
+export async function signedTx({ type, chainId, senderPk, to, value = 0n, input, nonce = 7, authorizationList, accessList = [] }) {
   const account = privateKeyToAccount(senderPk);
   const base = { chainId, nonce, gas: 200000n, to, value, data: input };
   let unsigned;
   if (type === "0x0") unsigned = { ...base, type: "legacy", gasPrice: 6000000n };
   else if (type === "0x1") unsigned = { ...base, type: "eip2930", gasPrice: 6000000n, accessList: [] };
-  else if (type === "0x2") unsigned = { ...base, type: "eip1559", maxFeePerGas: 7000000n, maxPriorityFeePerGas: 1000000n, accessList: [] };
+  else if (type === "0x2") unsigned = { ...base, type: "eip1559", maxFeePerGas: 7000000n, maxPriorityFeePerGas: 1000000n, accessList };
   else if (type === "0x4") unsigned = { ...base, type: "eip7702", maxFeePerGas: 7000000n, maxPriorityFeePerGas: 1000000n, accessList: [], authorizationList };
   const signedHex = await account.signTransaction(unsigned);
   const sig = parseTransaction(signedHex);
@@ -213,7 +213,7 @@ export async function signedTx({ type, chainId, senderPk, to, value = 0n, input,
   else Object.assign(tx, { maxFeePerGas: q(unsigned.maxFeePerGas), maxPriorityFeePerGas: q(unsigned.maxPriorityFeePerGas) });
   tx.to = to === null ? null : to.toLowerCase();
   tx.value = q(value);
-  if (type !== "0x0") tx.accessList = [];
+  if (type !== "0x0") tx.accessList = type === "0x2" ? accessList.map((e) => ({ address: e.address.toLowerCase(), storageKeys: e.storageKeys })) : [];
   if (type === "0x4")
     tx.authorizationList = authorizationList.map((t) => ({ chainId: q(t.chainId), address: t.address.toLowerCase(), nonce: q(t.nonce), yParity: q(t.yParity), r: q(BigInt(t.r)), s: q(BigInt(t.s)) }));
   tx.input = input;
@@ -229,13 +229,20 @@ export async function signedTx({ type, chainId, senderPk, to, value = 0n, input,
 // The block, receipt and transaction of one payment, consistent with each
 // other: the block's header hash recomputes, it lists the transaction at
 // `index`, and the receipt and its logs name both.
-export function placeInBlock({ tx, logs, baseBlock, number = 50000000n, timestamp, parentHash, stateRoot, index = 1 }) {
+// With `rawTransactions` (each an EIP-2718 encoding, the payment's last), the
+// block lists their hashes and its transactionsRoot is their trie root.
+export function placeInBlock({ tx, logs, baseBlock, number = 50000000n, timestamp, parentHash, stateRoot, index = 1, rawTransactions }) {
   const block = { ...baseBlock };
   block.number = q(number);
   block.timestamp = q(timestamp);
   if (parentHash) block.parentHash = parentHash;
   if (stateRoot) block.stateRoot = stateRoot;
   block.transactions = Array.from({ length: index + 1 }, (_, i) => (i === index ? tx.hash : testValue(`tx ${i} of the test block`)));
+  if (rawTransactions) {
+    index = rawTransactions.length - 1;
+    block.transactions = rawTransactions.map((r) => keccak256(r));
+    block.transactionsRoot = transactionsRoot(rawTransactions);
+  }
   delete block.hash;
   block.hash = headerHash(block).recomputed;
   const placed = { ...tx, blockHash: block.hash, blockNumber: block.number, transactionIndex: q(index), blockTimestamp: block.timestamp };
@@ -264,16 +271,39 @@ export const eip3009Logs = (token, a) => [
 ];
 
 // A single-account state trie: its root, and the proof of that account
-// (EIP-1186 accountProof) as one leaf node.
-export function singleAccountTrie({ address, nonce = 0n, balance = 0n }) {
-  const emptyCodeHash = keccak256("0x");
+// (EIP-1186 accountProof) as one leaf node; `codeHash` the account's (no code
+// when absent).
+export function singleAccountTrie({ address, nonce = 0n, balance = 0n, codeHash = keccak256("0x") }) {
   const storageHash = keccak256(toRlp("0x"));
   const path = keccak256(address.toLowerCase());
   const rq = (v) => (v === 0n ? "0x" : q(v).length % 2 ? "0x0" + q(v).slice(2) : q(v));
-  const value = toRlp([rq(nonce), rq(balance), storageHash, emptyCodeHash]);
+  const value = toRlp([rq(nonce), rq(balance), storageHash, codeHash]);
   const leaf = toRlp(["0x20" + path.slice(2), value]);
-  return { root: keccak256(leaf), proof: [leaf], result: { address: address.toLowerCase(), accountProof: [leaf], balance: q(balance), codeHash: emptyCodeHash, nonce: q(nonce), storageHash, storageProof: [] } };
+  return { root: keccak256(leaf), proof: [leaf], result: { address: address.toLowerCase(), accountProof: [leaf], balance: q(balance), codeHash, nonce: q(nonce), storageHash, storageProof: [] } };
 }
 
 export const ROUTER_ABI = parseAbi(["function testPull(bytes32 ref) payable"]);
+
+// The transactions root of a list of raw transactions (EIP-2718: the root of
+// patriciaTrie(rlp(index) => transaction)), built here for the test blocks, apart
+// from the verifier's own reading of it: each node an RLP list, inlined in its
+// parent when its encoding is under 32 bytes, else referenced by its keccak-256.
+export function transactionsRoot(raws) {
+  const nib = (hex) => [...hex.slice(2)].map((c) => parseInt(c, 16));
+  const hp = (path, leaf) => "0x" + [((leaf ? 2 : 0) + (path.length % 2)), ...(path.length % 2 ? [] : [0]), ...path].map((n) => n.toString(16)).join("");
+  const ref = (node) => (toRlp(node).length - 2 < 64 ? node : keccak256(toRlp(node)));
+  const node = (pairs, d) => {
+    if (pairs.length === 1) return [hp(pairs[0].k.slice(d), true), pairs[0].v];
+    let p = 0;
+    while (pairs.every((x) => x.k[d + p] !== undefined && x.k[d + p] === pairs[0].k[d + p])) p++;
+    if (p > 0) return [hp(pairs[0].k.slice(d, d + p), false), ref(node(pairs, d + p))];
+    const branch = Array.from({ length: 16 }, (_, i) => {
+      const sub = pairs.filter((x) => x.k[d] === i);
+      return sub.length ? ref(node(sub, d + 1)) : "0x";
+    });
+    return [...branch, pairs.find((x) => x.k.length === d)?.v ?? "0x"];
+  };
+  const pairs = raws.map((v, i) => ({ k: nib(toRlp(i === 0 ? "0x" : q(i).length % 2 ? "0x0" + q(i).slice(2) : q(i))), v }));
+  return keccak256(toRlp(node(pairs, 0)));
+}
 export { testValue, withoutMember };

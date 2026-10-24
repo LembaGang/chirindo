@@ -12,6 +12,7 @@
 // not reached. A property not in JUDGED is refused exactly as before.
 
 import { LEGACY_KID_RE, ROLES } from "./table.mjs";
+import { eip3009Readable, unreadByRule2 } from "./tx.mjs";
 
 export const JUDGED = [
   // Wa-01: Annex A instructions (M6, B-INS on the EIP-3009 path).
@@ -37,6 +38,41 @@ export const JUDGED = [
   "log-prefix",
   // Wa-11: a checkpoint or witness receipt beyond the carried log (TRUNCATED).
   "truncated",
+  // Wb-01: legacy (EIP-155) and type 0x1 transactions (M5.transaction, M5.sender).
+  "type:0x0+0x1",
+  // Wb-02: H as raw bytes in the calldata outside the nonce word (rules 3, 7).
+  "carrier:calldata",
+  // Wb-03: EIP-7702 transactions (rule 10e's tuple recovery).
+  "type:0x4",
+  // Wb-04: blob transactions (UNSUPPORTED-PATH unsupported-type); 0x7e stays refused.
+  "type:0x3",
+  // Wb-05: transferWithAuthorization in the bytes-signature form with a
+  // 65-byte signature, on the EIP-3009 path.
+  "call:twaBytes65",
+  // Wb-06: the calls rule 2 does not read (UNSUPPORTED-PATH unsupported-call),
+  // to any address.
+  "call:rule2-unread",
+  // Wb-07: any other call, on the calldata path (rules 5, 10c, 10d; the
+  // outflow reading; B-INS on that path).
+  "call:calldata-path",
+  // Wb-08: bytes after a recognised call's arguments (rule 4's carrier in
+  // bytes the sender alone signed; rules 10a and 10b; the flag trailer).
+  "trailer",
+  // Wb-09: an authorization that does not recover to its from
+  // (M5.authorization NOT-EVALUATED contract-signer; B-PAY likewise; L23).
+  "contract-signer",
+  // Wb-10: H found only where it does not bind (rule 6: NOT-EVALUATED
+  // unread-carrier), and a binding match with one that does not bind beside it.
+  "unread-carrier",
+  // Wb-11: an authorization that moves nothing out of its payer (NO-PAYMENT).
+  "no-payment",
+  // Wb-12: the payment block's parent (M5.parent-block).
+  "role:payment-parent-block",
+  // Wb-13: account proofs (M5.account-proof; rule 10e reading carried proofs).
+  "role:account-proof",
+  // Wb-14: the payment block's raw transactions (M5.block-transactions; rule
+  // 10e's scan of the earlier entries).
+  "role:payment-block-transactions",
 ];
 const judged = (p) => JUDGED.includes(p);
 
@@ -67,8 +103,14 @@ const WIDENED = {
     ["witness-receipt", ["witness.checkpoint/1"]],
   ],
   "role:supporting": [["supporting", ["opaque"]]],
+  "role:payment-parent-block": [["payment-parent-block", ["eth-rpc-json"]]],
+  "role:account-proof": [["account-proof", ["eth-proof-json"]]],
+  "role:payment-block-transactions": [["payment-block-transactions", ["eth-raw-transactions"]]],
 };
 const JUDGED_CALL_TARGET = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
+// The transaction types each judged property adds to item 8.
+const TYPES = { "type:0x0+0x1": ["0x0", "0x1"], "type:0x4": ["0x4"], "type:0x3": ["0x3"] };
+const judgedTypes = () => ["0x2", ...JUDGED.flatMap((p) => TYPES[p] ?? [])];
 
 function rolesAndProfiles() {
   const roles = [...JUDGED_ROLES];
@@ -126,17 +168,25 @@ export function decodedShape(s) {
   // 7. chain
   if (subject.chain_id !== "eip155:84532") return "chain";
   // 8. type
-  if (pay.type !== "0x2") return "type";
+  if (!judgedTypes().includes(pay.type)) return "type";
   // 9. call
-  if (!pay.call || pay.call.kind !== "twa9" || String(pay.to).toLowerCase() !== JUDGED_CALL_TARGET) return "call";
+  const toTarget = String(pay.to).toLowerCase() === JUDGED_CALL_TARGET;
+  const callJudged =
+    pay.call &&
+    ((toTarget && (pay.call.kind === "twa9" || (judged("call:twaBytes65") && eip3009Readable(pay.call)))) || (judged("call:rule2-unread") && unreadByRule2(pay.call)) || (judged("call:calldata-path") && pay.call.kind === "other"));
+  if (!callJudged) return "call";
+  // Items 10, 11 and 13 read the authorization of a call on the EIP-3009 path,
+  // and do not apply to any other call.
+  const eipCall = eip3009Readable(pay.call);
   // 10. trailer
-  if (pay.call.trailerHex !== "0x") return "trailer";
+  if (eipCall && pay.call.trailerHex !== "0x" && !judged("trailer")) return "trailer";
   // 11. contract-signer
-  if (pay.authStatus === "contract-signer") return "contract-signer";
+  if (eipCall && pay.authStatus === "contract-signer" && !judged("contract-signer")) return "contract-signer";
   // 12. unread-carrier
-  if (search && (!(search.carrier === "eip3009-nonce" || search.carrier === null) || search.nonBinding.length > 0)) return "unread-carrier";
+  const carriers = judged("carrier:calldata") ? ["eip3009-nonce", "calldata", null] : ["eip3009-nonce", null];
+  if (search && (!carriers.includes(search.carrier) || (search.nonBinding.length > 0 && !judged("unread-carrier")))) return "unread-carrier";
   // 13. no-payment
   const a = pay.call.auth;
-  if (!(a.value > 0n) || a.to === a.from) return "no-payment";
+  if (eipCall && (!(a.value > 0n) || a.to === a.from) && !judged("no-payment")) return "no-payment";
   return null;
 }

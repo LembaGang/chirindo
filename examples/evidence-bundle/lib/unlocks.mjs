@@ -5,12 +5,14 @@
 // requires an output, not a refusal, in which every need is reached: a check
 // need as a row of `checks` with status PASS or FAIL (NOT-EVALUATED only with
 // the reason the need names), restricted to `member` when one is named; a tag
-// need as its binding in the state (and reason) the need names.
+// need as its binding in the state (and reason) the need names. A tie named
+// `unit:<function>` is a unit test of that function in test/unlocks.mjs, for a
+// property whose own rows all need a later widening.
 
 export const UNLOCKS = {
   "role:instruction:signed-instruction-ed25519/0.2": {
     widening: "Wa-01",
-    needs: { "M6.instruction": {}, "B-INS.compare": { binding: "B-INS", state: "BOUND", reason: null } },
+    needs: { "M6.instruction": {}, "B-INS.compare": { binding: "B-INS", state: "BOUND", reason: null, reached: ["BOUND", "EXCEEDS", "MATCHED", "UNBOUND-OUTSIDE"] } },
     tie: "SA-01",
   },
   "profile:instruction:vi-0.1-draft+ap2-0.2": {
@@ -70,4 +72,88 @@ export const UNLOCKS = {
     needs: { "M3.history": { member: "sidecar-t15" }, "B-CKP.truncated": { binding: "B-CKP", state: "TRUNCATED", reason: null } },
     tie: "SA-15",
   },
+  "type:0x0+0x1": {
+    widening: "Wb-01",
+    needs: { "M5.transaction": { member: "tx-a" }, "M5.sender": { member: "tx-a" } },
+    tie: "T-18",
+  },
+  "carrier:calldata": {
+    widening: "Wb-02",
+    needs: { "B-PAY.carrier": {} },
+    tie: "unit:decodedShape",
+  },
+  "type:0x4": {
+    widening: "Wb-03",
+    needs: { "M5.transaction": { member: "tx-a" }, "B-PAY.10e-tuples": { binding: "B-PAY", state: "NOT-EVALUATED", reason: "account-has-code" } },
+    tie: "T-22",
+  },
+  "type:0x3": {
+    widening: "Wb-04",
+    needs: { "M5.support": { notEvaluated: "unsupported-type" } },
+    tie: "T-20",
+  },
+  "call:twaBytes65": {
+    widening: "Wb-05",
+    needs: { "M5.call": { member: "tx-a" }, "M5.token-domain": {}, "M5.authorization": { member: "tx-a" }, "M5.token-logs": { member: "rc-a" }, "M5.validity-window": {} },
+    tie: "T-25",
+  },
+  "call:rule2-unread": {
+    widening: "Wb-06",
+    needs: { "B-PAY.rule2": { binding: "B-PAY", state: "UNSUPPORTED-PATH", reason: "unsupported-call" } },
+    tie: "T-23",
+  },
+  "call:calldata-path": {
+    widening: "Wb-07",
+    // T-28 carries no logs: its B-INS is ABSENT once the outflow reading has
+    // run; the pair tie S-20 reaches the reading and the comparison with a movement.
+    needs: {
+      "B-PAY.calldata": { binding: "B-PAY", state: "BOUND", reason: null },
+      "B-PAY.outflow": { binding: "B-INS", state: "ABSENT", reason: null, reached: ["EXCEEDS", "NOT-EVALUATED", "BOUND"] },
+      "B-INS.compare": { binding: "B-INS", state: "ABSENT", reason: null, reached: ["BOUND", "EXCEEDS", "MATCHED", "UNBOUND-OUTSIDE"] },
+    },
+    tie: "T-28",
+  },
+  trailer: {
+    widening: "Wb-08",
+    needs: { "B-PAY.rule4-sender": { binding: "B-PAY", state: "CARRIED-BY-OTHER", reason: null } },
+    tie: "T-29",
+  },
+  "contract-signer": {
+    widening: "Wb-09",
+    needs: { "M5.authorization": { member: "tx-a", notEvaluated: "contract-signer" } },
+    tie: "T-30",
+  },
+  "unread-carrier": {
+    widening: "Wb-10",
+    needs: { "B-PAY.rule6": { binding: "B-PAY", state: "NOT-EVALUATED", reason: "unread-carrier" } },
+    tie: "T-31",
+  },
+  "no-payment": {
+    widening: "Wb-11",
+    needs: { "B-PAY.no-payment": { binding: "B-PAY", state: "NO-PAYMENT", reason: null } },
+    tie: "T-32",
+  },
+  "role:payment-parent-block": {
+    widening: "Wb-12",
+    needs: { "M5.parent-block": { member: "parent-t" } },
+    tie: "T-06",
+  },
+  "role:account-proof": {
+    widening: "Wb-13",
+    needs: { "M5.account-proof": { member: "proof-t" }, "B-PAY.10e-proofs": { binding: "B-PAY", state: "NOT-EVALUATED", reason: "account-has-code" } },
+    tie: "S-96",
+  },
+  "role:payment-block-transactions": {
+    widening: "Wb-14",
+    needs: { "M5.block-transactions": { member: "btx-t" }, "B-PAY.10e-scan": { binding: "B-PAY", state: "NOT-EVALUATED", reason: "account-has-code" } },
+    tie: "S-99",
+  },
 };
+
+// The pair ties of C4 (6): a vector that carries an evidence property and a
+// payment property together, in which the needs of both are reached.
+export const PAIRS = [
+  ["S-86", "role:gate-receipt+role:issuer-profile", "type:0x3"],
+  ["S-20", "role:instruction:signed-instruction-ed25519/0.2", "call:calldata-path"],
+  ["S-63", "role:instruction:signed-instruction-ed25519/0.2", "trailer"],
+];
