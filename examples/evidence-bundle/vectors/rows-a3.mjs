@@ -44,10 +44,11 @@ export function cardPins() {
 // TEST operator key, its arguments (args-d) when `args` is given, a sidecar
 // line with its checkpoint and a TEST witness receipt (sidecar-d), the
 // operator key (opkey-d), the witness key history as /v5/keys gives it, with
-// the TEST key (wkey-d), and the instruction (ins-d) when given.
-export function cardDoc({ args, ins = null, insProfile = "signed-instruction-ed25519/0.3", reference = "TEST WE-4 order TEST-1001", receivedAt = T_RECEIVED, logEdit, edit } = {}) {
+// the TEST key (wkey-d), and the instruction (ins-d) when given. With
+// `jwksUri`, the records name it (and iss its origin).
+export function cardDoc({ args, ins = null, insProfile = "signed-instruction-ed25519/0.3", reference = "TEST WE-4 order TEST-1001", receivedAt = T_RECEIVED, jwksUri, logEdit, edit } = {}) {
   const k = testEd("card operator");
-  const log = chirindoLog({ k, sessionId: "test-card-1", argsHash: jcsSha256(args ?? { note: "TEST arguments not carried" }), t0: Date.parse(T_DECISION), edit: logEdit });
+  const log = chirindoLog({ k, sessionId: "test-card-1", argsHash: jcsSha256(args ?? { note: "TEST arguments not carried" }), jwksUri, t0: Date.parse(T_DECISION), edit: logEdit });
   const cp = checkpoint({ k, sessionId: "test-card-1", count: 1, lastEntryHash: log.hashes[0], ts: T_CHECKPOINT });
   const rc = witnessReceipt({ cp, receivedAt });
   const doc = { type: "evidence-bundle/0.10", created_at: "2026-11-02T10:10:00Z", assembled_by: "examples/evidence-bundle/vectors/rows-a3.mjs (TEST)", subject: { kind: "card-payment", reference, cites: { log: "log-d", seq: 0 } }, members: [] };
@@ -136,7 +137,7 @@ const we4 = (order, { ins = we4Instruction(), insProfile, ...o } = {}) => () => 
 const deny = (recs) => recs.map((r) => ({ ...r, event: { ...r.event, decision: "deny", outcome: "denied" }, ["gate"]: { ...r["gate"], result: "halt" } }));
 // A second sidecar line: a checkpoint of count 2, beyond the carried log, and
 // a TEST witness receipt for it (B-CKP and B-WIT TRUNCATED).
-const longerHead = (doc) => {
+export const longerHead = (doc) => {
   const i = doc.members.findIndex((m) => m.id === "sidecar-d");
   const k = testEd("card operator");
   const cp2 = checkpoint({ k, sessionId: "test-card-1", count: 2, lastEntryHash: jcsSha256({ test: "a second record the bundle does not carry" }), ts: "2026-11-02T10:00:03.000Z" });

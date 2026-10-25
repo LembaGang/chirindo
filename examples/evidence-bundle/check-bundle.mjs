@@ -4,9 +4,12 @@
 //
 //   node check-bundle.mjs <bundle.json> [--authorizer <address>] [--tx <hash>] [--pins <dir>]
 //   node check-bundle.mjs --evidence-uri <https URL> --evidence-entry sha256:<hex> [--evidence-sha256 sha256:<hex>] [...]
+//   node check-bundle.mjs <bundle.json> <the charge options> --online [...]
 //
 // With the pointer, the bundle is fetched once (lib/pointer.mjs): Node's
-// fetch, each redirect followed and checked here.
+// fetch, each redirect followed and checked here. With --online, for a
+// card-payment subject only, the witness's list, the witness key list when
+// a receipt needs it, and the records' jwks_uri are read (lib/online.mjs).
 //
 // Exit 0: one verdict object (evidence-bundle-verdict/0.10) on stdout, whatever
 // the verdict. Exit 2: a usage error, or a bundle outside the shape this build
@@ -39,6 +42,8 @@ async function main() {
     // charge rule applies only once the fetched bundle is read.
     const read = !pointer || ["fetched", "match"].includes(pointer.status);
     if (opts.charge && read && subjectKind(bytes) === "evm-payment") throw new UsageError("the charge options are for a card-payment subject only (spec 4.2)");
+    // This build's online read is the witness read of a card subject (lib/online.mjs).
+    if (opts.online && read && subjectKind(bytes) !== "card-payment") throw new UsageError("--online: this build is offline only for a subject that is not card-payment");
   } catch (e) {
     if (e instanceof UsageError) {
       process.stderr.write(`usage error: ${e.message}\n`);
@@ -50,7 +55,8 @@ async function main() {
     }
     throw e;
   }
-  const r = await verifyBundle(bytes, { authorizer: opts.authorizer, tx: opts.tx, charge: opts.charge }, pins, { pointer });
+  const online = opts.online ? { fetch: (url, init) => fetch(url, init) } : null;
+  const r = await verifyBundle(bytes, { authorizer: opts.authorizer, tx: opts.tx, charge: opts.charge }, pins, { pointer, online });
   if (r.kind === "refused") {
     process.stderr.write(`not supported in this build: ${r.code}\n`);
     return 2;

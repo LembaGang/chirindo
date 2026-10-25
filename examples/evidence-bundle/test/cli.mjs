@@ -10,7 +10,7 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 import { buildWe1 } from "../build-we1.mjs";
 import { parseArgs, UsageError } from "../lib/cli.mjs";
-import { FOLDER, runCli } from "../vectors/make-vectors.mjs";
+import { FOLDER, runCli, we1 } from "../vectors/make-vectors.mjs";
 
 const A = "0xE65E3dE1493171dCF0A706a3f407d7DdB38C5673";
 const T = "0x30ca156899828709dac13ade34a3b2f2689bc9f2eb7690467a49c2fcaed55ce3";
@@ -55,6 +55,19 @@ test("usage errors of spec 4.2 and of this build", () => {
     usage(runCli(dir, "u", buildWe1(), args));
   usage(runCli(dir, "u", null, ["--authorizer", A], { noBundle: true }));
   usage(runCli(dir, "u", null, ["--authorizer", A], { missingBundle: true }));
+});
+
+// A regression test: the online read is for a card subject only, so an
+// evm-payment subject keeps the offline-only usage error (spec 4.2).
+test("--online for an evm-payment subject keeps the offline-only usage error; --rpc stays a usage error", () => {
+  for (const [args, re] of [
+    [["--online"], /^usage error: --online: this build is offline only/],
+    [["--rpc", "https://example.invalid"], /^usage error: --rpc: this build is offline only/],
+  ]) {
+    const r = runCli(dir, "online-evm", we1(), args);
+    usage(r);
+    assert.match(r.stderr, re);
+  }
 });
 
 test("a bundle path that names a directory is a usage error", () => {

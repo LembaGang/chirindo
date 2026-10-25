@@ -88,6 +88,15 @@ export const JUDGED = [
   // W3-05: the Agent Evidence Pointer in place of a bundle path (P1.pointer,
   // P2.entry; lib/pointer.mjs).
   "pointer",
+  // W3-07: the exhibit PDF of a verdict (make-exhibit.mjs; lib/exhibit.mjs, lib/pdf.mjs).
+  "view:exhibit",
+  // W3-08: the data-point export of a verdict (make-datapoints.mjs; lib/datapoints.mjs).
+  "view:datapoints",
+  // W3-09: the page-ready JSON of the card worked examples (pages/; lib/pages.mjs).
+  "view:pages",
+  // W3-10: --online for a card subject: the witness's list (O1, B-WIT online),
+  // the witness key list when needed (O6), the jwks_uri (O3, B-KEY online).
+  "online:card-witness",
 ];
 // Inputs and views (the stated charge, the pointer, the exhibit and the
 // export) are judged by name too: the code that reads one refuses it until its

@@ -1,0 +1,81 @@
+{
+  "type": "evidence-bundle/0.10",
+  "created_at": "2026-10-25T15:08:15Z",
+  "assembled_by": "examples/evidence-bundle (TEST page bundle for the card worked examples)",
+  "subject": {
+    "kind": "card-payment",
+    "reference": "TEST WE-4 order TEST-1001",
+    "cites": {
+      "log": "log-d",
+      "seq": 0
+    }
+  },
+  "members": [
+    {
+      "id": "log-d",
+      "role": "gate-log",
+      "profile": "chirindo-evidence.action/1",
+      "media_type": "application/x-ndjson",
+      "sha256": "sha256:06ef66358efbca35a78cef048d1fb617a0d951599363ec2d01b6d49312ccc036",
+      "bytes_b64": "eyJ2IjoiZXZpZGVuY2UuYWN0aW9uLzEiLCJzZXEiOjAsInNlc3Npb25faWQiOiJleGFtcGxlcy13ZS00LTEtMjAyNjEwMjUiLCJ0cyI6IjIwMjYtMTAtMjVUMTU6MDc6MjcuMzc4WiIsImFnZW50Ijp7InZlbmRvciI6ImNoaXJpbmRvIiwidmVyc2lvbiI6IjAuNS4zIn0sImV2ZW50Ijp7InR5cGUiOiJtY3BfY2FsbCIsIm91dGNvbWUiOiJleGVjdXRlZCIsInNlcnZlciI6ImV2aWRlbmNlLWJ1bmRsZS10ZXN0IiwidG9vbF9uYW1lIjoidGVzdF90b29sIiwiYXJnc19oYXNoIjoic2hhMjU2OmNkMmY0NjNjNWNiOTEzYjEwZTMwNjc4NWQ3Y2MyYzhhOTc5NmZjMjgwNjY3OThhYWZlYjhkN2ZkYzkwOWJiMDEiLCJkZWNpc2lvbiI6ImFsbG93IiwiZGVjaXNpb25fc291cmNlIjoiY29uZmlnIn0sInJlcXVlc3RfY29tbWl0bWVudCI6InNoYTI1Njo4ZTE5NWZlMDM0Y2NjMGEzMDY2MGZmZGI5N2YxY2M2NGZjMjE2MDA4YzliZmMxOTA4MTNhNDE1YjZiMjY2ODUwIiwiZ2F0ZSI6eyJyZXF1ZXN0X2NvbW1pdG1lbnQiOiJzaGEyNTY6OGUxOTVmZTAzNGNjYzBhMzA2NjBmZmRiOTdmMWNjNjRmYzIxNjAwOGM5YmZjMTkwODEzYTQxNWI2YjI2Njg1MCIsImdhdGVfcmVjZWlwdCI6InNoYTI1NjpmZTU0NDRhYWI0NWQ2OTgwOTQwMjA2ZDBhZWY5OGM2NWMxZWJiMzRhNTdmMjQ3ZmE4MzYwOGVhNmJjN2ZjOWU5IiwiZ2F0ZV9mYW1pbHkiOiJwZXJtaXQiLCJyZXN1bHQiOiJhY3QifSwia2V5X3RodW1icHJpbnQiOiJzVkJEc0tveUJ0TVJZRWMtNTFYbWd5MVBzSXZvNl85UWJTYnNBVllxS3pjIiwiaXNzIjoiaHR0cHM6Ly9oZWFkbGVzc29yYWNsZS5jb20iLCJraWQiOiJzVkJEc0tveUJ0TVJZRWMtNTFYbWd5MVBzSXZvNl85UWJTYnNBVllxS3pjIiwiandrc191cmkiOiJodHRwczovL2hlYWRsZXNzb3JhY2xlLmNvbS9ldmlkZW5jZS9leGFtcGxlcy9qd2tzLmpzb24iLCJwcmV2X2hhc2giOiJzaGEyNTY6YjIwYTZmNDc5M2M2YzE3NmQzYzM4ZWVlMGU3OGM4YTc0ODFiN2FlMGNhNTI4MDMzNTEyN2JlZTk3N2E1YjMzOSIsInNpZyI6IlFMemtuSExKVDBfVGxKZ1pDRmsyZ2M0VzRrRUtUNHZxUGVMY3lvRWxxWnBZdG1FX2F1aHBZOGU2V2dBM01FZTZic3FsRXRNMWk3SDBheHpENGx1TUNRIn0K",
+      "source": "examples/evidence-bundle/vectors/refusal-cases.mjs",
+      "fetched_at": "2026-10-20T10:00:00Z",
+      "capture": "reconstructed-from examples/evidence-bundle/vectors/synth.mjs"
+    },
+    {
+      "id": "args-d",
+      "role": "action-arguments",
+      "profile": "jcs-json",
+      "media_type": "application/json",
+      "sha256": "sha256:9ef364d9a5f35edf793132a9565417dd3098a63a4811d63368d445cbd335b54c",
+      "bytes_b64": "eyJpbnN0cnVjdGlvbl9zaGEyNTYiOiJzaGEyNTY6MzY0MDg5M2Y0MmE1ZmExMWYyODJiNzJjZGNlMzdkMWYwY2ZhN2E0NjBlZDlhMTdhYjFiZGE2MDI0NWMzYmM1MCIsIm9yZGVyIjp7Im1lcmNoYW50X2lkIjoidGVzdC1tZXJjaGFudC5leGFtcGxlIiwibWVyY2hhbnRfb3JkZXJfaWQiOiJURVNULTEwMDEiLCJjdXJyZW5jeSI6IlVTRCIsInRvdGFsX21pbm9yIjoiNDgwMCIsIml0ZW1zIjpbeyJza3UiOiJURVNULUpBQ0tFVC1NIiwibmFtZSI6IlRFU1QgamFja2V0LCBzaXplIE0iLCJjYXRlZ29yeSI6ImFwcGFyZWwiLCJxdWFudGl0eSI6MSwidW5pdF9wcmljZV9taW5vciI6IjQ4MDAiLCJyZWZ1bmRhYmxlIjp0cnVlfV19fQ==",
+      "source": "examples/evidence-bundle/vectors/refusal-cases.mjs",
+      "fetched_at": "2026-10-20T10:00:00Z",
+      "capture": "reconstructed-from examples/evidence-bundle/vectors/synth.mjs"
+    },
+    {
+      "id": "sidecar-d",
+      "role": "witness-sidecar",
+      "profile": "chirindo-witness-sidecar/1",
+      "media_type": "application/x-ndjson",
+      "sha256": "sha256:8f06e36d07a0cecd51b63cc8b1555cc1a53a586d9c1c53a2460aacdafa247d49",
+      "bytes_b64": "eyJjaGVja3BvaW50Ijp7InYiOiJldmlkZW5jZS5hY3Rpb24vMSIsInR5cGUiOiJjaGVja3BvaW50Iiwic2Vzc2lvbl9pZCI6ImV4YW1wbGVzLXdlLTQtMS0yMDI2MTAyNSIsImNvdW50IjoxLCJsYXN0X2VudHJ5X2hhc2giOiJzaGEyNTY6NGQ1YmEyZjJkODBjYzM5ZDAyMDIyZjQ2ZDk0ZDk4NzI3MDAwYzkzMWI5MmRmOWZiMWJiODIzYzU2NzBlNGRhNCIsInRzIjoiMjAyNi0xMC0yNVQxNTowNzoyOC4zNzhaIiwia2lkIjoic1ZCRHNLb3lCdE1SWUVjLTUxWG1neTFQc0l2bzZfOVFiU2JzQVZZcUt6YyIsInNpZyI6ImNBbzh6N1pTdFpGMlNZOVQySmk2cFFtTF9jbXlqQmhiNllzOUI0Tm9CREVCd2VYZHZaRXBaX2JyazRFZmQ2MDhuVzNqMVkwU0x2WTVkcGtPNVVxdkNnIn0sIndpdG5lc3NfcmVjZWlwdCI6eyJ0eXBlIjoid2l0bmVzcy5jaGVja3BvaW50LzEiLCJ3aXRuZXNzIjoiaGVhZGxlc3NvcmFjbGUuY29tIiwicmVjZWl2ZWRfYXQiOiIyMDI2LTEwLTI1VDE1OjA3OjI5LjI1NVoiLCJraWQiOiJzVkJEc0tveUJ0TVJZRWMtNTFYbWd5MVBzSXZvNl85UWJTYnNBVllxS3pjIiwic2Vzc2lvbl9pZCI6ImV4YW1wbGVzLXdlLTQtMS0yMDI2MTAyNSIsImNvdW50IjoiMSIsImxhc3RfZW50cnlfaGFzaCI6InNoYTI1Njo0ZDViYTJmMmQ4MGNjMzlkMDIwMjJmNDZkOTRkOTg3MjcwMDBjOTMxYjkyZGY5ZmIxYmI4MjNjNTY3MGU0ZGE0IiwiY2hlY2twb2ludF90cyI6IjIwMjYtMTAtMjVUMTU6MDc6MjguMzc4WiIsImNoZWNrcG9pbnRfc2hhMjU2Ijoic2hhMjU2OjFiMGJkZWEzZjVjMmNiNjRkYzFjZDY2Mjg1N2U5OTA0MDk5YzVhYWFiNjlhNjU3ZDZmNWVlYmIwODcwMTI4YmQiLCJmb3JrIjoiZmFsc2UiLCJwdWJsaWNfa2V5X2lkIjoia2V5XzIwMjZfdjEiLCJzaWduYXR1cmUiOiIxZjhjYTEzOGE2ZmVmNDZhZWJhYjM0YTk3NDYxZjRmOWQ5MWY3Yzg2M2ExOGVkNzVjYzQ0YTVlNDA1ZWIzNzBjN2ZiYjI4ZjFlOGNjYzIxNmFjYWYzYWMwNjhmZjQ2YzU2MjM1NjZkOTVjODEzMGM4MzgyMDYzZDU4NDhmMWUwYSJ9LCJ3aXRuZXNzX2Vycm9yIjpudWxsfQo=",
+      "source": "examples/evidence-bundle/vectors/refusal-cases.mjs",
+      "fetched_at": "2026-10-20T10:00:00Z",
+      "capture": "reconstructed-from examples/evidence-bundle/vectors/synth.mjs"
+    },
+    {
+      "id": "opkey-d",
+      "role": "operator-key",
+      "profile": "jwks",
+      "media_type": "application/json",
+      "sha256": "sha256:d72d37e6aff4e58734ed6cec607f5c1151f573589ed81cc7f2a14ce3a8bc27ed",
+      "bytes_b64": "eyJrZXlzIjpbeyJrdHkiOiJPS1AiLCJjcnYiOiJFZDI1NTE5IiwieCI6IlZNZ19BLXJxMzBWVERiQkg0YlotOWVfYjYxZzJvQy00RXRGYXkwVVJDdFEiLCJraWQiOiJzVkJEc0tveUJ0TVJZRWMtNTFYbWd5MVBzSXZvNl85UWJTYnNBVllxS3pjIn1dfQ==",
+      "source": "examples/evidence-bundle/vectors/refusal-cases.mjs",
+      "fetched_at": "2026-10-20T10:00:00Z",
+      "capture": "reconstructed-from examples/evidence-bundle/vectors/synth.mjs"
+    },
+    {
+      "id": "wkey-d",
+      "role": "witness-key",
+      "profile": "ho-v5-keys",
+      "media_type": "application/json",
+      "sha256": "sha256:e410ea0c4fe9c3ddd597ec40d0cea711e16c144dc587801ecf346d8cfd6d52bc",
+      "bytes_b64": "eyJrZXlzIjpbeyJrZXlfaWQiOiJrZXlfMjAyNl92MSIsImFsZ29yaXRobSI6IkVkMjU1MTkiLCJmb3JtYXQiOiJoZXgiLCJwdWJsaWNfa2V5IjoiMDNkYzI3OTkzYTJjOTA4NTZjZGViNDVlMjI4YWMwNjVmMThmNjlmMDkzM2M5MTdiMjMzNmMxZTc1NzEyZjE3OCIsInZhbGlkX2Zyb20iOiIyMDI2LTAxLTAxVDAwOjAwOjAwWiIsInZhbGlkX3VudGlsIjpudWxsfV19",
+      "source": "examples/evidence-bundle/vectors/refusal-cases.mjs",
+      "fetched_at": "2026-10-20T10:00:00Z",
+      "capture": "reconstructed-from examples/evidence-bundle/vectors/synth.mjs"
+    },
+    {
+      "id": "ins-d",
+      "role": "instruction",
+      "profile": "signed-instruction-ed25519/0.3",
+      "media_type": "application/json",
+      "sha256": "sha256:7eca5550bdec93079634eb312a8e55d1eb59bca712c3bb697e4a3524c340ea1b",
+      "bytes_b64": "eyJ2Ijoic2lnbmVkLWluc3RydWN0aW9uLWVkMjU1MTkvMC4zIiwicHJpbmNpcGFsIjp7ImtpZCI6InVtTGliWUk4b0VudmI5em9UNDRncUxKeE1WYUdGWjZoWFhnT1JJazA0MGciLCJwdWJsaWNfa2V5X2p3ayI6eyJrdHkiOiJPS1AiLCJjcnYiOiJFZDI1NTE5IiwieCI6Il9iUzVGWllYRURITnhNZEo1S01FM0FMLXY1RTNlZW1HVWhJTlNuT3RhTUUifX0sImFnZW50X2tpZCI6WyJzVkJEc0tveUJ0TVJZRWMtNTFYbWd5MVBzSXZvNl85UWJTYnNBVllxS3pjIl0sInRleHQiOiJURVNUIEZJWFRVUkUgaW5zdHJ1Y3Rpb246IGNhcmQgb3JkZXJzIHdpdGhpbiB0aGUgY2FyZCBsaW1pdHMiLCJjb25zdHJhaW50cyI6eyJ2YWxpZF9mcm9tIjoiMjAyNi0xMC0yMlQwMzowNzoyN1oiLCJ2YWxpZF91bnRpbCI6IjIwMjYtMTAtMjlUMDM6MDc6MjdaIiwiY2FyZCI6eyJjdXJyZW5jeSI6IlVTRCIsIm1heF90b3RhbF9taW5vciI6IjUwMDAiLCJtZXJjaGFudHMiOlsidGVzdC1tZXJjaGFudC5leGFtcGxlIl0sInJlZnVuZGFibGVfb25seSI6dHJ1ZX19LCJpYXQiOiIyMDI2LTEwLTIyVDAzOjA3OjI3WiIsInNpZyI6IjBDRnNRUjVxc2VYeVNaTkpiYkJfWXY4SXBSbTlPTHNuU19DWnk5TWQzMUZVczNOM1Bmbnl4RmNPalZ1VUs4Wk5xdHlFLUNHQkdpZzMxNWtQLV9JbkJnIn0=",
+      "source": "examples/evidence-bundle/vectors/refusal-cases.mjs",
+      "fetched_at": "2026-10-20T10:00:00Z",
+      "capture": "reconstructed-from examples/evidence-bundle/vectors/synth.mjs"
+    }
+  ]
+}

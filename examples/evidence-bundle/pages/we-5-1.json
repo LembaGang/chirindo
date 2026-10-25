@@ -1,0 +1,1148 @@
+{
+  "id": "we-5-1",
+  "limit": "Headless Oracle is the gate's operator and the witness; the traveller, the hotel and the charge are test parties; test card data only.",
+  "bundle": {
+    "path": "pages/we-5-1.bundle.json",
+    "sha256": "ffd6def6008684f2dffd16b52936b1c78875f5313b442215f7e65a41ad306572",
+    "size": 8011
+  },
+  "stated": {
+    "args": [
+      "--charge-id",
+      "TEST-ch-we5-1",
+      "--charge-amount",
+      "28000",
+      "--charge-currency",
+      "EUR",
+      "--charge-authorized-at",
+      "2026-10-25T15:18:03Z",
+      "--merchant-order-id",
+      "TEST-H-2001",
+      "--pins",
+      "pages/we-5-1-pins"
+    ],
+    "pins": "pages/we-5-1-pins/pins.json"
+  },
+  "offline_verdict": {
+    "type": "evidence-bundle-verdict/0.10",
+    "verifier": {
+      "name": "chirindo examples/evidence-bundle",
+      "version": "0.10.0",
+      "commit": "unrecorded"
+    },
+    "bundle_sha256": "sha256:ffd6def6008684f2dffd16b52936b1c78875f5313b442215f7e65a41ad306572",
+    "mode": "offline",
+    "checked_at": "2026-10-25T15:17:53.139Z",
+    "stated": {
+      "authorizer": null,
+      "tx": null,
+      "charge": {
+        "id": "TEST-ch-we5-1",
+        "amount_minor": "28000",
+        "currency": "EUR",
+        "authorized_at": "2026-10-25T15:18:03Z",
+        "merchant_order_id": "TEST-H-2001",
+        "checkout_ref": null
+      }
+    },
+    "pointer": null,
+    "endpoints": [],
+    "checks": [
+      {
+        "id": "S3.charge",
+        "member": null,
+        "status": "PASS",
+        "reason": null,
+        "detail": "the charge stated: 28000 EUR minor units, authorized at 2026-10-25T15:18:03Z"
+      },
+      {
+        "id": "M0.bundle",
+        "member": null,
+        "status": "PASS",
+        "reason": null,
+        "detail": "strict JSON; type, members and subject as section 3 defines them"
+      },
+      {
+        "id": "M1.manifest",
+        "member": null,
+        "status": "PASS",
+        "reason": null,
+        "detail": "6 members; ids, counts and references as table 3-1 requires"
+      },
+      {
+        "id": "M1.member",
+        "member": "log-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "1118 bytes, digest and (role, profile) as declared"
+      },
+      {
+        "id": "M1.member",
+        "member": "args-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "452 bytes, digest and (role, profile) as declared"
+      },
+      {
+        "id": "M1.member",
+        "member": "sidecar-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "1050 bytes, digest and (role, profile) as declared"
+      },
+      {
+        "id": "M1.member",
+        "member": "opkey-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "142 bytes, digest and (role, profile) as declared"
+      },
+      {
+        "id": "M1.member",
+        "member": "wkey-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "207 bytes, digest and (role, profile) as declared"
+      },
+      {
+        "id": "M1.member",
+        "member": "ins-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "732 bytes, digest and (role, profile) as declared"
+      },
+      {
+        "id": "M2.log",
+        "member": "log-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "1 records, hash chain from genesis, every sig verifies under the key whose thumbprint is kid"
+      },
+      {
+        "id": "M3.checkpoint",
+        "member": "sidecar-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "sidecar-d line 1: the eight members and their field rules"
+      },
+      {
+        "id": "M3.signature",
+        "member": "sidecar-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "sidecar-d line 1: sig verifies under the operator key for its kid"
+      },
+      {
+        "id": "M3.history",
+        "member": "sidecar-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "sidecar-d line 1: last_entry_hash is the entry hash of record 0 of log-d"
+      },
+      {
+        "id": "M4.witness-receipt",
+        "member": "sidecar-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "sidecar-d line 1: the signature verifies under key_2026_v1, received_at inside its window"
+      },
+      {
+        "id": "M6.instruction",
+        "member": "ins-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "the members of Annex A.3; principal.kid is its key's thumbprint; sig verifies; valid_from is not after valid_until"
+      },
+      {
+        "id": "M8.arguments",
+        "member": "args-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "its JCS SHA-256 sha256:282e79d76a25c71e2f36e1cd218c07bc914757de3346de8e37f6e2adf689a8da is the args_hash of a carried record"
+      },
+      {
+        "id": "M8.order",
+        "member": "args-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "the order has the shape of the committed order (spec 4.3)"
+      },
+      {
+        "id": "M9.operator-key",
+        "member": "opkey-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "jwks: a well-formed Ed25519 key, kid equal to its thumbprint where present"
+      },
+      {
+        "id": "M9.witness-key",
+        "member": "wkey-d",
+        "status": "PASS",
+        "reason": null,
+        "detail": "key_2026_v1: every member equals the pinned entry"
+      },
+      {
+        "id": "O1.witness-list",
+        "member": null,
+        "status": "NOT-EVALUATED",
+        "reason": "offline",
+        "detail": "offline: the witness's list for the cited log's kid and session_id is not read"
+      },
+      {
+        "id": "O3.jwks",
+        "member": null,
+        "status": "NOT-EVALUATED",
+        "reason": "offline",
+        "detail": "offline: the jwks_uri is not read"
+      }
+    ],
+    "bindings": [
+      {
+        "id": "B-LOG",
+        "state": "BOUND",
+        "reason": null,
+        "carrier": null,
+        "signed_by": null,
+        "detail": "record 0 of log-d, whose log passes M2"
+      },
+      {
+        "id": "B-CKP",
+        "state": "BOUND",
+        "reason": null,
+        "carrier": null,
+        "signed_by": null,
+        "detail": "a checkpoint signed by the log key covers the cited record"
+      },
+      {
+        "id": "B-WIT",
+        "state": "SUPPLIED",
+        "reason": null,
+        "carrier": null,
+        "signed_by": null,
+        "detail": "a covering receipt is carried; offline, the witness's list is not read"
+      },
+      {
+        "id": "B-PAY",
+        "state": "NOT-EVALUATED",
+        "reason": "card-subject",
+        "carrier": null,
+        "signed_by": null,
+        "detail": ""
+      },
+      {
+        "id": "B-CHAIN",
+        "state": "NOT-EVALUATED",
+        "reason": "card-subject",
+        "carrier": null,
+        "signed_by": null,
+        "detail": ""
+      },
+      {
+        "id": "B-KEY",
+        "state": "SUPPLIED",
+        "reason": null,
+        "carrier": null,
+        "signed_by": null,
+        "detail": "the carried JWKS holds the key; offline, the jwks_uri is not read"
+      },
+      {
+        "id": "B-INS",
+        "state": "BOUND",
+        "reason": null,
+        "carrier": null,
+        "signed_by": null,
+        "detail": "ins-d is the instruction the arguments cite"
+      },
+      {
+        "id": "B-GRC",
+        "state": "ABSENT",
+        "reason": null,
+        "carrier": null,
+        "signed_by": null,
+        "detail": "no gate receipt is carried or named"
+      },
+      {
+        "id": "B-CARD",
+        "state": "BOUND",
+        "reason": null,
+        "carrier": null,
+        "signed_by": null,
+        "detail": "the committed order matches the stated charge, and received_at is before the stated authorization time (B-WIT SUPPLIED: unconfirmed)"
+      }
+    ],
+    "decision": {
+      "value": "allow",
+      "record": {
+        "log": "log-d",
+        "seq": 0,
+        "event_decision": "allow",
+        "event_outcome": "executed",
+        "gate_result": "act",
+        "receipt_uid": null
+      },
+      "receipt": null,
+      "refusing_records": []
+    },
+    "gate_receipts": [],
+    "instructions": [
+      {
+        "member": "ins-d",
+        "cited": true,
+        "state": "BOUND",
+        "exceeded": [],
+        "reason": null,
+        "uses": 1,
+        "records_without_arguments": 0,
+        "card_limits": [
+          {
+            "limit": "currency",
+            "result": "inside",
+            "reason": null
+          },
+          {
+            "limit": "max_total_minor",
+            "result": "not-declared",
+            "reason": null
+          },
+          {
+            "limit": "max_unit_price_minor",
+            "result": "inside",
+            "reason": null
+          },
+          {
+            "limit": "merchants",
+            "result": "not-declared",
+            "reason": null
+          },
+          {
+            "limit": "items",
+            "result": "not-declared",
+            "reason": null
+          },
+          {
+            "limit": "categories",
+            "result": "inside",
+            "reason": null
+          },
+          {
+            "limit": "refundable_only",
+            "result": "inside",
+            "reason": null
+          },
+          {
+            "limit": "service_window",
+            "result": "inside",
+            "reason": null
+          },
+          {
+            "limit": "locations",
+            "result": "inside",
+            "reason": null
+          }
+        ]
+      }
+    ],
+    "payment": {
+      "connected": false,
+      "reason": "card-subject",
+      "payer": null,
+      "movements": [],
+      "as_supplied": true
+    },
+    "card": {
+      "order": {
+        "merchant_id": "test-hotel.example",
+        "merchant_order_id": "TEST-H-2001",
+        "checkout_ref": null,
+        "currency": "EUR",
+        "total_minor": "28000",
+        "items_sum_minor": "28000",
+        "item_count": 1
+      },
+      "matches": {
+        "amount": true,
+        "currency": true,
+        "merchant_order_id": true,
+        "checkout_ref": null
+      },
+      "witness_received_at": "2026-10-25T15:17:03.685Z",
+      "authorized_at": "2026-10-25T15:18:03Z",
+      "before_authorization": true
+    },
+    "hash_search": null,
+    "times": [
+      {
+        "what": "log-d record 0 ts",
+        "value": "2026-10-25T15:17:01.472Z",
+        "clock": "operator",
+        "as_supplied": false
+      },
+      {
+        "what": "selected checkpoint ts (sidecar-d line 1)",
+        "value": "2026-10-25T15:17:01.475Z",
+        "clock": "operator",
+        "as_supplied": false
+      },
+      {
+        "what": "selected witness receipt received_at (sidecar-d line 1)",
+        "value": "2026-10-25T15:17:03.685Z",
+        "clock": "headless-oracle",
+        "as_supplied": true
+      },
+      {
+        "what": "selected witness receipt checkpoint_ts (sidecar-d line 1)",
+        "value": "2026-10-25T15:17:01.475Z",
+        "clock": "headless-oracle",
+        "as_supplied": true
+      },
+      {
+        "what": "ins-d iat",
+        "value": "2026-10-24T15:07:27Z",
+        "clock": "principal",
+        "as_supplied": false
+      },
+      {
+        "what": "ins-d valid_from",
+        "value": "2026-10-24T15:07:27Z",
+        "clock": "principal",
+        "as_supplied": false
+      },
+      {
+        "what": "ins-d valid_until",
+        "value": "2026-11-09T00:00:00Z",
+        "clock": "principal",
+        "as_supplied": false
+      },
+      {
+        "what": "stated authorization time",
+        "value": "2026-10-25T15:18:03Z",
+        "clock": "processor",
+        "as_supplied": false
+      }
+    ],
+    "orderings": [
+      {
+        "earlier": "each earlier record of the session",
+        "later": "each later record",
+        "rests_on": "the hash chain of the cited log",
+        "status": "SHOWN"
+      },
+      {
+        "earlier": "the cited entry's content (all of it except sig)",
+        "later": "a signature over bytes that carry its hash",
+        "rests_on": "the cited entry hash as 32 raw bytes in the transaction's calldata (B-PAY)",
+        "status": "NOT-EVALUATED"
+      },
+      {
+        "earlier": "the checkpoint, its sig included",
+        "later": "the witness receipt",
+        "rests_on": "the receipt's checkpoint_sha256 over the carried checkpoint",
+        "status": "SHOWN"
+      },
+      {
+        "earlier": "the log head",
+        "later": "the witness receipt",
+        "rests_on": "the receipt's last_entry_hash",
+        "status": "SHOWN"
+      },
+      {
+        "earlier": "an instruction",
+        "later": "the cited entry",
+        "rests_on": "the entry's arguments carry the instruction's digest (B-INS BOUND or EXCEEDS)",
+        "status": "SHOWN"
+      }
+    ],
+    "flags": [
+      {
+        "code": "two-clock-comparison",
+        "detail": "the witness receipt's received_at (Headless Oracle's clock) against the stated authorization time (the processor's clock, as stated)"
+      },
+      {
+        "code": "two-clock-comparison",
+        "detail": "the selected checkpoint's ts (operator's clock) against the witness receipt's received_at (Headless Oracle's clock)"
+      },
+      {
+        "code": "two-clock-comparison",
+        "detail": "ins-d's iat (principal's clock) against the cited entry's ts (operator's clock)"
+      },
+      {
+        "code": "two-clock-comparison",
+        "detail": "ins-d's valid_from and valid_until (principal's clock) against the stated authorization time (the processor's clock, as stated)"
+      }
+    ],
+    "verdict": {
+      "code": "PAYMENT-NOT-VERIFIED",
+      "text": "NOT VERIFIED: the record does not show that the decision was recorded before the charge and matches it",
+      "rule": "C3",
+      "reason": "offline-witness-data",
+      "gaps": [
+        {
+          "binding": "B-WIT",
+          "state": "SUPPLIED",
+          "reason": null
+        },
+        {
+          "binding": "B-PAY",
+          "state": "NOT-EVALUATED",
+          "reason": "card-subject"
+        },
+        {
+          "binding": "B-CHAIN",
+          "state": "NOT-EVALUATED",
+          "reason": "card-subject"
+        },
+        {
+          "binding": "B-KEY",
+          "state": "SUPPLIED",
+          "reason": null
+        }
+      ]
+    },
+    "limits": [
+      {
+        "id": "L1",
+        "text": "A gate entry is the operator's own signed statement of what its gate saw and decided. The bundle does not show that a decision was wise, that the agent read the instruction correctly, or that any member's contents are true."
+      },
+      {
+        "id": "L2",
+        "text": "A log records what passed through the gate. It does not show that no action bypassed the gate. The verifier reports the gate version each entry names; chirindo entries through release 0.5.2 carry the constant 0.0.1 in place of a version. chirindo through release 0.5.2 (source read at tags v0.3.0, v0.4.0, v0.5.1 and v0.5.2; run on 0.5.2) forwarded a tools/call without an id member without evaluating policy or writing a receipt, and ran an allowed tools/call with id null without a receipt."
+      },
+      {
+        "id": "L3",
+        "text": "The witness receipt is Headless Oracle's signed statement that at received_at it was shown a checkpoint signed by the key with that thumbprint; it is only as reliable as Headless Oracle and its signing key. The witness is operated by Headless Oracle, which also publishes the gate software: it is independent of an operator other than Headless Oracle, not of Headless Oracle."
+      },
+      {
+        "id": "L4",
+        "text": "This run trusts, as the assembler supplied them, the bundle's copies of the payment's chain data, of the witness receipts, and of every key or profile the verifier has not pinned (an operator JWKS, a witness key id outside the verifier's history, an issuer profile). An online run re-fetches them from sources the verifier chooses; until two endpoints confirm the chain data, no verdict says VERIFIES."
+      },
+      {
+        "id": "L6",
+        "text": "A key's binding to an organisation goes no further than an https origin that served it to the verifier (B-KEY BOUND) or, for a standalone key, than the key itself (KEY-ONLY). An address is an address, not a person or a company."
+      },
+      {
+        "id": "L7",
+        "text": "Times on the principal's, the issuer's, the operator's and Headless Oracle's clocks are those parties' statements, and the block timestamp is set by the block producer within the chain's rules. Only the orderings that need no clock rest on signatures and hashes alone."
+      },
+      {
+        "id": "L8",
+        "text": "This bundle is named in none of the card network rules read for this specification (scope: the pages its sources list; the dispute chapters of the Visa Core Rules and the body of the Mastercard Chargeback Guide could not be read). It is evidence a decider may weigh within the existing reason codes."
+      },
+      {
+        "id": "L9",
+        "text": "The bundle carries what its assembler chose to put in. A verifier can show that the pieces present bind; it cannot show that a piece which would contradict them was left out, except where the witness's receipts show a longer history than the log carried (TRUNCATED) or a different one (FAIL)."
+      },
+      {
+        "id": "L12",
+        "text": "The principal key in a minimal instruction is bound to no person, account or payer; the bundle shows that the holder of that key signed the instruction."
+      },
+      {
+        "id": "L13",
+        "text": "Uses and budget are counted only over what the bundle carries: the records whose arguments it carries and the payments it binds. Uses and payments outside the bundle cannot be counted; the output gives the number of records whose arguments are not carried."
+      },
+      {
+        "id": "L14",
+        "text": "Headless Oracle operates both the gate whose key signed this log and the witness, so the log and the witness receipt are statements by one party."
+      },
+      {
+        "id": "L17",
+        "text": "This version does not verify card payments: whether the action connects to the card payment is not verified."
+      },
+      {
+        "id": "L24",
+        "text": "v0.10. For a card payment, the payment proof is the card network's authorization record, which the issuer holds; this bundle neither carries nor verifies it. What this verdict shows is whether the decision and the order the gate recorded were witnessed before the charge's authorization time as stated, and whether that order matches the stated charge: the stated charge and its time are the statements of the person running the verifier, taken from the processor's records."
+      },
+      {
+        "id": "L25",
+        "text": "v0.10. The committed order is the agent's statement at decision time, as the gate recorded it: its merchant, items, prices, refundability, dates and places are what the agent's call named. The bundle does not show that the merchant fulfilled that order, that the charge was for it beyond the fields compared, or that an item's attributes are true."
+      }
+    ]
+  },
+  "datapoints": {
+    "agent_evidence_format": "evidence-bundle-datapoints/0.10",
+    "agent_evidence_verdict": "PAYMENT-NOT-VERIFIED",
+    "agent_evidence_verdict_text": "NOT VERIFIED: the record does not show that the decision was recorded before the charge and matches it",
+    "agent_evidence_verdict_rule": "C3",
+    "agent_evidence_verdict_reason": "offline-witness-data",
+    "agent_evidence_mode": "offline",
+    "agent_evidence_checked_at": "2026-10-25T15:17:53.139Z",
+    "agent_evidence_bundle_sha256": "sha256:ffd6def6008684f2dffd16b52936b1c78875f5313b442215f7e65a41ad306572",
+    "agent_evidence_verdict_sha256": "sha256:f64544450af7fdf4a50886f44be3a96bcfffff34a47b8fe360defed1a4f01740",
+    "agent_evidence_uri": null,
+    "agent_evidence_entry": null,
+    "agent_evidence_entry_cited": null,
+    "agent_evidence_pointer_status": null,
+    "agent_decision": "allow",
+    "agent_decision_before_auth": null,
+    "agent_order_matches_charge": true,
+    "agent_order_reference_matched": true,
+    "agent_charge_id": "TEST-ch-we5-1",
+    "agent_authorization_time": "2026-10-25T15:18:03Z",
+    "agent_witness_time": "2026-10-25T15:17:03.685Z",
+    "agent_witness_state": "SUPPLIED",
+    "agent_witness_time_as_supplied": true,
+    "agent_log_state": "BOUND",
+    "agent_key_state": "SUPPLIED",
+    "agent_card_binding_state": "BOUND",
+    "agent_instruction_state": "BOUND",
+    "agent_instruction_scope_ok": true,
+    "agent_instruction_exceeded": "",
+    "agent_gate_receipt_state": "ABSENT",
+    "agent_gaps": "B-WIT:SUPPLIED,B-PAY:NOT-EVALUATED,B-CHAIN:NOT-EVALUATED,B-KEY:SUPPLIED",
+    "agent_limits": "L1,L2,L3,L4,L6,L7,L8,L9,L12,L13,L14,L17,L24,L25",
+    "agent_verifier": "chirindo examples/evidence-bundle 0.10.0",
+    "agent_verifier_commit": "unrecorded"
+  },
+  "exhibit": {
+    "page": "letter",
+    "path": "pages/we-5-1.letter.pdf",
+    "sha256": "10c056008e1ff0568f5832d6894809315876506998d7891c2a19d076c40469a4",
+    "size": 776006
+  },
+  "online": {
+    "verdict": {
+      "type": "evidence-bundle-verdict/0.10",
+      "verifier": {
+        "name": "chirindo examples/evidence-bundle",
+        "version": "0.10.0",
+        "commit": "unrecorded"
+      },
+      "bundle_sha256": "sha256:ffd6def6008684f2dffd16b52936b1c78875f5313b442215f7e65a41ad306572",
+      "mode": "online",
+      "checked_at": "2026-10-25T15:17:21.220Z",
+      "stated": {
+        "authorizer": null,
+        "tx": null,
+        "charge": {
+          "id": "TEST-ch-we5-1",
+          "amount_minor": "28000",
+          "currency": "EUR",
+          "authorized_at": "2026-10-25T15:18:03Z",
+          "merchant_order_id": "TEST-H-2001",
+          "checkout_ref": null
+        }
+      },
+      "pointer": null,
+      "endpoints": [
+        {
+          "service": "witness",
+          "url": "https://api.headlessoracle.com",
+          "registrable_domain": "headlessoracle.com",
+          "answered": true,
+          "used": true
+        },
+        {
+          "service": "jwks",
+          "url": "https://headlessoracle.com/evidence/examples/jwks.json",
+          "registrable_domain": "headlessoracle.com",
+          "answered": true,
+          "used": false
+        }
+      ],
+      "checks": [
+        {
+          "id": "S3.charge",
+          "member": null,
+          "status": "PASS",
+          "reason": null,
+          "detail": "the charge stated: 28000 EUR minor units, authorized at 2026-10-25T15:18:03Z"
+        },
+        {
+          "id": "M0.bundle",
+          "member": null,
+          "status": "PASS",
+          "reason": null,
+          "detail": "strict JSON; type, members and subject as section 3 defines them"
+        },
+        {
+          "id": "M1.manifest",
+          "member": null,
+          "status": "PASS",
+          "reason": null,
+          "detail": "6 members; ids, counts and references as table 3-1 requires"
+        },
+        {
+          "id": "M1.member",
+          "member": "log-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "1118 bytes, digest and (role, profile) as declared"
+        },
+        {
+          "id": "M1.member",
+          "member": "args-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "452 bytes, digest and (role, profile) as declared"
+        },
+        {
+          "id": "M1.member",
+          "member": "sidecar-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "1050 bytes, digest and (role, profile) as declared"
+        },
+        {
+          "id": "M1.member",
+          "member": "opkey-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "142 bytes, digest and (role, profile) as declared"
+        },
+        {
+          "id": "M1.member",
+          "member": "wkey-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "207 bytes, digest and (role, profile) as declared"
+        },
+        {
+          "id": "M1.member",
+          "member": "ins-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "732 bytes, digest and (role, profile) as declared"
+        },
+        {
+          "id": "M2.log",
+          "member": "log-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "1 records, hash chain from genesis, every sig verifies under the key whose thumbprint is kid"
+        },
+        {
+          "id": "M3.checkpoint",
+          "member": "sidecar-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "sidecar-d line 1: the eight members and their field rules"
+        },
+        {
+          "id": "M3.signature",
+          "member": "sidecar-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "sidecar-d line 1: sig verifies under the operator key for its kid"
+        },
+        {
+          "id": "M3.history",
+          "member": "sidecar-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "sidecar-d line 1: last_entry_hash is the entry hash of record 0 of log-d"
+        },
+        {
+          "id": "M4.witness-receipt",
+          "member": "sidecar-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "sidecar-d line 1: the signature verifies under key_2026_v1, received_at inside its window"
+        },
+        {
+          "id": "M6.instruction",
+          "member": "ins-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "the members of Annex A.3; principal.kid is its key's thumbprint; sig verifies; valid_from is not after valid_until"
+        },
+        {
+          "id": "M8.arguments",
+          "member": "args-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "its JCS SHA-256 sha256:282e79d76a25c71e2f36e1cd218c07bc914757de3346de8e37f6e2adf689a8da is the args_hash of a carried record"
+        },
+        {
+          "id": "M8.order",
+          "member": "args-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "the order has the shape of the committed order (spec 4.3)"
+        },
+        {
+          "id": "M9.operator-key",
+          "member": "opkey-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "jwks: a well-formed Ed25519 key, kid equal to its thumbprint where present"
+        },
+        {
+          "id": "M9.witness-key",
+          "member": "wkey-d",
+          "status": "PASS",
+          "reason": null,
+          "detail": "key_2026_v1: every member equals the pinned entry"
+        },
+        {
+          "id": "O1.witness-list",
+          "member": null,
+          "status": "PASS",
+          "reason": null,
+          "detail": "read to its end: 1 receipts listed over 1 page(s)"
+        },
+        {
+          "id": "O3.jwks",
+          "member": null,
+          "status": "NOT-EVALUATED",
+          "reason": "online-read-failed",
+          "detail": "GET https://headlessoracle.com/evidence/examples/jwks.json: the status is 404, not 200"
+        }
+      ],
+      "bindings": [
+        {
+          "id": "B-LOG",
+          "state": "BOUND",
+          "reason": null,
+          "carrier": null,
+          "signed_by": null,
+          "detail": "record 0 of log-d, whose log passes M2"
+        },
+        {
+          "id": "B-CKP",
+          "state": "BOUND",
+          "reason": null,
+          "carrier": null,
+          "signed_by": null,
+          "detail": "a checkpoint signed by the log key covers the cited record"
+        },
+        {
+          "id": "B-WIT",
+          "state": "BOUND",
+          "reason": null,
+          "carrier": null,
+          "signed_by": null,
+          "detail": "the witness's list, read to its end, holds the selected receipt and every covering receipt the bundle carries, each verified"
+        },
+        {
+          "id": "B-PAY",
+          "state": "NOT-EVALUATED",
+          "reason": "card-subject",
+          "carrier": null,
+          "signed_by": null,
+          "detail": ""
+        },
+        {
+          "id": "B-CHAIN",
+          "state": "NOT-EVALUATED",
+          "reason": "card-subject",
+          "carrier": null,
+          "signed_by": null,
+          "detail": ""
+        },
+        {
+          "id": "B-KEY",
+          "state": "NOT-EVALUATED",
+          "reason": "online-read-failed",
+          "carrier": null,
+          "signed_by": null,
+          "detail": "the jwks_uri was not read: GET https://headlessoracle.com/evidence/examples/jwks.json: the status is 404, not 200"
+        },
+        {
+          "id": "B-INS",
+          "state": "BOUND",
+          "reason": null,
+          "carrier": null,
+          "signed_by": null,
+          "detail": "ins-d is the instruction the arguments cite"
+        },
+        {
+          "id": "B-GRC",
+          "state": "ABSENT",
+          "reason": null,
+          "carrier": null,
+          "signed_by": null,
+          "detail": "no gate receipt is carried or named"
+        },
+        {
+          "id": "B-CARD",
+          "state": "BOUND",
+          "reason": null,
+          "carrier": null,
+          "signed_by": null,
+          "detail": "the committed order matches the stated charge, and received_at is before the stated authorization time"
+        }
+      ],
+      "decision": {
+        "value": "allow",
+        "record": {
+          "log": "log-d",
+          "seq": 0,
+          "event_decision": "allow",
+          "event_outcome": "executed",
+          "gate_result": "act",
+          "receipt_uid": null
+        },
+        "receipt": null,
+        "refusing_records": []
+      },
+      "gate_receipts": [],
+      "instructions": [
+        {
+          "member": "ins-d",
+          "cited": true,
+          "state": "BOUND",
+          "exceeded": [],
+          "reason": null,
+          "uses": 1,
+          "records_without_arguments": 0,
+          "card_limits": [
+            {
+              "limit": "currency",
+              "result": "inside",
+              "reason": null
+            },
+            {
+              "limit": "max_total_minor",
+              "result": "not-declared",
+              "reason": null
+            },
+            {
+              "limit": "max_unit_price_minor",
+              "result": "inside",
+              "reason": null
+            },
+            {
+              "limit": "merchants",
+              "result": "not-declared",
+              "reason": null
+            },
+            {
+              "limit": "items",
+              "result": "not-declared",
+              "reason": null
+            },
+            {
+              "limit": "categories",
+              "result": "inside",
+              "reason": null
+            },
+            {
+              "limit": "refundable_only",
+              "result": "inside",
+              "reason": null
+            },
+            {
+              "limit": "service_window",
+              "result": "inside",
+              "reason": null
+            },
+            {
+              "limit": "locations",
+              "result": "inside",
+              "reason": null
+            }
+          ]
+        }
+      ],
+      "payment": {
+        "connected": false,
+        "reason": "card-subject",
+        "payer": null,
+        "movements": [],
+        "as_supplied": true
+      },
+      "card": {
+        "order": {
+          "merchant_id": "test-hotel.example",
+          "merchant_order_id": "TEST-H-2001",
+          "checkout_ref": null,
+          "currency": "EUR",
+          "total_minor": "28000",
+          "items_sum_minor": "28000",
+          "item_count": 1
+        },
+        "matches": {
+          "amount": true,
+          "currency": true,
+          "merchant_order_id": true,
+          "checkout_ref": null
+        },
+        "witness_received_at": "2026-10-25T15:17:03.685Z",
+        "authorized_at": "2026-10-25T15:18:03Z",
+        "before_authorization": true
+      },
+      "hash_search": null,
+      "times": [
+        {
+          "what": "log-d record 0 ts",
+          "value": "2026-10-25T15:17:01.472Z",
+          "clock": "operator",
+          "as_supplied": false
+        },
+        {
+          "what": "selected checkpoint ts (sidecar-d line 1)",
+          "value": "2026-10-25T15:17:01.475Z",
+          "clock": "operator",
+          "as_supplied": false
+        },
+        {
+          "what": "selected witness receipt received_at (sidecar-d line 1)",
+          "value": "2026-10-25T15:17:03.685Z",
+          "clock": "headless-oracle",
+          "as_supplied": false
+        },
+        {
+          "what": "selected witness receipt checkpoint_ts (sidecar-d line 1)",
+          "value": "2026-10-25T15:17:01.475Z",
+          "clock": "headless-oracle",
+          "as_supplied": false
+        },
+        {
+          "what": "ins-d iat",
+          "value": "2026-10-24T15:07:27Z",
+          "clock": "principal",
+          "as_supplied": false
+        },
+        {
+          "what": "ins-d valid_from",
+          "value": "2026-10-24T15:07:27Z",
+          "clock": "principal",
+          "as_supplied": false
+        },
+        {
+          "what": "ins-d valid_until",
+          "value": "2026-11-09T00:00:00Z",
+          "clock": "principal",
+          "as_supplied": false
+        },
+        {
+          "what": "stated authorization time",
+          "value": "2026-10-25T15:18:03Z",
+          "clock": "processor",
+          "as_supplied": false
+        }
+      ],
+      "orderings": [
+        {
+          "earlier": "each earlier record of the session",
+          "later": "each later record",
+          "rests_on": "the hash chain of the cited log",
+          "status": "SHOWN"
+        },
+        {
+          "earlier": "the cited entry's content (all of it except sig)",
+          "later": "a signature over bytes that carry its hash",
+          "rests_on": "the cited entry hash as 32 raw bytes in the transaction's calldata (B-PAY)",
+          "status": "NOT-EVALUATED"
+        },
+        {
+          "earlier": "the checkpoint, its sig included",
+          "later": "the witness receipt",
+          "rests_on": "the receipt's checkpoint_sha256 over the carried checkpoint",
+          "status": "SHOWN"
+        },
+        {
+          "earlier": "the log head",
+          "later": "the witness receipt",
+          "rests_on": "the receipt's last_entry_hash",
+          "status": "SHOWN"
+        },
+        {
+          "earlier": "an instruction",
+          "later": "the cited entry",
+          "rests_on": "the entry's arguments carry the instruction's digest (B-INS BOUND or EXCEEDS)",
+          "status": "SHOWN"
+        }
+      ],
+      "flags": [
+        {
+          "code": "two-clock-comparison",
+          "detail": "the witness receipt's received_at (Headless Oracle's clock) against the stated authorization time (the processor's clock, as stated)"
+        },
+        {
+          "code": "two-clock-comparison",
+          "detail": "the selected checkpoint's ts (operator's clock) against the witness receipt's received_at (Headless Oracle's clock)"
+        },
+        {
+          "code": "two-clock-comparison",
+          "detail": "ins-d's iat (principal's clock) against the cited entry's ts (operator's clock)"
+        },
+        {
+          "code": "two-clock-comparison",
+          "detail": "ins-d's valid_from and valid_until (principal's clock) against the stated authorization time (the processor's clock, as stated)"
+        }
+      ],
+      "verdict": {
+        "code": "RECORDED-WITH-GAPS",
+        "text": "RECORDED WITH GAPS: the decision was recorded before the charge and matches it; the gaps are listed",
+        "rule": "C6",
+        "reason": null,
+        "gaps": [
+          {
+            "binding": "B-PAY",
+            "state": "NOT-EVALUATED",
+            "reason": "card-subject"
+          },
+          {
+            "binding": "B-CHAIN",
+            "state": "NOT-EVALUATED",
+            "reason": "card-subject"
+          },
+          {
+            "binding": "B-KEY",
+            "state": "NOT-EVALUATED",
+            "reason": "online-read-failed"
+          }
+        ]
+      },
+      "limits": [
+        {
+          "id": "L1",
+          "text": "A gate entry is the operator's own signed statement of what its gate saw and decided. The bundle does not show that a decision was wise, that the agent read the instruction correctly, or that any member's contents are true."
+        },
+        {
+          "id": "L2",
+          "text": "A log records what passed through the gate. It does not show that no action bypassed the gate. The verifier reports the gate version each entry names; chirindo entries through release 0.5.2 carry the constant 0.0.1 in place of a version. chirindo through release 0.5.2 (source read at tags v0.3.0, v0.4.0, v0.5.1 and v0.5.2; run on 0.5.2) forwarded a tools/call without an id member without evaluating policy or writing a receipt, and ran an allowed tools/call with id null without a receipt."
+        },
+        {
+          "id": "L3",
+          "text": "The witness receipt is Headless Oracle's signed statement that at received_at it was shown a checkpoint signed by the key with that thumbprint; it is only as reliable as Headless Oracle and its signing key. The witness is operated by Headless Oracle, which also publishes the gate software: it is independent of an operator other than Headless Oracle, not of Headless Oracle."
+        },
+        {
+          "id": "L4",
+          "text": "This run trusts, as the assembler supplied them, the bundle's copies of the payment's chain data, of the witness receipts, and of every key or profile the verifier has not pinned (an operator JWKS, a witness key id outside the verifier's history, an issuer profile). An online run re-fetches them from sources the verifier chooses; until two endpoints confirm the chain data, no verdict says VERIFIES."
+        },
+        {
+          "id": "L6",
+          "text": "A key's binding to an organisation goes no further than an https origin that served it to the verifier (B-KEY BOUND) or, for a standalone key, than the key itself (KEY-ONLY). An address is an address, not a person or a company."
+        },
+        {
+          "id": "L7",
+          "text": "Times on the principal's, the issuer's, the operator's and Headless Oracle's clocks are those parties' statements, and the block timestamp is set by the block producer within the chain's rules. Only the orderings that need no clock rest on signatures and hashes alone."
+        },
+        {
+          "id": "L8",
+          "text": "This bundle is named in none of the card network rules read for this specification (scope: the pages its sources list; the dispute chapters of the Visa Core Rules and the body of the Mastercard Chargeback Guide could not be read). It is evidence a decider may weigh within the existing reason codes."
+        },
+        {
+          "id": "L9",
+          "text": "The bundle carries what its assembler chose to put in. A verifier can show that the pieces present bind; it cannot show that a piece which would contradict them was left out, except where the witness's receipts show a longer history than the log carried (TRUNCATED) or a different one (FAIL)."
+        },
+        {
+          "id": "L12",
+          "text": "The principal key in a minimal instruction is bound to no person, account or payer; the bundle shows that the holder of that key signed the instruction."
+        },
+        {
+          "id": "L13",
+          "text": "Uses and budget are counted only over what the bundle carries: the records whose arguments it carries and the payments it binds. Uses and payments outside the bundle cannot be counted; the output gives the number of records whose arguments are not carried."
+        },
+        {
+          "id": "L14",
+          "text": "Headless Oracle operates both the gate whose key signed this log and the witness, so the log and the witness receipt are statements by one party."
+        },
+        {
+          "id": "L17",
+          "text": "This version does not verify card payments: whether the action connects to the card payment is not verified."
+        },
+        {
+          "id": "L24",
+          "text": "v0.10. For a card payment, the payment proof is the card network's authorization record, which the issuer holds; this bundle neither carries nor verifies it. What this verdict shows is whether the decision and the order the gate recorded were witnessed before the charge's authorization time as stated, and whether that order matches the stated charge: the stated charge and its time are the statements of the person running the verifier, taken from the processor's records."
+        },
+        {
+          "id": "L25",
+          "text": "v0.10. The committed order is the agent's statement at decision time, as the gate recorded it: its merchant, items, prices, refundability, dates and places are what the agent's call named. The bundle does not show that the merchant fulfilled that order, that the charge was for it beyond the fields compared, or that an item's attributes are true."
+        }
+      ]
+    },
+    "reason": null
+  }
+}

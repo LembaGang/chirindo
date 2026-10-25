@@ -18,6 +18,7 @@ import { ANNEX_A, argsHashOf, bIns, capturedDigest, M6_PROFILES, m6Instruction, 
 import { m7Receipt, ownState, readIssuerProfile, reading } from "./receipts.mjs";
 import { cardMatches, compareInstants, orderProblem, orderSummary } from "./card.mjs";
 import { LIMIT_TEXTS } from "./limits.mjs";
+import { readJwks, readWitnessKeys, readWitnessList, registrableDomain } from "./online.mjs";
 import { readOutflows } from "./outflow.mjs";
 import { analyseSearch, m5, readRpcJson, signerOfMatch } from "./payment.mjs";
 import {
@@ -117,7 +118,10 @@ built("M8.result");
 // shape of item 3 onward is judged on; it changes nothing.
 // `pointer`, from lib/pointer.mjs's fetchPointer, when the bytes were fetched
 // through the Agent Evidence Pointer (spec 4.2; bytes null when not fetched).
-export async function verifyBundle(bytes, stated, pins, { onDecoded, pointer = null } = {}) {
+// `online`, { fetch, setTimer?, clearTimer? }, makes the online reads of a
+// card subject (lib/online.mjs; the command line's --online); for any other
+// subject it is not used.
+export async function verifyBundle(bytes, stated, pins, { onDecoded, pointer = null, online = null } = {}) {
   const checks = [];
   const flags = [];
   const add = (id, member, status, reason, detail) => checks.push({ id, member, status, reason, detail: detail ?? "" });
@@ -130,6 +134,7 @@ export async function verifyBundle(bytes, stated, pins, { onDecoded, pointer = n
   const r0 = stop ? {} : m0(bytes);
   const doc = r0.doc ?? null;
   const card = doc?.subject.kind === "card-payment";
+  base.online = Boolean(online) && (card || !doc);
   if (!card) {
     if (stated.authorizer) add("S1.authorizer", null, "PASS", null, `the account stated: ${stated.authorizer}`);
     else add("S1.authorizer", null, "NOT-EVALUATED", "authorizer-not-stated", "no account was stated");
@@ -475,12 +480,71 @@ export async function verifyBundle(bytes, stated, pins, { onDecoded, pointer = n
   const refused2 = decodedShape({ doc, logs, checkpoints, receipts, pay: pay ?? {}, search, citedArgs, insMembers });
   if (refused2) return { kind: "refused", code: refused2, checks };
 
+  // (c) The online reads of a card subject. O4.key-document is not built:
+  // a run where it would apply is refused.
+  if (base.online) {
+    if (profiles.some((p) => p.pin && p.P?.keyDocument)) return { kind: "refused", code: "online:key-document", checks };
+    ctx.online = await onlineReads(online, ctx);
+  }
+
   return finish(ctx);
+}
+
+// The online reads (spec 4.2, O1, O3, O6): the witness's list for the cited
+// log's kid and session_id, each listed receipt checked under the key the
+// verifier resolves for its id (the pinned history, or for an id it lacks,
+// GET /v5/keys); and the jwks_uri the records name. B-WIT and B-KEY judge
+// what was read, in finish.
+built("O1.witness-list", "O3.jwks", "O6.witness-keys");
+async function onlineReads({ fetch, setTimer, clearTimer }, { cited, citedRec, receipts, pins }) {
+  const timers = { setTimer, clearTimer };
+  const base = pins.endpoints.witness;
+  const r = { list: null, listed: [], keys: null, jwks: null, endpoints: [] };
+  if (!citedRec) return r;
+  r.list = await readWitnessList(fetch, base, citedRec.kid, citedRec.session_id, timers);
+  r.endpoints.push({ service: "witness", url: base, registrable_domain: registrableDomain(base), answered: r.list.answered, used: r.list.ok });
+  const pinned = (id) => pins.witness_keys.keys.find((k) => k.key_id === id) ?? null;
+  const ids = [...receipts.map((x) => x.r?.public_key_id), ...r.list.receipts.map((x) => (isPlainObject(x) ? x.public_key_id : undefined))].filter(isStr);
+  let entries = null;
+  if (ids.some((id) => !pinned(id))) {
+    r.keys = await readWitnessKeys(fetch, base, timers);
+    try {
+      entries = r.keys.ok ? witnessKeyEntries(r.keys.value) : null;
+    } catch {
+      r.keys = { ...r.keys, ok: false, reason: `${base}/v5/keys: the answer has no readable keys list` };
+    }
+  }
+  r.listed = r.list.receipts.map((x) => {
+    if (!isPlainObject(x)) return { r: null, status: "FAIL", where: "the witness's list", detail: "a listed receipt is not a JSON object" };
+    const shape = m4Shape(x);
+    if (shape) return { r: x, status: "FAIL", where: "the witness's list", detail: shape };
+    let k = pinned(x.public_key_id);
+    let viaKeys = false;
+    if (!k && entries) {
+      const e = entries.get(x.public_key_id);
+      if (e && !witnessEntryShape(e)) [k, viaKeys] = [e, true];
+    }
+    if (!k) return { r: x, status: "NOT-EVALUATED", where: "the witness's list", detail: `the key id ${x.public_key_id} cannot be resolved` };
+    return { r: x, status: receiptSigOk(x, k.public_key) && inWindow(x.received_at, k) ? "PASS" : "FAIL", where: "the witness's list", viaKeys };
+  });
+  if (cited.profile !== ANNEX_B_LOG && Object.keys(citedRec).includes("jwks_uri") && isStr(citedRec.jwks_uri)) {
+    r.jwks = await readJwks(fetch, citedRec.jwks_uri, timers);
+    let domain = null;
+    try {
+      domain = registrableDomain(citedRec.jwks_uri);
+    } catch {
+      domain = null;
+    }
+    r.endpoints.push({ service: "jwks", url: citedRec.jwks_uri, registrable_domain: domain, answered: r.jwks.answered, used: r.jwks.ok });
+  }
+  return r;
 }
 
 // B-CKP TRUNCATED and B-WIT's TRUNCATED (spec 4.3, B-CKP and B-WIT rule 2),
 // read in finish below.
 built("B-CKP.truncated");
+// B-WIT's online rules (spec 4.3, rules 3, 4 and 6 with the witness's list), in finish below.
+built("B-WIT.online");
 
 // Bindings, decision, verdict and output. When a check FAILed (failAt), the
 // bindings that need the checks are not computed: each reads NOT EVALUATED
@@ -558,12 +622,18 @@ function finish(ctx) {
     else if (mine.some((c) => c.ok && c.cp.count > seq)) bind("B-CKP", "BOUND", null, { detail: "a checkpoint signed by the log key covers the cited record" });
     else bind("B-CKP", "ABSENT");
 
-    // B-WIT (offline: rules 1, 2, 4, 5 and 7).
-    const forLog = receipts.filter((x) => x.r && x.r.kid === kid && x.r.session_id === sid);
-    const verified = forLog.filter((x) => x.status === "PASS");
+    // B-WIT (rules 1 to 7; offline, rules 3 and 6 do not apply). Online, the
+    // receipts the witness lists for the log's (kid, session_id) are read
+    // beside the carried ones.
+    const on = ctx.online ?? null;
+    const mineRc = (x) => x.r && x.r.kid === kid && x.r.session_id === sid;
+    const forLog = receipts.filter(mineRc);
+    const listedForLog = on ? on.listed.filter(mineRc) : [];
+    const listedOther = on ? on.listed.filter((x) => x.r && !mineRc(x)) : [];
+    const verified = [...forLog, ...listedForLog].filter((x) => x.status === "PASS");
     const wouldCover = (x) => Number(x.r.count) > seq && Number(x.r.count) <= n && x.r.last_entry_hash === hashes[Number(x.r.count) - 1];
     const byCount = new Map();
-    let witFail = receipts.some((x) => x.status === "FAIL");
+    let witFail = receipts.some((x) => x.status === "FAIL") || listedForLog.some((x) => x.status === "FAIL");
     for (const x of verified) {
       const c = Number(x.r.count);
       if (c <= n && x.r.last_entry_hash !== hashes[c - 1]) witFail = true;
@@ -571,15 +641,25 @@ function finish(ctx) {
       byCount.set(c, x.r.last_entry_hash);
     }
     const covering = verified.filter(wouldCover);
-    if (witFail) bind("B-WIT", "FAIL");
-    else if (verified.some((x) => Number(x.r.count) > n)) bind("B-WIT", "TRUNCATED", null, { detail: "a witness receipt shows a longer history than the carried log" });
-    else if (covering.length) bind("B-WIT", "SUPPLIED", null, { detail: "a covering receipt is carried; offline, the witness's list is not read" });
-    else if (forLog.some((x) => x.status === "NOT-EVALUATED" && wouldCover(x))) bind("B-WIT", "NOT-EVALUATED", "witness-key-unknown", { detail: "a carried receipt that would cover the cited record is under a key id the verifier cannot resolve" });
-    else bind("B-WIT", "ABSENT");
+    for (const x of listedForLog) if (x.viaKeys) flag("witness-key-not-pinned", `the witness's list: key id ${x.r.public_key_id} is not in the verifier's key history; GET /v5/keys gives its key`);
     if (covering.length) {
       selectedRc = [...covering].sort((a, b) => Date.parse(a.r.received_at) - Date.parse(b.r.received_at) || Number(a.r.count) - Number(b.r.count) || (a.r.checkpoint_sha256 < b.r.checkpoint_sha256 ? -1 : 1))[0];
       if (!checkpoints.some((c) => c.shapeOk && jcsSha256(c.cp) === selectedRc.r.checkpoint_sha256)) flag("uncarried-checkpoint", `the selected receipt's checkpoint_sha256 matches no carried checkpoint`);
     }
+    // Online, what the list read shows: read to its end, every listed key resolved,
+    // and (by JCS) the selected receipt and every carried covering one listed.
+    const listed = (r) => listedForLog.some((x) => jcs(x.r) === jcs(r));
+    const incomplete = on && (!on.list.ok || listedForLog.some((x) => x.status === "NOT-EVALUATED") || on.listed.some((x) => x.r === null));
+    const inconsistent = on && on.list.ok && (forLog.filter((x) => x.status === "PASS" && wouldCover(x)).some((x) => !listed(x.r)) || listedOther.length > 0);
+    if (incomplete) flag("online-check-incomplete", on.list.ok ? "a listed receipt could not be checked" : `the witness's list was not read to its end: ${on.list.reason}`);
+    if (inconsistent) flag("witness-list-inconsistent", listedOther.length ? "the witness lists a receipt for another kid or session_id in answer to the log's" : "the witness's list lacks a covering receipt the bundle carries");
+    if (witFail) bind("B-WIT", "FAIL");
+    else if (verified.some((x) => Number(x.r.count) > n)) bind("B-WIT", "TRUNCATED", null, { detail: "a witness receipt shows a longer history than the carried log" });
+    else if (on && covering.length && !incomplete && !inconsistent && listed(selectedRc.r)) bind("B-WIT", "BOUND", null, { detail: "the witness's list, read to its end, holds the selected receipt and every covering receipt the bundle carries, each verified" });
+    else if (covering.length) bind("B-WIT", "SUPPLIED", null, { detail: on ? "a covering receipt is carried or listed; the witness's list does not confirm it" : "a covering receipt is carried; offline, the witness's list is not read" });
+    else if ([...forLog, ...listedForLog].some((x) => x.status === "NOT-EVALUATED" && wouldCover(x))) bind("B-WIT", "NOT-EVALUATED", "witness-key-unknown", { detail: "a receipt that would cover the cited record is under a key id the verifier cannot resolve" });
+    else if (on && !on.list.ok) bind("B-WIT", "NOT-EVALUATED", "online-read-failed", { detail: `no covering receipt is carried, and the witness's list was not read to its end: ${on.list.reason}` });
+    else bind("B-WIT", "ABSENT");
     const coveringCps = mine.filter((c) => c.ok && c.cp.count > seq && c.cp.count <= n);
     if (coveringCps.length) {
       selectedCp = (selectedRc && coveringCps.find((c) => jcsSha256(c.cp) === selectedRc.r.checkpoint_sha256)) ?? [...coveringCps].sort((a, b) => a.cp.count - b.cp.count || (jcsSha256(a.cp) < jcsSha256(b.cp) ? -1 : 1))[0];
@@ -779,8 +859,16 @@ function finish(ctx) {
   if (card && !charge) bind("B-CARD", "NOT-EVALUATED", "charge-not-stated", { detail: "no charge was stated" });
   else if (card && !B.has("B-CARD")) bind("B-CARD", "NOT-EVALUATED", failAt ? `prerequisite-failed:${failAt}` : "prerequisite-failed:B-LOG");
 
-  // The online checks that apply are listed as not evaluated (spec 4.2).
-  if (doc) {
+  // The online checks that apply: offline, listed as not evaluated (spec
+  // 4.2); online, for a card subject, O1, O3 and O6 as read (lib/online.mjs).
+  const on = ctx.online ?? null;
+  if (doc && base.online) {
+    const row = (id, ok, okDetail, why) => checks.push({ id, member: null, status: ok ? "PASS" : "NOT-EVALUATED", reason: ok ? null : on ? "online-read-failed" : `prerequisite-failed:${failAt ?? "B-LOG"}`, detail: ok ? okDetail : (why ?? "not read") });
+    const citedRec = cited?.records[subject.cites.seq] ?? null;
+    if (cited && cited.records.length) row("O1.witness-list", on?.list?.ok, `read to its end: ${on?.list?.receipts.length} receipts listed over ${on?.list?.pages} page(s)`, on?.list?.reason);
+    if (citedRec && cited.profile !== ANNEX_B_LOG && Object.keys(citedRec).includes("jwks_uri")) row("O3.jwks", on?.jwks?.ok, "the jwks_uri was read", on?.jwks?.reason);
+    if (on?.keys) row("O6.witness-keys", on.keys.ok, "GET /v5/keys was read", on.keys.reason);
+  } else if (doc) {
     const off = (id, detail) => checks.push({ id, member: null, status: "NOT-EVALUATED", reason: "offline", detail });
     if (cited && cited.records.length) off("O1.witness-list", "offline: the witness's list for the cited log's kid and session_id is not read");
     if (!card && pay) {
@@ -819,7 +907,9 @@ function finish(ctx) {
   else verdict = v("VERIFIES-WITH-GAPS", "V6", null);
 
   // The limits whose rule applies (spec section 8, table 8-1).
-  const L = new Set(["L1", "L4", "L6", "L7", "L8", "L9"]);
+  const L = new Set(["L1", "L6", "L7", "L8", "L9"]);
+  // L4: the run is offline, or an online read did not complete.
+  if (!base.online || checks.some((c) => /^O\d\./.test(c.id) && c.status !== "PASS")) L.add("L4");
   if (doc) {
     const ms = doc.members;
     if (ms.some((m) => m.role === "gate-log" && m.profile === "chirindo-evidence.action/1")) L.add("L2");
@@ -856,11 +946,11 @@ function finish(ctx) {
     type: OUTPUT_TYPE,
     verifier: { ...VERIFIER },
     bundle_sha256: base.bundle_sha256,
-    mode: "offline",
+    mode: base.online ? "online" : "offline",
     checked_at: new Date().toISOString(),
     stated: base.stated,
     pointer: base.pointer,
-    endpoints: [],
+    endpoints: ctx.online?.endpoints ?? [],
     checks,
     bindings,
     decision,
@@ -904,7 +994,7 @@ function cardVerdict({ anyFail, B, st, gaps, decision }) {
   // C4: B-CARD is BOUND here, and a breach is shown.
   if (breach) return v("OUTSIDE-INSTRUCTION", "C4", decision.value === "refuse" ? "decision-not-allow" : null);
   // C5: every card rule holds, and no reference was left unstated.
-  if (decision.value === "allow" && ["B-CARD", "B-INS", "B-LOG", "B-CKP", "B-WIT", "B-KEY"].every((id) => st(id) === "BOUND") && card.reason === null && (st("B-GRC") === "BOUND" || (st("B-GRC") === "ABSENT" && B.get("B-GRC").reason === null))) return v("RECORDED-BEFORE-CHARGE", "C5", null, []);
+  if (decision.value === "allow" && ["B-CARD", "B-INS", "B-LOG", "B-CKP", "B-WIT", "B-KEY"].every((id) => st(id) === "BOUND") && card.reason === null && (st("B-GRC") === "BOUND" || (st("B-GRC") === "ABSENT" && B.get("B-GRC").reason === null))) return v("RECORDED-BEFORE-CHARGE", "C5", null);
   return v("RECORDED-WITH-GAPS", "C6", null);
 }
 
@@ -928,14 +1018,22 @@ function bCard({ order, charge, selectedRc, wit, bind, flag, out }) {
   bind("B-CARD", "BOUND", noRef ? "reference-not-stated" : null, { detail: `the committed order matches the stated charge, and received_at is before the stated authorization time${wit === "BOUND" ? "" : " (B-WIT " + wit + ": unconfirmed)"}` });
 }
 
-// B-KEY offline (spec 4.3) for records that name an https jwks_uri: SUPPLIED
-// when a carried JWKS holds the key whose thumbprint is the log's kid, FAIL
-// when the carried JWKS lacks it, NOT EVALUATED when no JWKS is carried.
-built("B-KEY.jwks");
+// B-KEY (spec 4.3) for records that name an https jwks_uri: FAIL when the
+// carried JWKS lacks the key whose thumbprint is the log's kid. Offline,
+// SUPPLIED when a carried JWKS holds it, NOT EVALUATED when none is carried.
+// Online, by the verifier's own GET of the jwks_uri (O3.jwks): BOUND when the
+// JWKS served holds the key, KEY-ROTATED-OUT when it no longer does, NOT
+// EVALUATED (online-read-failed) when the GET fails.
+built("B-KEY.jwks", "B-KEY.online");
 function bKey(ctx, kid, bind) {
   const jwks = ctx.opMembers.filter((o) => o.profile === "jwks");
   const holds = (o) => !o.error && isPlainObject(o.value) && Array.isArray(o.value.keys) && o.value.keys.some((k) => isPlainObject(k) && k.kty === "OKP" && k.crv === "Ed25519" && isStr(k.x) && okpThumbprint(k.x) === kid);
-  if (!jwks.length) bind("B-KEY", "NOT-EVALUATED", "no-jwks-carried", { detail: "the records name a jwks_uri, and no JWKS is carried" });
+  const read = ctx.online?.jwks ?? null;
+  if (jwks.length && !jwks.some(holds)) bind("B-KEY", "FAIL", null, { detail: "the carried JWKS lacks the key whose thumbprint is the log's kid" });
+  else if (read && read.ok && holds({ value: read.value })) bind("B-KEY", "BOUND", null, { detail: "the JWKS the jwks_uri serves holds the key" });
+  else if (read && read.ok) bind("B-KEY", "KEY-ROTATED-OUT", null, { detail: `the JWKS the jwks_uri serves no longer holds the key${jwks.length ? `; the carried copy is ${jwks.map((o) => `${o.member} (fetched_at ${ctx.doc.members.find((m) => m.id === o.member)?.fetched_at ?? "not stated"})`).join(", ")}` : ""}` });
+  else if (read) bind("B-KEY", "NOT-EVALUATED", "online-read-failed", { detail: `the jwks_uri was not read: ${read.reason}` });
+  else if (!jwks.length) bind("B-KEY", "NOT-EVALUATED", "no-jwks-carried", { detail: "the records name a jwks_uri, and no JWKS is carried" });
   else if (jwks.some(holds)) bind("B-KEY", "SUPPLIED", null, { detail: "the carried JWKS holds the key; offline, the jwks_uri is not read" });
   else bind("B-KEY", "FAIL", null, { detail: "the carried JWKS lacks the key whose thumbprint is the log's kid" });
 }

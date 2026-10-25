@@ -183,6 +183,31 @@ export const UNLOCKS = {
     needs: { "P1.pointer": { status: "PASS" }, "P2.entry": { status: "PASS" } },
     tie: "V-40",
   },
+  // A view: the tie makes the exhibit from V-10's verdict (make-exhibit.mjs).
+  "view:exhibit": {
+    widening: "W3-07",
+    needs: { "exhibit.pdf": { view: "written" }, "exhibit.determinism": { view: "same-bytes" }, "exhibit.text-only": { view: "strings" } },
+    tie: "V-50",
+  },
+  // A view: the tie makes the export of V-10's verdict (make-datapoints.mjs).
+  "view:datapoints": {
+    widening: "W3-08",
+    needs: { "datapoints.export": { view: "members" } },
+    tie: "V-60",
+  },
+  // A view: the tie reads pages/we-4-1.json and the files it names (lib/pages.mjs).
+  "view:pages": {
+    widening: "W3-09",
+    needs: { "pages.json": { view: "page" } },
+    tie: "V-70",
+  },
+  // An input: --online for a card subject. The tie is a case of
+  // vectors/online-cases.mjs, run through the library entry with a fake witness.
+  "online:card-witness": {
+    widening: "W3-10",
+    needs: { "O1.witness-list": { status: "PASS" }, "B-WIT.online": { binding: "B-WIT", state: "BOUND", reason: null } },
+    tie: "V-72",
+  },
 };
 
 // The pair ties of C4 (6): a vector that carries an evidence property and a

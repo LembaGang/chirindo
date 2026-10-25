@@ -131,3 +131,18 @@ targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''(^|/)examples/ordering-evidence/keys/witness-key\.pin\.json$''']
 regexes = ['''^c9ea3bc503e2b8ef4b260f78324313c1b0b07f25cdfd95a04a8b900e2a00e158$''']
+
+[[allowlists]]
+# examples/evidence-bundle, the card worked examples' page bundles: each
+# carries, base64-encoded, a gate log whose records' `key_thumbprint` and
+# `kid` are the RFC 7638 thumbprint of the examples' TEST operator key, a
+# public JWK (no private "d") derived from the public seed in
+# examples/evidence-bundle/vectors/synth.mjs and published in
+# examples/evidence-bundle/pages/evidence-examples-jwks.json. gitleaks decodes
+# the base64 and matches it. The records are signed and witnessed, so the
+# value cannot be renamed or moved without breaking the evidence.
+description = "Evidence-bundle page bundles: RFC 7638 thumbprint of the examples' TEST operator key, public by construction"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)examples/evidence-bundle/pages/we-[45]-[12]\.bundle\.json$''']
+regexes = ['''^sVBDsKoyBtMRYEc-51Xmgy1PsIvo6_9QbSbsAVYqKzc$''']

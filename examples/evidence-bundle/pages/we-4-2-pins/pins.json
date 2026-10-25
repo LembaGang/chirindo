@@ -1,0 +1,91 @@
+{
+  "format": "evidence-bundle-pins/1",
+  "note": "The default pins with the card examples' TEST operator key id added to Headless Oracle's own operator key ids (so that L14 attaches, as WE-4's limit says); the witness key history is the shipped one.",
+  "witness_keys": {
+    "source": "https://api.headlessoracle.com/v5/keys",
+    "response_sha256": "642bc434c81092bb9f0103efc2478c0cf89fac330a4e1c049d2299e9c7b167b9",
+    "response_file": "examples/ordering-evidence/keys/v5-keys.response.json",
+    "keys": [
+      {
+        "key_id": "key_2026_v1",
+        "algorithm": "Ed25519",
+        "format": "hex",
+        "public_key": "03dc27993a2c90856cdeb45e228ac065f18f69f0933c917b2336c1e75712f178",
+        "valid_from": "2026-01-01T00:00:00Z",
+        "valid_until": null
+      }
+    ]
+  },
+  "operator_key_ids": [
+    "D8WTDAY8BnSSusV5d-jWRKXEatX7-8iWQm4txYYYJ9U",
+    "sVBDsKoyBtMRYEc-51Xmgy1PsIvo6_9QbSbsAVYqKzc"
+  ],
+  "issuer_profiles": [],
+  "endpoints": {
+    "note": "Carried for the online build; read by nothing in this offline build.",
+    "json-rpc": {
+      "8453": [
+        {
+          "url": "https://mainnet.base.org",
+          "registrable_domain": "base.org"
+        },
+        {
+          "url": "https://base.drpc.org",
+          "registrable_domain": "drpc.org"
+        },
+        {
+          "url": "https://base-mainnet.public.blastapi.io",
+          "registrable_domain": "blastapi.io"
+        },
+        {
+          "url": "https://base-rpc.publicnode.com",
+          "registrable_domain": "publicnode.com"
+        }
+      ],
+      "84532": [
+        {
+          "url": "https://sepolia.base.org",
+          "registrable_domain": "base.org"
+        },
+        {
+          "url": "https://base-sepolia.drpc.org",
+          "registrable_domain": "drpc.org"
+        },
+        {
+          "url": "https://base-sepolia-rpc.publicnode.com",
+          "registrable_domain": "publicnode.com"
+        }
+      ]
+    },
+    "witness": "https://api.headlessoracle.com"
+  },
+  "tokens": {
+    "8453": [],
+    "84532": [
+      {
+        "address": "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+        "name": "USDC",
+        "version": "2",
+        "sources": [
+          "examples/ordering-evidence/case-a/facilitator/request.json:14-15",
+          "examples/ordering-evidence/case-a/pay.mjs:81-83"
+        ]
+      }
+    ]
+  },
+  "erc4337": {
+    "source": "examples/ordering-evidence-h4/lib/evm.mjs (USEROP_ABI, ENTRYPOINTS)",
+    "selectors": [
+      "0x1fad948c",
+      "0x765e827f",
+      "0x4b1d7cf5",
+      "0xdbed18e0"
+    ],
+    "entrypoints": [
+      "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+      "0x0000000071727de22e5e9d8baf0edac6f37da032",
+      "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"
+    ]
+  },
+  "intent_submission_contracts": []
+}

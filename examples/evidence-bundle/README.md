@@ -18,8 +18,11 @@ to the charge the person running the verifier states; it writes one JSON
 verdict object (`evidence-bundle-verdict/0.10`, schema in `schema/`).
 
 It also holds `build-we1.mjs`, which builds WE-1 from the committed files of
-`examples/ordering-evidence/case-a`; the WE-1 sweep (`sweep.mjs`); and the
-vectors this folder can build from the repository's own bytes (`vectors/`).
+`examples/ordering-evidence/case-a`; the WE-1 sweep (`sweep.mjs`); the
+vectors this folder can build from the repository's own bytes (`vectors/`);
+two views of a verdict for chargeback platforms, the exhibit PDF
+(`make-exhibit.mjs`) and the data-point export (`make-datapoints.mjs`); and
+the page-ready files of the card worked examples WE-4 and WE-5 (`pages/`).
 It is not part of the npm package.
 
 ## Setup
@@ -32,8 +35,9 @@ cd examples/ordering-evidence-h4 && npm ci
 cd ../evidence-bundle && npm ci
 ```
 
-Node 20 or later. The dependencies are pinned: viem 2.56.9 and canonicalize
-2.1.0.
+Node 20 or later. The dependencies are pinned: viem 2.56.9, canonicalize
+2.1.0, and dejavu-fonts-ttf 2.37.3, which holds only font files: the exhibit
+reads DejaVu Sans from it ("The exhibit PDF", below).
 
 ## Commands
 
@@ -59,6 +63,17 @@ node check-bundle.mjs we1.json --authorizer 0xE65E3dE1493171dCF0A706a3f407d7DdB3
   `--evidence-uri <https URL>` and `--evidence-entry sha256:<64 hex>`, and
   optionally `--evidence-sha256 sha256:<64 hex>` ("The Agent Evidence
   Pointer", below).
+- `--online`, for a `card-payment` subject only: read the witness's own list of
+  receipts for the cited log, and the operator key set the records name ("The
+  online witness read", below).
+
+The views of a verdict, each made from the verdict JSON alone:
+
+```
+node check-bundle.mjs <bundle.json> <the charge options> > verdict.json
+node make-exhibit.mjs verdict.json --page letter --out exhibit.pdf    # or --page a4
+node make-datapoints.mjs verdict.json > datapoints.json
+```
 
 `build-we1.mjs` checks every source file against its committed sha256 before
 it writes anything, and exits 2 naming a file that differs (a checkout that
@@ -71,7 +86,8 @@ repository root; `test/builder.mjs` uses it to show both outcomes on a copy.
 - `0`: one verdict object on stdout, whatever the verdict (FAILS included).
 - `2`: nothing on stdout and one line on stderr: a usage error (an
   `--authorizer` or `--tx` that is malformed or given twice, an unknown option,
-  `--online` or `--rpc`, a missing or unreadable bundle, invalid pins; a charge
+  `--rpc`, `--online` for a subject that is not `card-payment`, a missing or
+  unreadable bundle, invalid pins; a charge
   option outside its form, given twice, without the other required ones, or for
   an `evm-payment` subject; a pointer URI that is not https or carries user
   information, an entry or digest outside its form, the URI or the entry
@@ -80,10 +96,17 @@ repository root; `test/builder.mjs` uses it to show both outcomes on a copy.
 - `1`: an internal error, with nothing on stdout. No test reaches exit 1:
   no input is known to cause one, here or in `build-we1.mjs`.
 
+`make-exhibit.mjs` exits 0 with the exhibit written and nothing on stdout; 2
+for a usage error, a font file that is not the pinned one, or a file that is
+not an `evidence-bundle-verdict/0.10` verdict; 3 with `exhibit not written:
+<why>` when every limit does not fit one page at 6 points. No file is written
+on 2 or 3. `make-datapoints.mjs` exits 0 with the export on stdout, and 2 for
+a usage error or a file that is not a 0.10 verdict.
+
 ## What an offline run never says
 
-This build is offline only: the pointer's one fetch of the bundle file is the
-only network read it makes, and it reads nothing a bundle names. It trusts, as
+Without `--online`, a run reads the network only for the pointer's one fetch of
+the bundle file, and it reads nothing a bundle names. It trusts, as
 the bundle's assembler supplied them, the bundle's copies of the payment's
 chain data and of the witness receipts, so no verdict it gives contains the
 word VERIFIES: with every other link in place the verdict is PAYMENT NOT
@@ -94,6 +117,95 @@ binding is never `BOUND`. For a card subject with a stated charge, the witness
 receipt is the bundle's copy, so no card verdict is `RECORDED-BEFORE-CHARGE`,
 `RECORDED-WITH-GAPS` or `OUTSIDE-INSTRUCTION`: with every other link in place it
 is PAYMENT NOT VERIFIED with the reason `offline-witness-data` (rule C3).
+
+## The online witness read (`--online`, card subjects)
+
+For a `card-payment` subject, `--online` makes three reads, GET only, and
+nothing else: an `evm-payment` subject keeps the offline-only usage error,
+because this build does not read chain endpoints.
+- `O1.witness-list`: the witness's own list of receipts for the cited log's
+  `kid` and `session_id` (`https://api.headlessoracle.com/v1/witness/checkpoints`,
+  the base URL from the pins), following `next_after` for up to 10,000 pages,
+  each request with no redirect and a 10 s limit, as chirindo's witness client
+  reads it. Each listed receipt is checked under the pinned key for its id, or,
+  for an id the pins lack, under the key `GET /v5/keys` gives
+  (`O6.witness-keys`, flag `witness-key-not-pinned`).
+- `O3.jwks`: the `jwks_uri` the records name, over https on port 443 with at
+  most one redirect to the same origin.
+
+B-WIT is BOUND when the list, read to its end, holds the selected receipt and
+every covering receipt the bundle carries, each verified, and nothing for
+another kid or session. It is SUPPLIED, with the flag
+`online-check-incomplete` or `witness-list-inconsistent`, when the list could
+not be read to its end or does not confirm the carried receipt, and FAIL when a
+listed receipt shows the log rewritten after witnessing. B-KEY is BOUND when the
+JWKS the `jwks_uri` serves holds the log's key, KEY-ROTATED-OUT when it no
+longer does, and NOT EVALUATED (`online-read-failed`) when the read fails.
+Only B-WIT BOUND confirms the witness receipt's time, so only an online run
+can read `RECORDED-BEFORE-CHARGE`, `RECORDED-WITH-GAPS` or
+`OUTSIDE-INSTRUCTION`. The output lists each endpoint read, with its
+registrable domain, and attaches L4 only when an online read did not complete.
+`O4.key-document`, which this build does not read, is refused where it would
+apply (`not supported in this build: online:key-document`).
+
+## The exhibit PDF
+
+`make-exhibit.mjs` makes a one-page PDF of one verdict JSON, for a chargeback
+platform to place among its own exhibits. It is a view: it shows values of the
+verdict, in this order, and nothing else.
+1. The limits stated first: L24 for a card subject, L14 and L3 when attached.
+2. The items a dispute decider asks for, with the strength this run shows:
+   - agent identity (B-LOG, B-KEY);
+   - the customer's signed instruction (B-INS, and whether L12 is attached);
+   - the cart against the charge (B-CARD, `card.matches`, each card limit);
+   - the timing (`received_at` against the stated authorization time, B-WIT);
+   - what is not shown (the agent's reading of the instruction, L1) and not
+     carried (customer recognition, 3-D Secure, AVS, fulfilment).
+3. The verdict.
+4. Every binding, with its state and reason.
+5. The times, each with its clock.
+6. Every other limit, in table 8-1's order.
+
+A footer follows, with the verdict JSON's sha256, `bundle_sha256`, the pointer
+when one was used, the verifier, the mode, `checked_at` and the generator.
+
+The same verdict JSON bytes, page size and generator version give the same
+PDF bytes:
+- PDF 1.7, the content uncompressed, the objects in one fixed order;
+- an Info dictionary holding only `Producer` and `CreationDate`, the date from
+  the verdict's `checked_at` and never from a clock;
+- an ID from the verdict JSON's sha256.
+
+Every string is drawn with the font's text operators as a hex string, so
+nothing from a bundle is ever read as PDF syntax. A character the font's
+WinAnsi encoding lacks, and every control character, is drawn as `[U+XXXX]`.
+The PDF has no annotation, link, action, script, form, embedded file or image.
+Text gets smaller down to 6 points, then the list of times is shortened with a
+line saying how many are left out. When every limit still does not fit one
+page, no exhibit is written. The committed exhibits are about 776 kB each, under
+the 5,000,000-byte limit, almost all of it the font.
+
+The font is DejaVu Sans (`ttf/DejaVuSans.ttf` of the `dejavu-fonts-ttf` 2.37.3
+package, read from `node_modules`, sha256
+`7da195a74c55bef988d0d48f9508bd5d849425c1770dba5d7bfc6ce9ed848954`; another
+file is refused). Every exhibit, the committed ones under `pages/` included,
+carries it whole, never subset. Its licence is `fonts/DejaVu-LICENSE`, the
+package's `LICENSE` byte for byte; the PDF itself carries no licence notice.
+
+## The data-point export
+
+`make-datapoints.mjs` writes `evidence-bundle-datapoints/0.10`, a flat JSON
+object serialised by RFC 8785 (JCS) with a line feed after it, for chargeback
+platforms' argument engines. Every member is a string, a boolean or null, and
+is defined from the verdict JSON alone. Examples are `agent_evidence_verdict`,
+`agent_decision_before_auth`, `agent_order_matches_charge`,
+`agent_instruction_scope_ok`, `agent_witness_time` and `agent_gaps`. A member
+that does not apply to the subject is null, and every boolean is three-valued:
+null never means true. `agent_decision_before_auth` is null whenever B-WIT is
+not BOUND, so it is null offline. `agent_gaps` gives each gap as
+`<binding>:<state>`, without its reason: for a card subject it lists B-PAY and
+B-CHAIN, which are NOT EVALUATED with the reason `card-subject` and never apply
+to a card payment.
 
 ## The shape this build judges
 
@@ -299,6 +411,35 @@ night above the cap, a stay outside the window, the city written `Lisboa`
 (V-27a to V-27c, each `outside`) and an item without `refundable` (V-28,
 `order-field-missing`). The dates of WE-5's stay are test values.
 
+## The page files (`pages/`)
+
+`pages/we-4-1.json`, `we-4-2.json`, `we-5-1.json` and `we-5-2.json` are the
+page-ready files of WE-4 and WE-5, both variants. Each is a JSON object with
+`id`, `limit` (the example's stated limit), `bundle` (the bundle file beside
+it, with its sha256 and size), `stated` (the inputs, and the pins named),
+`offline_verdict`, `datapoints` (the export of the offline verdict), `exhibit`
+(US Letter, with its sha256 and size) and `online` (the online verdict).
+
+Their bundles are page bundles, not the vectors' bundles:
+- each carries a receipt from Headless Oracle's own witness, for a checkpoint
+  of a TEST operator key's log;
+- each names the operator key set
+  `https://headlessoracle.com/evidence/examples/jwks.json`;
+- each was run with the shipped pins plus that key's id.
+
+A page states only verdicts its own bundle gave. Offline each reads PAYMENT
+NOT VERIFIED (`offline-witness-data`). Online the witness's list confirmed each
+receipt (B-WIT BOUND), and the inside variants read `RECORDED-WITH-GAPS` and
+the outside variants `OUTSIDE-INSTRUCTION`.
+
+At the time of these runs the `jwks_uri` did not serve the key, so B-KEY is NOT
+EVALUATED (`online-read-failed`). Once that URL serves the key, the inside
+variants read `RECORDED-BEFORE-CHARGE`. `pages/evidence-examples-jwks.json`
+holds the bytes to serve there; it is published at that URL by the site, not
+from this folder. `node vectors/make-pages.mjs --write we-4-1` writes a page
+from V-10's TEST bundle; the committed pages were written from the page
+bundles.
+
 ## WE-1's members, and where `fetched_at` comes from
 
 | member | file | `fetched_at` |
@@ -317,7 +458,7 @@ night above the cap, a stay outside the window, the city written `Lisboa`
 ## Tests, vectors and the sweep
 
 ```
-npm test             # reuse, jcs, cli, schema, we1, vectors, refusals, unlocks, builder, card, pointer, errata, never-verifies
+npm test             # reuse, jcs, cli, schema, we1, vectors, refusals, unlocks, builder, card, pointer, errata, never-verifies, exhibit, datapoints, pages, online
 npm run test:sweep   # the WE-1 sweep (a few minutes)
 ```
 
@@ -326,7 +467,10 @@ the repository's own bytes and from throwaway test keys derived from public
 seed strings (`vectors/synth.mjs`; the rows of the shapes judged since the
 first build are in `vectors/rows-a2.mjs` and `vectors/rows-a2b.mjs`, and the
 card rows of v0.10 in `vectors/rows-a3.mjs`; the pointer's cases, run through
-the library entry with a fake fetch, are in `vectors/pointer-cases.mjs`): a recipe (a base bundle and a
+the library entry with a fake fetch, are in `vectors/pointer-cases.mjs`, the
+online cases, run with a fake witness and a fake key host, in
+`vectors/online-cases.mjs`, and the verdicts the views are made from in
+`vectors/view-cases.mjs`): a recipe (a base bundle and a
 change, never bundle bytes), its arguments, and the verifier's output
 projected to what every
 implementation must reproduce. It is a snapshot of this verifier's own output,

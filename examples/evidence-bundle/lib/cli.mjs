@@ -96,7 +96,7 @@ function pointerValue(name, s) {
 }
 
 export function parseArgs(argv) {
-  const o = { bundlePath: null, authorizer: null, tx: null, pinsDir: null, charge: null, pointer: null };
+  const o = { bundlePath: null, authorizer: null, tx: null, pinsDir: null, charge: null, pointer: null, online: false };
   const chargeIn = {};
   const pointerIn = {};
   const seen = new Set();
@@ -119,6 +119,11 @@ export function parseArgs(argv) {
     } else if (a === "--pins") {
       once(a);
       o.pinsDir = value();
+    } else if (a === "--online" && judged("online:card-witness")) {
+      // The witness read of a card subject; check-bundle.mjs refuses it for
+      // any other subject once the bundle is read.
+      once(a);
+      o.online = true;
     } else if (a === "--online" || a === "--rpc") throw new UsageError(`${a}: this build is offline only`);
     else if (Object.values(INPUT_OPTIONS).flat().includes(a)) {
       const property = Object.keys(INPUT_OPTIONS).find((p) => INPUT_OPTIONS[p].includes(a));
