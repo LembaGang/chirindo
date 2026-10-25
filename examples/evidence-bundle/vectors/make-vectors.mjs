@@ -5,7 +5,7 @@
 //
 //   node vectors/make-vectors.mjs --write [<file>]
 //
-// writes the vector file (default vectors/evidence-bundle-0.9.json): for each
+// writes the vector file (default vectors/evidence-bundle-0.10.json): for each
 // vector its recipe, its arguments and the verifier's output projected as
 // spec D.5's last paragraph lists. The file is a regression snapshot of this
 // verifier's own output, not an independent check.
@@ -19,12 +19,13 @@ import { buildWe1 } from "../build-we1.mjs";
 import { bundleBytes, member, readSource, WE1_AUTHORIZER, WE1_TX } from "../lib/we1.mjs";
 import { ROWS_STEP0, ROWS_WA01, ROWS_WA02, ROWS_WA03, ROWS_WA04, ROWS_WA05, ROWS_WA06, ROWS_WA07, ROWS_WA08, ROWS_WA09, ROWS_WA10, ROWS_WA11 } from "./rows-a2.mjs";
 import { ROWS_B0, ROWS_WB04, ROWS_WB06, ROWS_WB07, ROWS_WB08, ROWS_WB09, ROWS_WB10, ROWS_WB11, ROWS_WB12, ROWS_WB13, ROWS_WB14 } from "./rows-a2b.mjs";
+import { ROWS_A3_STEP0, ROWS_W301, ROWS_W302, ROWS_W303, ROWS_W304 } from "./rows-a3.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const FOLDER = path.resolve(HERE, "..");
 export const CREATED_AT = "2026-10-22T00:00:00Z";
 const ASSEMBLED_BY = "examples/evidence-bundle/vectors/make-vectors.mjs";
-export const VECTOR_FILE = path.join(HERE, "evidence-bundle-0.9.json");
+export const VECTOR_FILE = path.join(HERE, "evidence-bundle-0.10.json");
 
 export const A = WE1_AUTHORIZER;
 export const T = WE1_TX;
@@ -275,6 +276,11 @@ export const VECTORS = [
   ...ROWS_WB12,
   ...ROWS_WB13,
   ...ROWS_WB14,
+  ...ROWS_A3_STEP0,
+  ...ROWS_W301,
+  ...ROWS_W302,
+  ...ROWS_W303,
+  ...ROWS_W304,
 ];
 
 // Runs check-bundle.mjs on a bundle document (or on none) with arguments.
@@ -334,7 +340,7 @@ export async function makeFile() {
       vectors.push({ id: v.id, description: v.description, recipe: v.recipe, args: r.args, mode: "offline", expected: expectedOf(r) });
     }
     return {
-      format: "evidence-bundle-vectors/0.9",
+      format: "evidence-bundle-vectors/0.10",
       note: "Offline vectors built from the repository's own bytes. Each recipe is applied at run time by vectors/make-vectors.mjs; no bundle bytes are stored here. The expected values are a snapshot of this verifier's own output, projected as spec D.5's last paragraph lists (detail fields, checked_at, verifier and bundle_sha256 left out).",
       vectors,
     };

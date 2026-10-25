@@ -11,7 +11,7 @@ import { after, before, test } from "node:test";
 import { validate } from "../lib/schema-check.mjs";
 import { FOLDER, runVector, VECTORS } from "../vectors/make-vectors.mjs";
 
-const file = path.join(FOLDER, "schema", "evidence-bundle-verdict-0.9.schema.json");
+const file = path.join(FOLDER, "schema", "evidence-bundle-verdict-0.10.schema.json");
 const schema = JSON.parse(readFileSync(file, "utf8"));
 let dir;
 const outputs = [];
@@ -26,8 +26,8 @@ after(() => rmSync(dir, { recursive: true, force: true }));
 
 test("the schema file is the code block of spec D.3", () => {
   const b = readFileSync(file);
-  assert.equal(b.length, 8784);
-  assert.equal(createHash("sha256").update(b).digest("hex"), "5fcd823fc663da703c1e010b8c43966db93f3950942f4e060bbede2328e59d3c");
+  assert.equal(b.length, 12065);
+  assert.equal(createHash("sha256").update(b).digest("hex"), "64bd63bed5f41b1151419f50552d145966b49cab3d1b9455cc53aa4a5908ddfd");
 });
 
 test("the output of every vector validates", () => {

@@ -14,9 +14,12 @@ import { after, before, test } from "node:test";
 import { decodedShape, JUDGED } from "../lib/allowlist.mjs";
 import { loadPins } from "../lib/cli.mjs";
 import { PAIRS, UNLOCKS } from "../lib/unlocks.mjs";
+// Loaded here so that its BUILT tags are registered before the needs are checked.
+import { verifyPointer } from "../lib/pointer.mjs";
 import { BUILT, verifyBundle } from "../lib/verify.mjs";
 import { bundleBytes } from "../lib/we1.mjs";
 import { A, runCli, runVector, T, VECTORS, we1 } from "../vectors/make-vectors.mjs";
+import { POINTER_CASES } from "../vectors/pointer-cases.mjs";
 import { CASES } from "../vectors/refusal-cases.mjs";
 
 let dir;
@@ -31,6 +34,12 @@ export const missingNeeds = (unlocks, built) => Object.entries(unlocks).flatMap(
 async function runTie(id) {
   const v = VECTORS.find((x) => x.id === id);
   if (v) return runVector(v, dir);
+  // A pointer case runs through the library entry, its fetch a fake (W3-05).
+  const pc = POINTER_CASES.find((x) => x.id === id);
+  if (pc) {
+    const r = await pc.run(verifyPointer);
+    return { status: r.kind === "verdict" ? 0 : 2, stderr: r.kind === "refused" ? `not supported in this build: ${r.code}` : "", output: r.output ?? null };
+  }
   const c = CASES.find((x) => x.id === id);
   assert.ok(c, `tie vector ${id} is neither a vector nor a refusal case`);
   const { doc, args } = await c.build();
@@ -48,6 +57,11 @@ test("every judged property has an UNLOCKS entry, and every entry is judged", ()
 // pair tie, one of the states the need lists as reached (`reached`).
 function assertReached(o, needs, { pair = false } = {}) {
   for (const [need, w] of Object.entries(needs)) {
+    // A verdict need: the verdict's code, rule and text (W3-02: a card rule and its card text).
+    if (w.verdict) {
+      for (const [k, val] of Object.entries(w.verdict)) assert.equal(o.verdict[k], val, `${need}: verdict ${k}`);
+      continue;
+    }
     if (w.binding) {
       const b = o.bindings.find((x) => x.id === w.binding);
       if (pair && w.reached) assert.ok(w.reached.includes(b.state), `${need}: ${w.binding} state ${b.state}`);
@@ -59,7 +73,9 @@ function assertReached(o, needs, { pair = false } = {}) {
       const rows = o.checks.filter((c) => c.id === need && (!w.member || c.member === w.member));
       assert.ok(rows.length > 0, `${need} is listed${w.member ? ` for ${w.member}` : ""}`);
       for (const c of rows) {
-        if (c.status === "NOT-EVALUATED") assert.equal(c.reason, w.notEvaluated, `${need} on ${c.member}: NOT-EVALUATED only with the reason the entry names`);
+        // A need may name the one status that reaches it (W3-01: M0.bundle PASS on a 0.10 bundle).
+        if (w.status) assert.equal(c.status, w.status, `${need} on ${c.member}: ${c.status}`);
+        else if (c.status === "NOT-EVALUATED") assert.equal(c.reason, w.notEvaluated, `${need} on ${c.member}: NOT-EVALUATED only with the reason the entry names`);
         else assert.ok(["PASS", "FAIL"].includes(c.status), `${need} on ${c.member}: ${c.status}`);
       }
     }
@@ -97,6 +113,19 @@ test("carrier:calldata (Wb-02) and unread-carrier (Wb-10): WE-1's decoded state 
   // Refused from Wb-02 until Wb-10 judged a match that does not bind.
   assert.equal(decodedShape({ ...s, search: { ...s.search, carrier: "calldata", nonBinding: [{ field: "input", form: "hex-text", offset: 300 }] } }), null, "one match that does not bind");
 });
+
+// An input property is refused by name until it is judged, as a shape is.
+for (const [property, option] of [
+  ["card:charge-stated", "--charge-amount"],
+  ["pointer", "--evidence-uri"],
+])
+  test(`an input not judged is refused by name: ${property}`, () => {
+    if (JUDGED.includes(property)) return;
+    const r = runCli(dir, `input-${property.replace(/\W/g, "-")}`, we1(), [option, "x"]);
+    assert.equal(r.status, 2);
+    assert.equal(r.stdout, "");
+    assert.equal(r.stderr, `not supported in this build: ${property}\n`);
+  });
 
 test("red proof: an entry that needs a check this build does not have is reported", () => {
   assert.deepEqual(missingNeeds(UNLOCKS, BUILT), []);

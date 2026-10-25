@@ -14,8 +14,9 @@ import { declaredShape, decodedShape } from "./allowlist.mjs";
 import { BUILT, built } from "./built.mjs";
 import { jcsJsonDigest, m0, m1 } from "./bundle.mjs";
 import { accountProof, blockTransactions, jsonTuples, parentBlockProblem, scanEarlier, tupleAuthority } from "./chain.mjs";
-import { ANNEX_A, argsHashOf, bIns, capturedDigest, m6Instruction, resultHashOf } from "./instructions.mjs";
+import { ANNEX_A, argsHashOf, bIns, capturedDigest, M6_PROFILES, m6Instruction, resultHashOf } from "./instructions.mjs";
 import { m7Receipt, ownState, readIssuerProfile, reading } from "./receipts.mjs";
+import { cardMatches, compareInstants, orderProblem, orderSummary } from "./card.mjs";
 import { LIMIT_TEXTS } from "./limits.mjs";
 import { readOutflows } from "./outflow.mjs";
 import { analyseSearch, m5, readRpcJson, signerOfMatch } from "./payment.mjs";
@@ -36,12 +37,12 @@ import {
   witnessEntryShape,
   witnessKeyEntries,
 } from "./records.mjs";
-import { ALLOW_TRIPLE, BINDING_IDS, OUTPUT_TYPE, REFUSE_VALUES, THUMBPRINT_RE, VERDICT_TEXT } from "./table.mjs";
+import { ALLOW_TRIPLE, BINDING_IDS, BUNDLE_TYPE, OUTPUT_TYPE, REFUSE_VALUES, THUMBPRINT_RE, VERDICT_TEXT } from "./table.mjs";
 import { eip3009Readable, txSerialization, unreadByRule2 } from "./tx.mjs";
 
 export { BUILT };
 const ANNEX_B_LOG = "jcs-sha256-chain/0.1";
-export const VERIFIER = { name: "chirindo examples/evidence-bundle", version: "0.9.0", commit: "unrecorded" };
+export const VERIFIER = { name: "chirindo examples/evidence-bundle", version: "0.10.0", commit: "unrecorded" };
 
 const sha256Hex = (b) => createHash("sha256").update(b).digest("hex");
 const isStr = (v) => typeof v === "string";
@@ -109,28 +110,40 @@ function decisionOf(rec) {
   return { vals, value: "not-read" };
 }
 
+built("S3.charge");
 built("S1.authorizer", "S2.tx", "M2.prefix", "M3.signature", "M3.history", "M8.arguments", "M9.witness-key");
 built("M8.result");
 // `onDecoded`, for test/unlocks.mjs only, receives the decoded state that the
 // shape of item 3 onward is judged on; it changes nothing.
-export async function verifyBundle(bytes, stated, pins, { onDecoded } = {}) {
+// `pointer`, from lib/pointer.mjs's fetchPointer, when the bytes were fetched
+// through the Agent Evidence Pointer (spec 4.2; bytes null when not fetched).
+export async function verifyBundle(bytes, stated, pins, { onDecoded, pointer = null } = {}) {
   const checks = [];
   const flags = [];
   const add = (id, member, status, reason, detail) => checks.push({ id, member, status, reason, detail: detail ?? "" });
   const flag = (code, detail) => flags.push({ code, detail });
-  const base = { bundle_sha256: "sha256:" + sha256Hex(bytes), stated: { authorizer: stated.authorizer ?? null, tx: stated.tx ?? null } };
+  const base = { bundle_sha256: bytes ? "sha256:" + sha256Hex(bytes) : null, stated: { authorizer: stated.authorizer ?? null, tx: stated.tx ?? null, charge: stated.charge ?? null }, pointer: pointer && { uri: pointer.uri, stated_entry: pointer.stated_entry, stated_sha256: pointer.stated_sha256, fetched_sha256: pointer.fetched_sha256, status: pointer.status, detail: pointer.detail } };
+  // When P1.pointer does not pass, nothing else runs (spec 4.2): the bundle is not read.
+  const stop = !!pointer && !["fetched", "match"].includes(pointer.status);
 
-  // (a1) S1.authorizer, S2.tx, M0, M1.
-  const r0 = m0(bytes);
+  // (a1) S1.authorizer, S2.tx, P1.pointer, M0, M1.
+  const r0 = stop ? {} : m0(bytes);
   const doc = r0.doc ?? null;
   const card = doc?.subject.kind === "card-payment";
   if (!card) {
     if (stated.authorizer) add("S1.authorizer", null, "PASS", null, `the account stated: ${stated.authorizer}`);
     else add("S1.authorizer", null, "NOT-EVALUATED", "authorizer-not-stated", "no account was stated");
     if (!stated.tx) add("S2.tx", null, "NOT-EVALUATED", "tx-not-stated", "no transaction was stated");
-    else if (!doc) add("S2.tx", null, "NOT-EVALUATED", "prerequisite-failed:M0.bundle", "the bundle's subject could not be read");
+    else if (!doc) add("S2.tx", null, "NOT-EVALUATED", stop ? "prerequisite-failed:P1.pointer" : "prerequisite-failed:M0.bundle", stop ? "the bundle was not read" : "the bundle's subject could not be read");
     else if (stated.tx === doc.subject.tx_hash) add("S2.tx", null, "PASS", null, "the stated transaction is subject.tx_hash");
     else add("S2.tx", null, "FAIL", null, "the stated transaction is not subject.tx_hash");
+  } else if (stated.charge) add("S3.charge", null, "PASS", null, `the charge stated: ${stated.charge.amount_minor} ${stated.charge.currency} minor units, authorized at ${stated.charge.authorized_at}`);
+  else add("S3.charge", null, "NOT-EVALUATED", "charge-not-stated", "no charge was stated");
+  // Unread, the subject's kind is not known: a stated charge is listed beside S1 and S2.
+  if (stop && stated.charge) add("S3.charge", null, "PASS", null, `the charge stated: ${stated.charge.amount_minor} ${stated.charge.currency} minor units, authorized at ${stated.charge.authorized_at}`);
+  if (pointer) {
+    add("P1.pointer", null, pointer.status === "unfetchable" ? "NOT-EVALUATED" : pointer.status === "mismatch" ? "FAIL" : "PASS", pointer.status === "unfetchable" ? "pointer-unfetchable" : null, pointer.detail);
+    if (stop) return finish({ base, checks, flags, doc: null, failAt: "P1.pointer" });
   }
   if (!doc) {
     add("M0.bundle", null, "FAIL", null, r0.fail);
@@ -166,6 +179,7 @@ export async function verifyBundle(bytes, stated, pins, { onDecoded } = {}) {
     flags.push(...log.m2.flags);
     add("M2.log", log.member, log.m2.status, log.m2.reason, log.m2.detail);
   }
+  if (pointer) p2Entry(pointer, logs, doc.subject.cites, checks);
   const logKey = (l) => `${l.records[0]?.kid}\u0000${l.records[0]?.session_id}`;
   for (let i = 0; i < logs.length; i++)
     for (let j = i + 1; j < logs.length; j++) {
@@ -327,13 +341,13 @@ export async function verifyBundle(bytes, stated, pins, { onDecoded } = {}) {
     if (pay.type === "0x4" && pay.rows.find((r) => r.id === "M5.transaction")?.status === "PASS") pay.authorities = (await Promise.all(jsonTuples(p.tx.authorizationList).map(tupleAuthority))).filter(Boolean);
   }
 
-  // M6, each instruction in the profile of Annex A; the others are carried
-  // with their digests (B-INS PRESENT).
+  // M6, each instruction in the profile of Annex A or Annex A.3; the others
+  // are carried with their digests (B-INS PRESENT).
   const insMembers = byRole("instruction").map((m) => {
     const bytes = decoded.get(m.id);
-    if (m.profile !== ANNEX_A) return { member: m.id, profile: m.profile, digest: capturedDigest(bytes), value: null, m6: null };
-    const r = m6Instruction(bytes);
-    add("M6.instruction", m.id, r.problem ? "FAIL" : "PASS", null, r.problem ?? "the members of Annex A; principal.kid is its key's thumbprint; sig verifies; valid_from is not after valid_until");
+    if (!M6_PROFILES.includes(m.profile)) return { member: m.id, profile: m.profile, digest: capturedDigest(bytes), value: null, m6: null };
+    const r = m6Instruction(bytes, m.profile);
+    add("M6.instruction", m.id, r.problem ? "FAIL" : "PASS", null, r.problem ?? `the members of ${m.profile === ANNEX_A ? "Annex A" : "Annex A.3"}; principal.kid is its key's thumbprint; sig verifies; valid_from is not after valid_until`);
     return { member: m.id, profile: m.profile, digest: r.digest ?? null, value: r.value ?? null, m6: r.problem ? "FAIL" : "PASS" };
   });
 
@@ -402,6 +416,14 @@ export async function verifyBundle(bytes, stated, pins, { onDecoded } = {}) {
     else add("M8.result", m.id, "FAIL", null, `its JCS SHA-256 ${d.digest} is the result_hash of no carried record`);
   }
 
+  // M8.order (v0.10): each action-arguments member whose value is an object
+  // with an order member commits to an order of the shape of spec 4.3.
+  for (const a of argMembers) {
+    if (!isPlainObject(a.value) || !Object.keys(a.value).includes("order")) continue;
+    const problem = orderProblem(a.value.order);
+    add("M8.order", a.member, problem ? "FAIL" : "PASS", null, problem ?? "the order has the shape of the committed order (spec 4.3)");
+  }
+
   // M9.
   const logKids = new Set(logs.map((l) => l.records[0]?.kid).filter((k) => isStr(k) && THUMBPRINT_RE.test(k)));
   for (const o of opMembers) {
@@ -447,8 +469,10 @@ export async function verifyBundle(bytes, stated, pins, { onDecoded } = {}) {
   if (firstFail()) return finish({ ...ctx, failAt: firstFail() });
 
   // (b2) the decoded shape.
-  onDecoded?.({ doc, logs, checkpoints, receipts, pay: pay ?? {}, search });
-  const refused2 = decodedShape({ doc, logs, checkpoints, receipts, pay: pay ?? {}, search });
+  // The cited record's carried arguments, whose order a card subject's shape reads.
+  const citedArgs = citedRec ? (argMembers.find((a) => a.digest === argsHashOf(citedRec, cited.profile))?.value ?? null) : null;
+  onDecoded?.({ doc, logs, checkpoints, receipts, pay: pay ?? {}, search, citedArgs });
+  const refused2 = decodedShape({ doc, logs, checkpoints, receipts, pay: pay ?? {}, search, citedArgs, insMembers });
   if (refused2) return { kind: "refused", code: refused2, checks };
 
   return finish(ctx);
@@ -461,11 +485,34 @@ built("B-CKP.truncated");
 // Bindings, decision, verdict and output. When a check FAILed (failAt), the
 // bindings that need the checks are not computed: each reads NOT EVALUATED
 // with the reason naming the first FAIL, and V1 gives FAILS.
+// B-CARD rule 1 (the prerequisites), in finish below.
+built("B-CARD.prereq");
+// P2.entry (spec 4.2): the entry hash of the record subject.cites names is the
+// stated entry. Listed after P1.pointer, as table 4-2 orders the checks.
+built("P2.entry");
+function p2Entry(pointer, logs, cites, checks) {
+  const row = (status, reason, detail) => checks.splice(checks.findIndex((c) => c.id === "P1.pointer") + 1, 0, { id: "P2.entry", member: cites.log, status, reason, detail });
+  const c = logs.find((l) => l.member === cites.log);
+  if (!c || c.m2.status !== "PASS") return row("NOT-EVALUATED", "prerequisite-failed:M2.log", `${cites.log}'s M2.log did not pass`);
+  const e = c.m2.entryHashes[cites.seq];
+  if (e === pointer.stated_entry) return row("PASS", null, `the entry hash of ${cites.log} record ${cites.seq} is the stated entry ${e}`);
+  const other = logs.flatMap((l) => (l.m2.entryHashes ?? []).map((h, k) => ({ log: l.member, k, h }))).find((x) => x.h === pointer.stated_entry);
+  const where = other ? `; ${other.log} record ${other.k} has the stated entry` : "; no carried record has it";
+  return row("FAIL", null, `the cited record, ${cites.log} record ${cites.seq}, has the entry hash ${e ?? "(none: the record is not carried)"}, not the stated ${pointer.stated_entry}${where}`);
+}
+
 function finish(ctx) {
   const { base, checks, flags, doc, failAt } = ctx;
+  // P2.entry, when a run stopped before M2: not evaluated, on the check that stopped it.
+  if (base.pointer && !checks.some((c) => c.id === "P2.entry"))
+    checks.splice(checks.findIndex((c) => c.id === "P1.pointer") + 1, 0, { id: "P2.entry", member: doc?.subject.cites.log ?? null, status: "NOT-EVALUATED", reason: `prerequisite-failed:${failAt}`, detail: `not evaluated: ${failAt} stopped the run` });
   const flag = (code, detail) => flags.push({ code, detail });
   const subject = doc?.subject ?? null;
   const card = subject?.kind === "card-payment";
+  // The stated charge (S3.charge), read from base: the paths that stop at M0 or M1 carry no `stated`.
+  const charge = base.stated.charge;
+  let cardOut = null;
+  let cardRules = null;
   const B = new Map();
   const bind = (id, state, reason = null, extra = {}) => B.set(id, { id, state, reason, carrier: extra.carrier ?? null, signed_by: extra.signed_by ?? null, detail: extra.detail ?? "" });
   let decision = { value: "not-read", record: null, receipt: null, refusing_records: [] };
@@ -495,7 +542,7 @@ function finish(ctx) {
     const why = failAt ? `prerequisite-failed:${failAt}` : "prerequisite-failed:B-LOG";
     for (const id of BINDING_IDS.slice(1)) bind(id, "NOT-EVALUATED", why);
     payment.reason = why;
-    instructions = insMembers.map((i) => ({ member: i.member, cited: false, state: i.m6 === "FAIL" ? "FAIL" : "NOT-EVALUATED", exceeded: [], reason: i.m6 === "FAIL" ? null : why, uses: 0, records_without_arguments: 0 }));
+    instructions = insMembers.map((i) => ({ member: i.member, cited: false, state: i.m6 === "FAIL" ? "FAIL" : "NOT-EVALUATED", exceeded: [], reason: i.m6 === "FAIL" ? null : why, uses: 0, records_without_arguments: 0, card_limits: [] }));
   } else {
     const kid = citedRec.kid;
     const sid = citedRec.session_id;
@@ -632,8 +679,18 @@ function finish(ctx) {
 
     // B-INS, which reads the payment values when a payer is derived.
     const A = ctx.argMembers.find((a) => a.digest === argsHashOf(citedRec, cited.profile)) ?? null;
+    // B-CARD (spec 4.3), for a card subject with a stated charge: rule 1, the prerequisites.
+    ctx.selectedRcAt = selectedRc?.r.received_at ?? null;
+    if (card && charge) {
+      if (!A) bind("B-CARD", "NOT-EVALUATED", "args-not-carried", { detail: "the cited record's arguments are not carried" });
+      else if (!(isPlainObject(A.value) && Object.keys(A.value).includes("order"))) bind("B-CARD", "NOT-EVALUATED", "no-order-committed", { detail: `${A.member} commits to no order` });
+      else bCard({ order: A.value.order, charge, selectedRc, wit: B.get("B-WIT").state, bind, flag, out: (o) => (cardRules = o) });
+    }
     const pv = payerDerived ? { chain: subject.chain_id, movements: payment.movements.filter((m) => BigInt(m.amount) > 0n && m.payee !== payment.payer), blockTs: pay.blockTs, kid: citedRec.kid } : null;
-    const ins = bIns({ ins: insMembers, A, pv, bpayState: B.get("B-PAY").state, logs, argMembers: ctx.argMembers, unread: unreadOutflows });
+    // For a card subject with a stated charge, step 5 reads the committed order.
+    const order = A && isPlainObject(A.value) && Object.keys(A.value).includes("order") ? A.value.order : null;
+    const cardIns = card && charge ? { order, orderOk: order !== null && orderProblem(order) === null, kid: citedRec.kid, authorizedAt: charge.authorized_at } : null;
+    const ins = bIns({ ins: insMembers, A, pv, bpayState: B.get("B-PAY").state, logs, argMembers: ctx.argMembers, unread: unreadOutflows, card: cardIns });
     bind("B-INS", ins.agg.state, ins.agg.reason, { detail: ins.agg.detail });
     instructions = ins.rows;
     // An Annex B record states no decision of its own and is not a source.
@@ -700,8 +757,27 @@ function finish(ctx) {
       flag("two-clock-comparison", `${citedIns.member}'s iat (principal's clock) against the cited entry's ts (operator's clock)`);
       if (tsMs(citedIns.value.iat) > tsMs(citedRec.ts)) flag("clock-contradiction", `${citedIns.member}'s iat is later than the cited entry's ts, while the entry's arguments carry its digest`);
     }
+    // An instruction's window against the stated authorization time (spec 4.3, B-INS for a card subject).
+    for (const r of instructions.filter((x) => x.card_limits.length)) flag("two-clock-comparison", `${r.member}'s valid_from and valid_until (principal's clock) against the stated authorization time (the processor's clock, as stated)`);
+    // A card subject's stated authorization time: the processor's clock, as stated (spec 4.5).
+    if (card && charge) times.push({ what: "stated authorization time", value: charge.authorized_at, clock: "processor", as_supplied: false });
     if (selectedRc && blockTs !== null) flag("two-clock-comparison", "the witness receipt's received_at (Headless Oracle's clock) against the block timestamp (block producer's clock); this orders the checkpoint against the payment's inclusion in its block, never against its signing");
   }
+
+  // The card member (spec 4.7), for a card subject with a stated charge.
+  if (card && charge)
+    cardOut = {
+      order: cardRules?.order ?? null,
+      matches: cardRules?.matches ?? { amount: null, currency: null, merchant_order_id: null, checkout_ref: null },
+      witness_received_at: ctx.selectedRcAt ?? null,
+      authorized_at: charge.authorized_at,
+      before_authorization: cardRules?.before ?? null,
+    };
+
+  // B-CARD (spec 4.3), listed for a card subject only: without a stated charge,
+  // NOT EVALUATED (rule 1, charge-not-stated) whatever else holds.
+  if (card && !charge) bind("B-CARD", "NOT-EVALUATED", "charge-not-stated", { detail: "no charge was stated" });
+  else if (card && !B.has("B-CARD")) bind("B-CARD", "NOT-EVALUATED", failAt ? `prerequisite-failed:${failAt}` : "prerequisite-failed:B-LOG");
 
   // The online checks that apply are listed as not evaluated (spec 4.2).
   if (doc) {
@@ -719,15 +795,20 @@ function finish(ctx) {
   }
 
   // The verdict (spec 4.6, table 4-6a).
-  const bindings = BINDING_IDS.map((id) => B.get(id));
+  const bindings = [...BINDING_IDS, ...(card ? ["B-CARD"] : [])].map((id) => B.get(id));
   const st = (id) => B.get(id).state;
   const anyFail = checks.some((c) => c.status === "FAIL") || bindings.some((b) => b.state === "FAIL");
   const breach = decision.value === "refuse" || st("B-INS") === "EXCEEDS" || st("B-GRC") === "EXCEEDS";
-  const gaps = bindings.filter((b) => b.state !== "BOUND" && !(b.id === "B-GRC" && b.state === "ABSENT" && b.reason === null)).map((b) => ({ binding: b.id, state: b.state, reason: b.reason }));
+  // B-CARD BOUND with reference-not-stated is a gap too (spec 4.3, B-CARD rule 2).
+  const gaps = bindings.filter((b) => (b.state !== "BOUND" || (b.id === "B-CARD" && b.reason === "reference-not-stated")) && !(b.id === "B-GRC" && b.state === "ABSENT" && b.reason === null)).map((b) => ({ binding: b.id, state: b.state, reason: b.reason }));
   let verdict;
   const v = (code, rule, reason, g = gaps) => ({ code, text: VERDICT_TEXT[code], rule, reason, gaps: g });
   const bp = B.get("B-PAY");
-  if (anyFail) verdict = v("FAILS", "V1", null, []);
+  const charged = card && !!charge;
+  // V3, named first: the pointer's fetch failed, and no bundle was read (spec 4.6).
+  if (checks.some((c) => c.id === "P1.pointer" && c.status === "NOT-EVALUATED")) verdict = v("PAYMENT-NOT-VERIFIED", "V3", "pointer-unfetchable");
+  else if (charged) verdict = cardVerdict({ anyFail, B, st, gaps, decision });
+  else if (anyFail) verdict = v("FAILS", "V1", null, []);
   else if (bp.state === "ABSENT" || bp.state === "NO-PAYMENT" || (bp.state === "CARRIED-BY-OTHER" && !payerDerived)) verdict = v("DOES-NOT-CONNECT", "V2", null);
   else if (bp.state === "UNSUPPORTED-PATH" || bp.state === "NOT-EVALUATED") verdict = v("PAYMENT-NOT-VERIFIED", "V3", bp.reason);
   else if (st("B-CHAIN") === "SUPPLIED" || st("B-CHAIN") === "NOT-EVALUATED") verdict = v("PAYMENT-NOT-VERIFIED", "V3", "offline-chain-data");
@@ -748,13 +829,18 @@ function finish(ctx) {
       L.add("L10");
       if (cited?.profile === "chirindo-evidence.action/1") L.add("L11");
     }
-    if (ms.some((m) => m.role === "instruction" && m.profile === "signed-instruction-ed25519/0.2")) L.add("L12");
+    // L12 and L13 apply to profile 0.3 as to 0.2 (Annex A.3), where table 3-1
+    // allows it: a 0.3 member of a 0.9 bundle FAILs M1 and is not an instruction.
+    if (ms.some((m) => m.role === "instruction" && (m.profile === ANNEX_A || (m.profile === "signed-instruction-ed25519/0.3" && doc.type === BUNDLE_TYPE)))) L.add("L12");
     const insProfile = (r) => ms.find((m) => m.id === r.member)?.profile;
-    if (instructions.some((r) => insProfile(r) === ANNEX_A && ["BOUND", "EXCEEDS", "MATCHED", "UNBOUND-OUTSIDE"].includes(r.state))) L.add("L13");
+    if (instructions.some((r) => M6_PROFILES.includes(insProfile(r)) && ["BOUND", "EXCEEDS", "MATCHED", "UNBOUND-OUTSIDE"].includes(r.state))) L.add("L13");
     if (cited && cited.records.length && pins.operator_key_ids.includes(cited.records[0].kid)) L.add("L14");
     if (payerDerived) L.add("L15");
     if (ms.some((m) => m.role === "gate-receipt")) L.add("L16");
-    if (card) L.add("L17");
+    if (card) L.add("L17").add("L24");
+    // L25: an order is committed in the cited action's arguments.
+    const citedA = cited?.records.length && citedRec ? ctx.argMembers?.find((a) => a.digest === argsHashOf(citedRec, cited.profile)) : null;
+    if (citedA && isPlainObject(citedA.value) && Object.keys(citedA.value).includes("order")) L.add("L25");
     if (subject?.chain_id === "eip155:84532") L.add("L19");
     if (instructions.some((r) => ["MATCHED", "UNBOUND-OUTSIDE"].includes(r.state))) L.add("L18");
     if (bp.state === "UNSUPPORTED-PATH" && ["other-sender", "unsupported-call"].includes(bp.reason)) L.add("L20");
@@ -773,6 +859,7 @@ function finish(ctx) {
     mode: "offline",
     checked_at: new Date().toISOString(),
     stated: base.stated,
+    pointer: base.pointer,
     endpoints: [],
     checks,
     bindings,
@@ -780,6 +867,7 @@ function finish(ctx) {
     gate_receipts: gateReceipts,
     instructions,
     payment,
+    card: cardOut,
     hash_search: hashSearch,
     times,
     orderings,
@@ -788,6 +876,56 @@ function finish(ctx) {
     limits,
   };
   return { kind: "verdict", output };
+}
+
+// Table 4-6c (spec 4.6): the verdict of a card subject with a stated charge,
+// in place of table 4-6a; B-PAY and B-CHAIN are not read by it.
+built("verdict.card");
+export const CARD_VERDICT_TEXT = {
+  FAILS: "FAILS",
+  "DOES-NOT-MATCH-CHARGE": "DOES NOT MATCH THE CHARGE: the order the gate recorded does not match the stated charge",
+  "PAYMENT-NOT-VERIFIED": "NOT VERIFIED: the record does not show that the decision was recorded before the charge and matches it",
+  "OUTSIDE-INSTRUCTION": "OUTSIDE THE INSTRUCTION: the decision was recorded before the charge and matches it, and the order falls outside the instruction or goes against the decision",
+  "RECORDED-BEFORE-CHARGE": "RECORDED BEFORE THE CHARGE: the decision and the instruction were recorded before the charge and match it",
+  "RECORDED-WITH-GAPS": "RECORDED WITH GAPS: the decision was recorded before the charge and matches it; the gaps are listed",
+};
+function cardVerdict({ anyFail, B, st, gaps, decision }) {
+  const v = (code, rule, reason, g = gaps) => ({ code, text: CARD_VERDICT_TEXT[code], rule, reason, gaps: g });
+  const card = B.get("B-CARD");
+  // A breach, for table 4-6c: the cited decision refuses, or B-INS is EXCEEDS.
+  const breach = decision.value === "refuse" || st("B-INS") === "EXCEEDS";
+  if (anyFail) return v("FAILS", "C1", null, []);
+  if (card.state === "DIFFERS") return v("DOES-NOT-MATCH-CHARGE", "C2", null);
+  // C3: B-CARD not evaluated (its reason), or B-WIT not BOUND, so the time rule is unconfirmed (V-1).
+  if (card.state === "NOT-EVALUATED" || card.state === "AFTER-AUTHORIZATION") return v("PAYMENT-NOT-VERIFIED", "C3", card.reason);
+  if (st("B-WIT") !== "BOUND") return v("PAYMENT-NOT-VERIFIED", "C3", "offline-witness-data");
+  if (!breach && decision.value === "not-read") return v("PAYMENT-NOT-VERIFIED", "C3", "decision-not-read");
+  if (!breach && st("B-INS") === "NOT-EVALUATED" && B.get("B-INS").reason === "order-field-missing") return v("PAYMENT-NOT-VERIFIED", "C3", "order-field-missing");
+  // C4: B-CARD is BOUND here, and a breach is shown.
+  if (breach) return v("OUTSIDE-INSTRUCTION", "C4", decision.value === "refuse" ? "decision-not-allow" : null);
+  // C5: every card rule holds, and no reference was left unstated.
+  if (decision.value === "allow" && ["B-CARD", "B-INS", "B-LOG", "B-CKP", "B-WIT", "B-KEY"].every((id) => st(id) === "BOUND") && card.reason === null && (st("B-GRC") === "BOUND" || (st("B-GRC") === "ABSENT" && B.get("B-GRC").reason === null))) return v("RECORDED-BEFORE-CHARGE", "C5", null, []);
+  return v("RECORDED-WITH-GAPS", "C6", null);
+}
+
+// B-CARD rules 2 to 4 (spec 4.3), once rule 1 found the order: the match with
+// the stated charge, then the time of the selected witness receipt against the
+// stated authorization time; only B-WIT BOUND confirms that receipt's time.
+built("M8.order", "B-CARD.match", "B-CARD.time");
+function bCard({ order, charge, selectedRc, wit, bind, flag, out }) {
+  const matches = cardMatches(order, charge);
+  const o = { order: orderSummary(order), matches, before: null };
+  out(o);
+  const differs = Object.entries(matches).filter(([, x]) => x === false).map(([k]) => k);
+  if (differs.length) return bind("B-CARD", "DIFFERS", null, { detail: `the stated charge differs from the committed order in ${differs.join(", ")}` });
+  const noRef = matches.merchant_order_id === null && matches.checkout_ref === null;
+  if (noRef) flag("reference-not-stated", "the stated charge carries neither reference the order commits to; no reference is compared");
+  // Rule 3: the selected receipt, when B-WIT is BOUND, SUPPLIED or TRUNCATED.
+  if (!selectedRc || !["BOUND", "SUPPLIED", "TRUNCATED"].includes(wit)) return bind("B-CARD", "NOT-EVALUATED", "no-witness-time", { detail: "no covering witness receipt verified" });
+  flag("two-clock-comparison", "the witness receipt's received_at (Headless Oracle's clock) against the stated authorization time (the processor's clock, as stated)");
+  o.before = compareInstants(selectedRc.r.received_at, charge.authorized_at) < 0;
+  if (!o.before) return bind("B-CARD", "AFTER-AUTHORIZATION", "not-before-authorization", { detail: `received_at ${selectedRc.r.received_at} is not strictly before the stated authorization time ${charge.authorized_at}` });
+  bind("B-CARD", "BOUND", noRef ? "reference-not-stated" : null, { detail: `the committed order matches the stated charge, and received_at is before the stated authorization time${wit === "BOUND" ? "" : " (B-WIT " + wit + ": unconfirmed)"}` });
 }
 
 // B-KEY offline (spec 4.3) for records that name an https jwks_uri: SUPPLIED

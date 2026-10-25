@@ -5,10 +5,17 @@ import { createHash } from "node:crypto";
 import { address } from "../../ordering-evidence-h4/lib/evm.mjs";
 import { b64urlCanonical, ed25519Verify, isPlainObject, jcs, jcsSha256, okpThumbprint, parseStrictJson, withoutMember } from "../../ordering-evidence-h4/lib/formats.mjs";
 import { built } from "./built.mjs";
+import { compareInstants, dateOk } from "./card.mjs";
 import { tsMs } from "./records.mjs";
 import { THUMBPRINT_RE } from "./table.mjs";
 
 export const ANNEX_A = "signed-instruction-ed25519/0.2";
+export const ANNEX_A3 = "signed-instruction-ed25519/0.3";
+// The instruction profiles M6 verifies; the others are carried as PRESENT.
+export const M6_PROFILES = [ANNEX_A, ANNEX_A3];
+const PAYMENT_LIMITS = ["chain_id", "asset", "max_amount", "payees"];
+// Annex A.3's card member, in its order (also the order of card_limits).
+export const CARD_LIMITS = ["currency", "max_total_minor", "max_unit_price_minor", "merchants", "items", "categories", "refundable_only", "service_window", "locations"];
 const isStr = (v) => typeof v === "string";
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
 const sha256Hex = (b) => createHash("sha256").update(b).digest("hex");
@@ -30,12 +37,31 @@ const addr = (s, what) => {
   }
 };
 
-// M6 (spec 4.2 and Annex A): exactly Annex A's members with their types; v;
-// principal.kid the thumbprint of its key; sig over the JCS bytes without
-// sig; valid_from not after valid_until; addresses by the rule of 4.1.
-// Returns { value, digest } or { problem }.
+// Annex A.3's card member: currency and at least one other member that
+// limits something (refundable_only false limits nothing, so it does not count).
+function checkCard(card) {
+  exactly(card, ["currency"], CARD_LIMITS.slice(1), "constraints.card");
+  const has = (k) => Object.keys(card).includes(k);
+  if (!isStr(card.currency) || !/^[A-Z]{3}$/.test(card.currency)) bad("constraints.card.currency is not three upper-case letters");
+  for (const k of ["max_total_minor", "max_unit_price_minor"]) if (has(k) && !(isStr(card[k]) && DECIMAL.test(card[k]))) bad(`constraints.card.${k} is not a decimal string with no sign and no leading zero`);
+  for (const k of ["merchants", "items", "categories", "locations"])
+    if (has(k) && !(Array.isArray(card[k]) && card[k].length > 0 && card[k].every((x) => isStr(x) && x.length >= 1 && x.length <= 256))) bad(`constraints.card.${k} is not a non-empty list of strings of 1 to 256 characters`);
+  if (has("refundable_only") && typeof card.refundable_only !== "boolean") bad("constraints.card.refundable_only is not a boolean");
+  if (has("service_window")) {
+    exactly(card.service_window, ["from", "until"], [], "constraints.card.service_window");
+    if (!dateOk(card.service_window.from) || !dateOk(card.service_window.until)) bad("constraints.card.service_window.from or until is not a date YYYY-MM-DD");
+    if (card.service_window.from > card.service_window.until) bad("constraints.card.service_window.from is after until");
+  }
+  if (!Object.keys(card).some((k) => k !== "currency" && !(k === "refundable_only" && card[k] === false))) bad("constraints.card holds no member beyond currency that limits something (refundable_only false limits nothing)");
+}
+
+// M6 (spec 4.2, Annex A and Annex A.3): exactly the profile's members with
+// their types; v; principal.kid the thumbprint of its key; sig over the JCS
+// bytes without sig; valid_from not after valid_until; addresses by the rule
+// of 4.1; for profile 0.3, the card member. Returns { value, digest } or
+// { problem }.
 built("M6.instruction");
-export function m6Instruction(bytes) {
+export function m6Instruction(bytes, profile = ANNEX_A) {
   let ins;
   try {
     ins = parseStrictJson(bytes);
@@ -44,7 +70,7 @@ export function m6Instruction(bytes) {
   }
   try {
     exactly(ins, ["v", "principal", "agent_kid", "text", "constraints", "iat", "sig"], [], "the instruction");
-    if (ins.v !== ANNEX_A) bad(`v is not ${ANNEX_A}`);
+    if (ins.v !== profile) bad(`v is not ${profile}`);
     exactly(ins.principal, ["kid", "public_key_jwk"], [], "principal");
     const jwk = ins.principal.public_key_jwk;
     exactly(jwk, ["kty", "crv", "x"], [], "principal.public_key_jwk");
@@ -59,14 +85,24 @@ export function m6Instruction(bytes) {
     if (!Array.isArray(ins.agent_kid) || ins.agent_kid.length === 0 || !ins.agent_kid.every((k) => isStr(k) && THUMBPRINT_RE.test(k))) bad("agent_kid is not a non-empty list of 43-character thumbprints");
     if (!isStr(ins.text)) bad("text is not a string");
     const c = ins.constraints;
-    exactly(c, ["chain_id", "asset", "max_amount", "payees", "valid_from", "valid_until"], ["max_uses", "budget"], "constraints");
-    if (!isStr(c.chain_id) || !/^eip155:[1-9][0-9]*$/.test(c.chain_id)) bad("constraints.chain_id is not eip155:<decimal chain id>");
-    if (c.asset !== "native") addr(c.asset, "constraints.asset");
-    if (!isStr(c.max_amount) || !DECIMAL.test(c.max_amount)) bad("constraints.max_amount is not a decimal string with no sign and no leading zero");
+    // Annex A.3: with card, chain_id, asset, max_amount and payees are all four or none.
+    const hasCard = profile === ANNEX_A3 && isPlainObject(c) && Object.keys(c).includes("card");
+    const named = isPlainObject(c) ? PAYMENT_LIMITS.filter((k) => Object.keys(c).includes(k)) : [];
+    if (hasCard && named.length !== 0 && named.length !== PAYMENT_LIMITS.length) bad("constraints names some of chain_id, asset, max_amount and payees; with card, Annex A.3 allows all four or none");
+    const payment = !hasCard || named.length === PAYMENT_LIMITS.length;
+    exactly(c, [...(payment ? PAYMENT_LIMITS : []), "valid_from", "valid_until"], ["max_uses", "budget", ...(profile === ANNEX_A3 ? ["card"] : [])], "constraints");
+    if (payment) {
+      if (!isStr(c.chain_id) || !/^eip155:[1-9][0-9]*$/.test(c.chain_id)) bad("constraints.chain_id is not eip155:<decimal chain id>");
+      if (c.asset !== "native") addr(c.asset, "constraints.asset");
+      if (!isStr(c.max_amount) || !DECIMAL.test(c.max_amount)) bad("constraints.max_amount is not a decimal string with no sign and no leading zero");
+    }
     if (Object.keys(c).includes("budget") && !(isStr(c.budget) && DECIMAL.test(c.budget))) bad("constraints.budget is not a decimal string with no sign and no leading zero");
     if (Object.keys(c).includes("max_uses") && !(Number.isSafeInteger(c.max_uses) && c.max_uses >= 1)) bad("constraints.max_uses is not an integer of at least 1");
-    if (!Array.isArray(c.payees) || c.payees.length === 0) bad("constraints.payees is not a non-empty list");
-    c.payees.forEach((p, i) => addr(p, `constraints.payees[${i}]`));
+    if (payment) {
+      if (!Array.isArray(c.payees) || c.payees.length === 0) bad("constraints.payees is not a non-empty list");
+      c.payees.forEach((p, i) => addr(p, `constraints.payees[${i}]`));
+    }
+    if (hasCard) checkCard(c.card);
     if (tsMs(c.valid_from) === null || tsMs(c.valid_until) === null) bad("constraints.valid_from or valid_until is not a time");
     if (tsMs(c.valid_from) > tsMs(c.valid_until)) bad("constraints.valid_from is after valid_until");
     if (tsMs(ins.iat) === null) bad("iat is not a time");
@@ -88,7 +124,7 @@ export function m6Instruction(bytes) {
 // The digest of an instruction member that is not Annex A: its bytes as captured.
 export const capturedDigest = (bytes) => "sha256:" + sha256Hex(bytes);
 
-const EXCEEDED_ORDER = ["chain_id", "asset", "payees", "max_amount", "valid_from", "valid_until", "agent_kid", "max_uses", "budget"];
+const EXCEEDED_ORDER = ["chain_id", "asset", "payees", "max_amount", "valid_from", "valid_until", "agent_kid", "max_uses", "budget", ...CARD_LIMITS];
 
 // Spec 4.3, B-INS step 5: an Annex A instruction's constraints against the
 // payment values `pv` ({ chain, movements, blockTs, kid }) and its use count.
@@ -112,6 +148,46 @@ export function exceededBy(ins, pv, uses) {
   // The payments the bundle binds: in this version, the subject payment alone.
   if (Object.keys(c).includes("budget") && inAsset > BigInt(c.budget)) out.add("budget");
   return EXCEEDED_ORDER.filter((x) => out.has(x));
+}
+
+// Spec 4.3, "B-INS for a card subject", step 5: a profile 0.3 instruction's
+// card limits against the committed order, each with its result, and its own
+// members against the cited log's kid, the use count and the stated
+// authorization time. Returns { card_limits, exceeded, missing }, where
+// missing says a limit the instruction sets lacks a field of the order.
+built("B-INS.card");
+export function cardLimitsOf(ins, order, { kid, authorizedAt }, uses) {
+  const card = ins.constraints.card;
+  const items = order.items;
+  const has = (o, k) => Object.keys(o).includes(k);
+  // Each item read for one limit: true inside, false outside, null its field missing.
+  const everyItem = (fields, ok) => {
+    const r = items.map((it) => (fields.every((f) => has(it, f)) ? ok(it) : null));
+    return r.includes(false) ? "outside" : r.includes(null) ? "not-evaluated" : "inside";
+  };
+  const judge = {
+    currency: () => (order.currency === card.currency ? "inside" : "outside"),
+    max_total_minor: () => (BigInt(order.total_minor) <= BigInt(card.max_total_minor) ? "inside" : "outside"),
+    max_unit_price_minor: () => everyItem(["unit_price_minor"], (it) => BigInt(it.unit_price_minor) <= BigInt(card.max_unit_price_minor)),
+    merchants: () => (card.merchants.includes(order.merchant_id) ? "inside" : "outside"),
+    items: () => everyItem(["sku"], (it) => card.items.includes(it.sku)),
+    categories: () => everyItem(["category"], (it) => card.categories.includes(it.category)),
+    refundable_only: () => everyItem(["refundable"], (it) => it.refundable === true),
+    service_window: () => everyItem(["service_from", "service_until"], (it) => it.service_from >= card.service_window.from && it.service_until <= card.service_window.until),
+    locations: () => everyItem(["location"], (it) => card.locations.includes(it.location)),
+  };
+  // A limit the card does not set, and refundable_only false, limit nothing.
+  const card_limits = CARD_LIMITS.map((k) => {
+    const result = !has(card, k) || (k === "refundable_only" && card[k] === false) ? "not-declared" : judge[k]();
+    return { limit: k, result, reason: result === "not-evaluated" ? "order-field-missing" : null };
+  });
+  const out = new Set(card_limits.filter((l) => l.result === "outside").map((l) => l.limit));
+  const c = ins.constraints;
+  if (compareInstants(authorizedAt, c.valid_from) < 0) out.add("valid_from");
+  if (compareInstants(authorizedAt, c.valid_until) > 0) out.add("valid_until");
+  if (!ins.agent_kid.includes(kid)) out.add("agent_kid");
+  if (uses > (c.max_uses ?? 1)) out.add("max_uses");
+  return { card_limits, exceeded: EXCEEDED_ORDER.filter((x) => out.has(x)), missing: card_limits.some((l) => l.result === "not-evaluated") };
 }
 
 // The arguments hash a record names: event.args_hash in a chirindo record, a
@@ -146,28 +222,43 @@ const present = (row) => Object.assign(row, { state: "PRESENT" });
 // instruction members ({ member, profile, digest, value, m6 }); `A` the
 // cited record's carried arguments or null; `pv` the payment values, or null
 // when no payer is derived (then `bpay` names B-PAY's state); `unread` the
-// outflows the reading of the calldata path could not judge.
-export function bIns({ ins, A, pv, bpayState, logs, argMembers, unread = [] }) {
+// outflows the reading of the calldata path could not judge. `card`, for a
+// card subject with a stated charge, gives { order, orderOk, kid,
+// authorizedAt }, and step 5 then reads the committed order instead of pv.
+export function bIns({ ins, A, pv, bpayState, logs, argMembers, unread = [], card = null }) {
   const D = A && isPlainObject(A.value) && Object.keys(A.value).includes("instruction_sha256") ? A.value.instruction_sha256 : null;
   const rows = ins.map((i) => {
     const { uses, without } = usesOf(i.digest, logs, argMembers);
-    return { member: i.member, cited: D !== null && i.digest === D, state: null, exceeded: [], reason: null, uses, records_without_arguments: without, i };
+    return { member: i.member, cited: D !== null && i.digest === D, state: null, exceeded: [], reason: null, uses, records_without_arguments: without, card_limits: [], i };
   });
   const compare = (row, inside, outside) => {
+    if (card) return compareCard(row, inside, outside);
     if (!pv) return Object.assign(row, { state: "NOT-EVALUATED", reason: "no-payer-derived" });
     const ex = exceededBy(row.i.value, pv, row.uses);
     // An incomplete outflow reading (step 5): what was read is judged first.
     if (unread.length) return Object.assign(row, ex.length ? { state: outside, exceeded: ex, reason: "unread-outflow" } : { state: "NOT-EVALUATED", exceeded: [], reason: "unread-outflow" });
     return Object.assign(row, { state: ex.length ? outside : inside, exceeded: ex });
   };
+  // Step 5 for a card subject: no order, a 0.2 instruction, a 0.3 one
+  // without card, then the limits; an outside limit beside a missing field is
+  // EXCEEDS with the reason order-field-missing.
+  const compareCard = (row, inside, outside) => {
+    if (!card.order) return Object.assign(row, { state: "NOT-EVALUATED", reason: "no-order-committed" });
+    if (!card.orderOk) return Object.assign(row, { state: "NOT-EVALUATED", reason: "prerequisite-failed:M8.order" });
+    if (row.i.profile === ANNEX_A) return Object.assign(row, { state: "NOT-EVALUATED", reason: "no-card-limits" });
+    if (!Object.keys(row.i.value.constraints).includes("card")) return Object.assign(row, { state: "NOT-EVALUATED", reason: "card-limits-not-declared" });
+    const { card_limits, exceeded, missing } = cardLimitsOf(row.i.value, card.order, card, row.uses);
+    const reason = missing ? "order-field-missing" : null;
+    return Object.assign(row, exceeded.length ? { state: outside, exceeded, reason, card_limits } : { state: missing ? "NOT-EVALUATED" : inside, exceeded: [], reason, card_limits });
+  };
   for (const row of rows) {
-    if (row.i.profile !== ANNEX_A) present(row);
+    if (!M6_PROFILES.includes(row.i.profile)) present(row);
     else if (row.i.m6 !== "PASS") row.state = "FAIL";
     else if (row.cited) compare(row, "BOUND", "EXCEEDS");
     else compare(row, "MATCHED", "UNBOUND-OUTSIDE");
   }
   const out = rows.map(({ i, ...r }) => r);
-  const why = !pv ? ` (no payer is derived; B-PAY is ${bpayState})` : "";
+  const why = !pv && !card ? ` (no payer is derived; B-PAY is ${bpayState})` : "";
   let agg;
   if (out.some((r) => r.state === "FAIL")) agg = { state: "FAIL", reason: null, detail: "an instruction fails M6" };
   else if (D !== null) {

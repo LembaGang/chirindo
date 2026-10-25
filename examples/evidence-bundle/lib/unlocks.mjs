@@ -148,6 +148,41 @@ export const UNLOCKS = {
     needs: { "M5.block-transactions": { member: "btx-t" }, "B-PAY.10e-scan": { binding: "B-PAY", state: "NOT-EVALUATED", reason: "account-has-code" } },
     tie: "S-99",
   },
+  "bundle-type:0.10": {
+    widening: "W3-01",
+    needs: { "M0.bundle": { status: "PASS" } },
+    tie: "V-01",
+  },
+  "card:charge-stated": {
+    widening: "W3-02",
+    needs: {
+      "S3.charge": { status: "PASS" },
+      "B-CARD.prereq": { binding: "B-CARD", state: "NOT-EVALUATED", reason: "no-order-committed" },
+      "verdict.card": { verdict: { code: "PAYMENT-NOT-VERIFIED", rule: "C3", text: "NOT VERIFIED: the record does not show that the decision was recorded before the charge and matches it" } },
+    },
+    tie: "V-02",
+  },
+  "args:order": {
+    widening: "W3-03",
+    needs: {
+      "M8.order": { member: "args-d", status: "PASS" },
+      "B-CARD.match": { binding: "B-CARD", state: "BOUND", reason: null },
+      "B-CARD.time": { binding: "B-CARD", state: "BOUND", reason: null },
+    },
+    tie: "V-03",
+  },
+  "role:instruction:signed-instruction-ed25519/0.3": {
+    widening: "W3-04",
+    needs: { "M6.instruction": { member: "ins-d", status: "PASS" }, "B-INS.card": { binding: "B-INS", state: "BOUND", reason: null } },
+    tie: "V-10",
+  },
+  // An input: the tie is a case of vectors/pointer-cases.mjs, run through the
+  // library entry with a fake fetch.
+  pointer: {
+    widening: "W3-05",
+    needs: { "P1.pointer": { status: "PASS" }, "P2.entry": { status: "PASS" } },
+    tie: "V-40",
+  },
 };
 
 // The pair ties of C4 (6): a vector that carries an evidence property and a

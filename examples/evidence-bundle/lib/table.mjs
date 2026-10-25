@@ -1,13 +1,15 @@
 // Names the spec fixes: table 3-1's roles and profiles, the check ids of table
 // 4-2 in their order, the binding ids, and the verdict texts of table 4-6a.
 
-export const BUNDLE_TYPE = "evidence-bundle/0.9";
-export const OUTPUT_TYPE = "evidence-bundle-verdict/0.9";
+export const BUNDLE_TYPE = "evidence-bundle/0.10";
+// M0 reads both bundle types, whose members are the same (spec 4.2, M0).
+export const BUNDLE_TYPES = ["evidence-bundle/0.10", "evidence-bundle/0.9"];
+export const OUTPUT_TYPE = "evidence-bundle-verdict/0.10";
 
 // Table 3-1, in its row order (the allow-list reports the first role of this
 // order that it refuses).
 export const ROLE_PROFILES = [
-  ["instruction", ["signed-instruction-ed25519/0.2", "vi-0.1-draft", "ap2-0.2"]],
+  ["instruction", ["signed-instruction-ed25519/0.2", "signed-instruction-ed25519/0.3", "vi-0.1-draft", "ap2-0.2"]],
   ["action-arguments", ["jcs-json"]],
   ["action-result", ["jcs-json"]],
   ["gate-log", ["chirindo-evidence.action/1", "jcs-sha256-chain/0.1"]],

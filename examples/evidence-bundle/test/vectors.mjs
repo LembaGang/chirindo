@@ -1,4 +1,4 @@
-// The vectors of vectors/evidence-bundle-0.9.json: each is regenerated from
+// The vectors of vectors/evidence-bundle-0.10.json: each is regenerated from
 // its recipe and run; the projection must equal the committed file, a fresh
 // --write must give the committed bytes, and each vector's expected values
 // are asserted on the parsed output.
@@ -381,6 +381,9 @@ const A2_ROWS = [
   ...["S-106", "S-107"].map((id) => [id, "an earlier entry of a type this version does not decode: prerequisite-failed:O7.account-code", { lines: "962, 330", bindings: { "B-PAY": ["NOT-EVALUATED", "prerequisite-failed:O7.account-code"] } }, { checks: [["M5.block-transactions", "btx-t", "PASS", null]], verdict: ["PAYMENT-NOT-VERIFIED", "V3", "prerequisite-failed:O7.account-code"] }]),
 ];
 
+// Format 0.10 (vectors/rows-a3.mjs), the regression row of C5 step 0.
+A2_ROWS.push(["V-26", "a 0.9-typed bundle carrying a 0.3 instruction: M1.member FAIL, FAILS", { lines: "v0.10 186, 285", checks: [["M1.member", "ins-c", "FAIL"]], verdict: ["FAILS", "V1"] }, {}]);
+
 for (const [id, what, spec, derived] of A2_ROWS) {
   test(`${id}: ${what} [spec, lines ${spec.lines}]`, () => expectRow(id, spec));
   if (Object.keys(derived).length) test(`${id}: ${what} [derived]`, () => expectRow(id, derived));
@@ -403,4 +406,12 @@ test("SA-09: the verdict and bindings as the same bundle without its action resu
   const o = out("SA-09");
   assert.deepEqual([r.output.verdict.code, r.output.verdict.rule, r.output.verdict.reason], [o.verdict.code, o.verdict.rule, o.verdict.reason]);
   assert.deepEqual(r.output.bindings.map((b) => [b.id, b.state, b.reason]), o.bindings.map((b) => [b.id, b.state, b.reason]));
+});
+
+// W3-01: a bundle of type evidence-bundle/0.10 reads as the same bundle of type 0.9.
+test("V-01: WE-1 typed evidence-bundle/0.10 gives R-01's projection [derived; spec v0.10 285]", () => {
+  const p = expectedOf(runs.get("V-01"));
+  assert.equal(p.exit, 0);
+  assert.deepEqual(p, expectedOf(runs.get("R-01")));
+  assert.equal(check(out("V-01"), "M0.bundle").status, "PASS");
 });

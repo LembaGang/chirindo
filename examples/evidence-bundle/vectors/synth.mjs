@@ -108,7 +108,20 @@ export function checkpoint({ k, sessionId, count, lastEntryHash, ts = "2026-10-2
   c.sig = edSign(null, Buffer.from(jcs(c), "utf8"), k.priv).toString("base64url");
   return c;
 }
-export const sidecarLine = (cp, receipt = null, error = receipt ? null : "TEST FIXTURE: not submitted to a witness") => Buffer.from(JSON.stringify({ checkpoint: cp, witness_receipt: receipt, witness_error: error }) + "\n", "utf8");
+// A witness receipt (the served receipt.fields and signature; spec M4) for a
+// checkpoint, signed by a TEST witness key, never Headless Oracle's: `witness`
+// reads headlessoracle.com because M4 requires it, and the key id names the
+// key as a test key. Only test pins that add this key verify it.
+export const TEST_WITNESS_KEY_ID = "test_witness_2026";
+export const testWitness = () => testEd("witness");
+export function witnessReceipt({ cp, receivedAt, k = testWitness(), keyId = TEST_WITNESS_KEY_ID }) {
+  const r = { type: "witness.checkpoint/1", witness: "headlessoracle.com", received_at: receivedAt, kid: cp.kid, session_id: cp.session_id, count: String(cp.count), last_entry_hash: cp.last_entry_hash, checkpoint_ts: cp.ts, checkpoint_sha256: jcsSha256(cp), fork: "false", public_key_id: keyId };
+  r.signature = edSign(null, Buffer.from(jcs(r), "utf8"), k.priv).toString("hex");
+  return r;
+}
+// The TEST witness key as a key-history entry (pins, and the carried /v5/keys form).
+export const testWitnessEntry = () => ({ key_id: TEST_WITNESS_KEY_ID, algorithm: "Ed25519", format: "hex", public_key: Buffer.from(testWitness().x, "base64url").toString("hex"), valid_from: "2026-01-01T00:00:00Z", valid_until: null });
+export const sidecarLine =(cp, receipt = null, error = receipt ? null : "TEST FIXTURE: not submitted to a witness") => Buffer.from(JSON.stringify({ checkpoint: cp, witness_receipt: receipt, witness_error: error }) + "\n", "utf8");
 
 // An Annex A instruction signed by a test principal key; `constraints`
 // replaces or adds constraint members.
@@ -121,6 +134,16 @@ export function instruction({ principal, agentKid, payee, token, constraints = {
     constraints: { chain_id: "eip155:84532", asset: token, max_amount: "10000", payees: [payee], valid_from: "2026-10-01T00:00:00Z", valid_until: "2026-12-31T00:00:00Z", ...constraints },
     iat: "2026-10-01T00:00:00Z",
   };
+  ins.sig = edSign(null, Buffer.from(jcs(ins), "utf8"), principal.priv).toString("base64url");
+  return ins;
+}
+
+// A signed-instruction-ed25519/0.3 instruction (spec Annex A.3) for card
+// orders only: `card` its card limits (left out when null), no chain or token.
+export function cardInstruction({ principal, agentKid, card, validFrom, validUntil, text = "TEST FIXTURE instruction: card orders within the card limits", constraints = {} }) {
+  const c = { valid_from: validFrom, valid_until: validUntil, ...constraints };
+  if (card !== null) c.card = card;
+  const ins = { v: "signed-instruction-ed25519/0.3", principal: { kid: principal.kid, public_key_jwk: { kty: "OKP", crv: "Ed25519", x: principal.x } }, agent_kid: [agentKid], text, constraints: c, iat: validFrom };
   ins.sig = edSign(null, Buffer.from(jcs(ins), "utf8"), principal.priv).toString("base64url");
   return ins;
 }

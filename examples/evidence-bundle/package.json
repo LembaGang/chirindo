@@ -2,9 +2,9 @@
   "name": "chirindo-evidence-bundle",
   "private": true,
   "type": "module",
-  "description": "Offline verifier for dispute evidence bundles (format evidence-bundle/0.9), with the worked example WE-1 built from examples/ordering-evidence/case-a. Not part of the npm package.",
+  "description": "Offline verifier for dispute evidence bundles (format evidence-bundle/0.10, which reads 0.9 bundles too), with the worked example WE-1 built from examples/ordering-evidence/case-a. Not part of the npm package.",
   "scripts": {
-    "test": "node --test --test-reporter=tap test/reuse.mjs test/jcs.mjs test/cli.mjs test/schema.mjs test/we1.mjs test/vectors.mjs test/refusals.mjs test/unlocks.mjs test/builder.mjs",
+    "test": "node --test --test-reporter=tap test/reuse.mjs test/jcs.mjs test/cli.mjs test/schema.mjs test/we1.mjs test/vectors.mjs test/refusals.mjs test/unlocks.mjs test/builder.mjs test/card.mjs test/pointer.mjs test/errata.mjs test/never-verifies.mjs",
     "test:sweep": "node --test --test-reporter=tap test/sweep.mjs"
   },
   "engines": {

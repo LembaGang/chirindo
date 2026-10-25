@@ -4,7 +4,7 @@ import canonicalize from "canonicalize";
 import { createHash } from "node:crypto";
 import { isPlainObject, parseStrictJson } from "../../ordering-evidence-h4/lib/formats.mjs";
 import { built } from "./built.mjs";
-import { BUNDLE_TYPE, PROFILES_OF } from "./table.mjs";
+import { BUNDLE_TYPE, BUNDLE_TYPES, PROFILES_OF } from "./table.mjs";
 
 export const EXPECTED_AUTHORIZER_TEXT = "the account the payment must come from is stated by the person running the verifier, never by the bundle";
 
@@ -34,7 +34,7 @@ export function m0(bytes) {
   }
   let err = exactly(doc, ["type", "created_at", "assembled_by", "subject", "members"], [], "the bundle");
   if (err) return { fail: err };
-  if (doc.type !== BUNDLE_TYPE) return { fail: `type is not ${BUNDLE_TYPE}` };
+  if (!BUNDLE_TYPES.includes(doc.type)) return { fail: `type is not ${BUNDLE_TYPES.join(" or ")}` };
   if (!isStr(doc.created_at) || !isStr(doc.assembled_by)) return { fail: "created_at and assembled_by must be strings" };
   const s = doc.subject;
   if (isPlainObject(s) && Object.keys(s).includes("expected_authorizer")) return { fail: EXPECTED_AUTHORIZER_TEXT, expectedAuthorizer: true };
@@ -103,6 +103,11 @@ export function m1(doc, peekFactory) {
     }
     if (!PROFILES_OF.has(m.role) || !PROFILES_OF.get(m.role).includes(m.profile)) {
       fail(`(${m.role}, ${m.profile}) is not a role and profile of table 3-1`);
+      continue;
+    }
+    // Table 3-1 allows profile 0.3 only in an evidence-bundle/0.10 bundle (spec M0).
+    if (m.role === "instruction" && m.profile === "signed-instruction-ed25519/0.3" && doc.type !== BUNDLE_TYPE) {
+      fail(`a signed-instruction-ed25519/0.3 member is allowed only in an ${BUNDLE_TYPE} bundle (table 3-1)`);
       continue;
     }
     const hasIp = Object.keys(m).includes("issuer_profile");

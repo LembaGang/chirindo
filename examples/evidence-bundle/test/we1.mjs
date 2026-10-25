@@ -77,12 +77,20 @@ test("the WE-1 builder reads the committed bytes and builds the eight members of
   assert.equal(Object.keys(SOURCES).length, 11);
 });
 
-test("the limits texts are table 8-1's, L2 with the sentence of spec section 8 (8,070 bytes joined)", () => {
+test("the limits texts are table 8-1's, L2 with the sentence of spec section 8 (8,070 bytes joined for L1 to L23; 8,893 with L24 and L25)", () => {
   const texts = Object.values(LIMIT_TEXTS);
-  assert.equal(texts.length, 23);
+  assert.equal(texts.length, 25);
+  // v0.9's 23 texts, in their own order, unchanged.
+  const v09 = Buffer.from(Array.from({ length: 23 }, (_, i) => LIMIT_TEXTS[`L${i + 1}`]).join("\n"), "utf8");
+  assert.equal(v09.length, 8070);
+  assert.equal(sha(v09), "99d9eeb81510d529f739672e6133b9c75c051fa184093c7ba4ddfc3338133c01");
+  // v0.10's table 8-1 order, in which L24 and L25 come before L23.
+  assert.deepEqual(Object.keys(LIMIT_TEXTS).slice(-3), ["L24", "L25", "L23"]);
   const joined = Buffer.from(texts.join("\n"), "utf8");
-  assert.equal(joined.length, 8070);
-  assert.equal(sha(joined), "99d9eeb81510d529f739672e6133b9c75c051fa184093c7ba4ddfc3338133c01");
+  assert.equal(joined.length, 8893);
+  assert.equal(sha(joined), "72c3274d2f4dd75041e30348fbab71632b337bb0210d9a8616b97220f36470f0");
+  assert.equal(Buffer.byteLength(LIMIT_TEXTS.L24), 474);
+  assert.equal(Buffer.byteLength(LIMIT_TEXTS.L25), 347);
   assert.equal(Buffer.byteLength(LIMIT_TEXTS.L2), 492);
   assert.equal(sha(Buffer.from(LIMIT_TEXTS.L2, "utf8")), "085d31bef41d6aa9b8bba9a618b2d468ca1443dc28e469344c6c34a4162ec9f2");
 });
@@ -118,7 +126,7 @@ test("R-01: WE-1 offline with its stated account and transaction", () => {
   // Comparisons of two clocks are reported as such (spec 4.5).
   assert.ok(o.flags.length >= 1);
   assert.deepEqual([...new Set(o.flags.map((f) => f.code))], ["two-clock-comparison"]);
-  assert.deepEqual(o.verifier, { name: "chirindo examples/evidence-bundle", version: "0.9.0", commit: "unrecorded" });
+  assert.deepEqual(o.verifier, { name: "chirindo examples/evidence-bundle", version: "0.10.0", commit: "unrecorded" });
   const expect = [
     ["S1.authorizer", null, "PASS"], ["S2.tx", null, "PASS"], ["M0.bundle", null, "PASS"], ["M1.manifest", null, "PASS"],
     ...["log-a", "args-a", "sidecar-a", "opkey-a", "wkey", "tx-a", "rc-a", "blk-a"].map((m) => ["M1.member", m, "PASS"]),
@@ -136,7 +144,7 @@ test("R-01: WE-1 offline with its stated account and transaction", () => {
   assert.deepEqual(o.hash_search.forms, ["raw-32-bytes", "hex-text"]);
   assert.equal(o.payment.connected, true);
   assert.equal(o.payment.as_supplied, true);
-  assert.deepEqual(o.stated, { authorizer: a, tx: T });
+  assert.deepEqual(o.stated, { authorizer: a, tx: T, charge: null });
 });
 
 test("R-02: only the transaction stated", () => {

@@ -11,6 +11,7 @@
 // and test/unlocks.mjs fails when a judged property's checks are not built or
 // not reached. A property not in JUDGED is refused exactly as before.
 
+import { isPlainObject } from "../../ordering-evidence-h4/lib/formats.mjs";
 import { LEGACY_KID_RE, ROLES } from "./table.mjs";
 import { eip3009Readable, unreadByRule2 } from "./tx.mjs";
 
@@ -73,8 +74,25 @@ export const JUDGED = [
   // Wb-14: the payment block's raw transactions (M5.block-transactions; rule
   // 10e's scan of the earlier entries).
   "role:payment-block-transactions",
+  // W3-01: bundles of type evidence-bundle/0.10 (M0 reads 0.10 and 0.9).
+  "bundle-type:0.10",
+  // W3-02: a disputed charge stated for a card subject (S3.charge, B-CARD
+  // rule 1, rules C1 and C3); an order in the cited arguments stays refused.
+  "card:charge-stated",
+  // W3-03: an order committed in the cited arguments (M8.order, B-CARD rules
+  // 2 to 4, rules C2, C5 and C6, L25).
+  "args:order",
+  // W3-04: instructions of profile 0.3 (Annex A.3, M6; B-INS for a card
+  // subject, card_limits; rule C4; L12 and L13).
+  "role:instruction:signed-instruction-ed25519/0.3",
+  // W3-05: the Agent Evidence Pointer in place of a bundle path (P1.pointer,
+  // P2.entry; lib/pointer.mjs).
+  "pointer",
 ];
-const judged = (p) => JUDGED.includes(p);
+// Inputs and views (the stated charge, the pointer, the exhibit and the
+// export) are judged by name too: the code that reads one refuses it until its
+// widening adds it here.
+export const judged = (p) => JUDGED.includes(p);
 
 const JUDGED_ROLES = ["gate-log", "action-arguments", "witness-sidecar", "operator-key", "witness-key", "payment-transaction", "payment-receipt", "payment-block"];
 const JUDGED_PROFILE = {
@@ -92,6 +110,7 @@ const JUDGED_PROFILE = {
 const WIDENED = {
   "role:instruction:signed-instruction-ed25519/0.2": [["instruction", ["signed-instruction-ed25519/0.2"]]],
   "profile:instruction:vi-0.1-draft+ap2-0.2": [["instruction", ["vi-0.1-draft", "ap2-0.2"]]],
+  "role:instruction:signed-instruction-ed25519/0.3": [["instruction", ["signed-instruction-ed25519/0.3"]]],
   "role:action-result": [["action-result", ["jcs-json"]]],
   "profile:gate-log:jcs-sha256-chain/0.1": [["gate-log", ["jcs-sha256-chain/0.1"]]],
   "role:gate-receipt+role:issuer-profile": [
@@ -134,7 +153,7 @@ export function declaredShape(members) {
 // receipts, the subject, the payment as M5 read it, and the search of B-PAY
 // rule 3 for the cited hash (null when the cited record does not exist).
 export function decodedShape(s) {
-  const { doc, logs, checkpoints, receipts, pay, search } = s;
+  const { doc, logs, checkpoints, receipts, pay, search, citedArgs, insMembers = [] } = s;
   const members = doc.members;
   const subject = doc.subject;
   // 3. legacy-shape
@@ -164,7 +183,13 @@ export function decodedShape(s) {
     const n = countOf(c.kid, c.sid);
     if (!judged("truncated") && n !== undefined && c.count > n) return "truncated";
   }
+  // args:order: a card subject whose cited record's arguments commit to an order.
+  if (subject.kind === "card-payment" && isPlainObject(citedArgs) && Object.keys(citedArgs).includes("order") && !judged("args:order")) return "args:order";
   if (subject.kind === "card-payment") return null;
+  // An evm-payment subject with a profile 0.3 instruction for card orders only
+  // (no chain_id, asset, max_amount or payees): the spec gives step 5 no
+  // outcome for it, so this build refuses it rather than name a new code.
+  if (insMembers.some((i) => i.m6 === "PASS" && i.profile === "signed-instruction-ed25519/0.3" && !Object.keys(i.value.constraints).includes("chain_id"))) return "instruction:card-only";
   // 7. chain
   if (subject.chain_id !== "eip155:84532") return "chain";
   // 8. type
