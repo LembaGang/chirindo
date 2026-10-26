@@ -615,7 +615,7 @@
       },
       "bundle_sha256": "sha256:8da516d746229d963701c9a4634540e30e7adb8cf5c974619146e5654c582bdc",
       "mode": "online",
-      "checked_at": "2026-10-25T15:14:10.196Z",
+      "checked_at": "2026-10-26T10:24:28.928Z",
       "stated": {
         "authorizer": null,
         "tx": null,
@@ -642,7 +642,7 @@
           "url": "https://headlessoracle.com/evidence/examples/jwks.json",
           "registrable_domain": "headlessoracle.com",
           "answered": true,
-          "used": false
+          "used": true
         }
       ],
       "checks": [
@@ -789,9 +789,9 @@
         {
           "id": "O3.jwks",
           "member": null,
-          "status": "NOT-EVALUATED",
-          "reason": "online-read-failed",
-          "detail": "GET https://headlessoracle.com/evidence/examples/jwks.json: the status is 404, not 200"
+          "status": "PASS",
+          "reason": null,
+          "detail": "the jwks_uri was read"
         }
       ],
       "bindings": [
@@ -837,11 +837,11 @@
         },
         {
           "id": "B-KEY",
-          "state": "NOT-EVALUATED",
-          "reason": "online-read-failed",
+          "state": "BOUND",
+          "reason": null,
           "carrier": null,
           "signed_by": null,
-          "detail": "the jwks_uri was not read: GET https://headlessoracle.com/evidence/examples/jwks.json: the status is 404, not 200"
+          "detail": "the JWKS the jwks_uri serves holds the key"
         },
         {
           "id": "B-INS",
@@ -1087,11 +1087,6 @@
             "reason": "card-subject"
           },
           {
-            "binding": "B-KEY",
-            "state": "NOT-EVALUATED",
-            "reason": "online-read-failed"
-          },
-          {
             "binding": "B-INS",
             "state": "EXCEEDS",
             "reason": null
@@ -1110,10 +1105,6 @@
         {
           "id": "L3",
           "text": "The witness receipt is Headless Oracle's signed statement that at received_at it was shown a checkpoint signed by the key with that thumbprint; it is only as reliable as Headless Oracle and its signing key. The witness is operated by Headless Oracle, which also publishes the gate software: it is independent of an operator other than Headless Oracle, not of Headless Oracle."
-        },
-        {
-          "id": "L4",
-          "text": "This run trusts, as the assembler supplied them, the bundle's copies of the payment's chain data, of the witness receipts, and of every key or profile the verifier has not pinned (an operator JWKS, a witness key id outside the verifier's history, an issuer profile). An online run re-fetches them from sources the verifier chooses; until two endpoints confirm the chain data, no verdict says VERIFIES."
         },
         {
           "id": "L6",

@@ -429,16 +429,16 @@ Their bundles are page bundles, not the vectors' bundles:
 
 A page states only verdicts its own bundle gave. Offline each reads PAYMENT
 NOT VERIFIED (`offline-witness-data`). Online the witness's list confirmed each
-receipt (B-WIT BOUND), and the inside variants read `RECORDED-WITH-GAPS` and
-the outside variants `OUTSIDE-INSTRUCTION`.
+receipt (B-WIT BOUND) and the `jwks_uri` served the key (B-KEY BOUND), so the
+inside variants read `RECORDED-BEFORE-CHARGE` and the outside variants
+`OUTSIDE-INSTRUCTION`. Each online verdict carries its own `checked_at`. A run
+made while that URL does not serve the key reads B-KEY NOT EVALUATED
+(`online-read-failed`), and the inside variants then read `RECORDED-WITH-GAPS`.
 
-At the time of these runs the `jwks_uri` did not serve the key, so B-KEY is NOT
-EVALUATED (`online-read-failed`). Once that URL serves the key, the inside
-variants read `RECORDED-BEFORE-CHARGE`. `pages/evidence-examples-jwks.json`
-holds the bytes to serve there; it is published at that URL by the site, not
-from this folder. `node vectors/make-pages.mjs --write we-4-1` writes a page
-from V-10's TEST bundle; the committed pages were written from the page
-bundles.
+`pages/evidence-examples-jwks.json` holds the bytes served at that URL; it is
+published there by the site, not from this folder.
+`node vectors/make-pages.mjs --write we-4-1` writes a page from V-10's TEST
+bundle; the committed pages were written from the page bundles.
 
 ## WE-1's members, and where `fetched_at` comes from
 
