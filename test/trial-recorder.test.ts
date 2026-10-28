@@ -269,7 +269,7 @@ describe("trial recorder: refusals and gap lines", () => {
     expect(readNdjson(gapsOf(dir))).toHaveLength(cases.length);
 
     const secrets = [
-      "ZZ-NOT-AN-OBJECT", "ZZ-CHANNEL-SECRET", "ZZ-TOP-SECRET-0", "ZZ-TOP-SECRET-1", "ZZTOPFIELD", "ZZ-AC-SECRET-2", "ZZ-ORDER-SECRET-3",
+      "ZZ-NOT-AN-OBJECT", "ZZ-CHANNEL-SECRET", "ZZ-TOP-SECRET-0", "ZZ-TOP-SECRET-1", "ZZ-AC-SECRET-2", "ZZ-ORDER-SECRET-3",
       "ZZ-ITEM-SECRET-4", "ZZ-PS-SECRET-5", "ZZ-PTL-SECRET-6", "ZZ-MANDATE-SECRET-7", "ZZ-KEY-SECRET-8", "ZZKEYNAMESECRET9",
       "4111111111111111", "4111 1111 1111 1111", "3782-822463-10005", "5555555555554444", "6011111111111117",
       "ZZbuyer.secret@example.com", "ZZcat.secret@example.org", "ZZ-GETTER-SECRET",

@@ -25,6 +25,13 @@
 //       same exit codes. Lets a stranger close the loop with ONLY chirindo
 //       installed.
 //
+//   chirindo trial-recorder --dir <path> --server-label <name> [--port <n>]
+//                           [--host 127.0.0.1|::1] [--token-file <file>] ...
+//       The trial recorder as a loopback HTTP endpoint (src/trial/http.ts).
+//
+//   chirindo trial-erase --dir <path> (--args-hash <h> | --order-ref <ref>)
+//       Remove retained arguments; chains and sidecars are never touched.
+//
 // Identity defaults to ./.gate/identity.json + ./.gate/private-key.pem.
 // Chain receipts default to ./.gate/sessions/<session-id>.jsonl.
 
@@ -69,6 +76,10 @@ import {
   type WitnessPub,
   type WitnessTarget,
 } from "./witness.js";
+import { openTrialRecorder } from "./trial/recorder.js";
+import { createTrialServer } from "./trial/http.js";
+import { eraseRetained, sha256Tagged } from "./trial/files.js";
+import { PRINTABLE_256 } from "./trial/rules.js";
 
 // The Evidence plan key for the witness (v0.5) may come from this variable;
 // --witness-account-key-file takes precedence over it.
@@ -77,6 +88,7 @@ const WITNESS_ACCOUNT_KEY_ENV = "CHIRINDO_WITNESS_ACCOUNT_KEY";
 // Clean shutdown waits at most this long for the final witness POST.
 const SHUTDOWN_WITNESS_WAIT_MS = 5_000;
 const DATA_DIR = ".gate";
+const TRIAL_DEFAULT_PORT = 7419;
 
 function helpText(): string {
   return `chirindo — fail-closed cryptographic gate at the MCP tools/call boundary
@@ -101,6 +113,12 @@ Usage:
                        [--witness <base-url> | --witness-file <sidecar>]
                        [--witness-key <hex|jwk-file>] [--witness-key-id <id>]
                        [--witness-name <name>]
+  chirindo trial-recorder --server-label <name> [--dir <path>]
+                       [--port <n>] [--host 127.0.0.1|::1] [--token-file <file>]
+                       [--jwks-uri <https-url>] [--witness <base-url>]
+                       [--witness-key <hex|jwk-file>] [--witness-name <name>]
+                       [--witness-account-key-file <path>]
+  chirindo trial-erase [--dir <path>] (--args-hash <sha256:hex> | --order-ref <ref>)
 
 Defaults:
   data dir = ./${DATA_DIR}/
@@ -110,6 +128,16 @@ Defaults:
   --key    = <data-dir>/${IDENTITY_FILENAME}
   --jwks   = $${JWKS_URL_ENV_VAR} or ${DEFAULT_JWKS_URL}
   --out    (export-jwks) = <data-dir>/jwks.json
+  --port   (trial-recorder) = ${TRIAL_DEFAULT_PORT}, on --host 127.0.0.1
+
+Trial recorder:
+  trial-recorder records agent carts over POST /record, /await and /gap on a
+  loopback address (GET /health); it prints {"listening":"<url>"} once bound.
+  Call http://127.0.0.1:<port>, not localhost: the Host header must name the
+  bound address and port. Without --token-file any process on this host can
+  call it. trial-erase removes the retained arguments for an args_hash or an
+  order reference and prints one JSON line per file removed, then
+  {"removed_count": N}.
 
 Tool names:
   By default \`proxy\` refuses a tools/call whose name is outside MCP's rule
@@ -1036,6 +1064,136 @@ function loadTrustFile(path: string): string[] | null {
   return list as string[];
 }
 
+// `chirindo trial-recorder` — the trial recorder behind a loopback endpoint.
+// Usage errors exit 2 and a start failure exits 1, both before listening.
+// It ends on SIGINT or SIGTERM by closing the server and the recorder (final
+// checkpoint, at most 5 s), never by process.exit() (see cmdProxy).
+async function cmdTrialRecorder(args: ParsedArgs): Promise<number> {
+  const cmd = "trial-recorder";
+  const dir = resolvePath((args.flags.get("dir") as string) ?? DATA_DIR);
+  const serverLabel = args.flags.get("server-label");
+  if (typeof serverLabel !== "string" || serverLabel === "") {
+    process.stderr.write(`usage: chirindo ${cmd} --server-label <name> [--dir <path>] [--port <n>] [--host 127.0.0.1|::1] [--token-file <file>]\n`);
+    return 2;
+  }
+  const host = args.flags.get("host") ?? "127.0.0.1";
+  if (host !== "127.0.0.1" && host !== "::1") {
+    process.stderr.write(`chirindo ${cmd}: --host must be 127.0.0.1 or ::1\n`);
+    return 2;
+  }
+  const portFlag = args.flags.get("port") ?? String(TRIAL_DEFAULT_PORT);
+  if (typeof portFlag !== "string" || !/^(0|[1-9][0-9]{0,4})$/.test(portFlag) || Number(portFlag) > 65_535) {
+    process.stderr.write(`chirindo ${cmd}: --port must be an integer from 0 to 65535\n`);
+    return 2;
+  }
+  // The same check as proxy --jwks-uri.
+  const jwksUriFlag = args.flags.get("jwks-uri");
+  let jwksUri: string | undefined;
+  if (jwksUriFlag !== undefined) {
+    let u: URL | undefined;
+    try {
+      u = typeof jwksUriFlag === "string" ? new URL(jwksUriFlag) : undefined;
+    } catch {
+      u = undefined;
+    }
+    if (u === undefined || u.protocol !== "https:") {
+      process.stderr.write(`[chirindo] --jwks-uri must be a valid https:// URL\n`);
+      return 2;
+    }
+    jwksUri = jwksUriFlag as string;
+  }
+  const witness = parseWitnessTarget(args, cmd);
+  if (witness === null) return 2;
+  const tokenFlag = args.flags.get("token-file");
+  let token: string | undefined;
+  if (tokenFlag !== undefined) {
+    if (typeof tokenFlag !== "string") {
+      process.stderr.write(`chirindo ${cmd}: --token-file takes a path\n`);
+      return 2;
+    }
+    try {
+      token = readFileSync(resolvePath(tokenFlag), "utf8").trim();
+    } catch (e) {
+      process.stderr.write(`chirindo ${cmd}: cannot read --token-file ${tokenFlag} (${(e as NodeJS.ErrnoException).code ?? "unreadable"})\n`);
+      return 2;
+    }
+    if (token === "") {
+      process.stderr.write(`chirindo ${cmd}: --token-file ${tokenFlag} is empty\n`);
+      return 2;
+    }
+  }
+
+  let recorder;
+  try {
+    recorder = openTrialRecorder({
+      dir,
+      serverLabel,
+      ...(jwksUri !== undefined ? { jwksUri } : {}),
+      ...(witness !== undefined ? { witness } : {}),
+      log: (m) => process.stderr.write(m + "\n"),
+      now: () => new Date().toISOString(),
+    });
+  } catch (e) {
+    process.stderr.write(`[chirindo] ${cmd}: cannot start: ${(e as Error).message}\n[chirindo] run 'chirindo init --dir ${dir}' first if the identity is missing.\n`);
+    return 1;
+  }
+  const server = createTrialServer({ recorder, host, port: Number(portFlag), ...(token !== undefined ? { token } : {}) });
+  let bound: { port: number; url: string };
+  try {
+    bound = await server.listen();
+  } catch (e) {
+    process.stderr.write(`[chirindo] ${cmd}: cannot listen on ${host}:${portFlag} (${(e as NodeJS.ErrnoException).code ?? "error"})\n`);
+    await recorder.close(SHUTDOWN_WITNESS_WAIT_MS);
+    return 1;
+  }
+  process.stdout.write(JSON.stringify({ listening: bound.url }) + "\n");
+  process.stderr.write(
+    `[chirindo] ${cmd} up: session=${recorder.session_id} dir=${dir}` +
+      (witness !== undefined ? ` witness=${witness.baseUrl}` : "") +
+      (token !== undefined ? " token=required" : " token=none (any local process can call it)") +
+      `\n`,
+  );
+  const shutdown = async () => {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+    await server.close();
+    await recorder.close(SHUTDOWN_WITNESS_WAIT_MS);
+    process.stderr.write(`[chirindo] ${cmd} exiting\n`);
+    process.exitCode = 0;
+  };
+  const onSignal = () => void shutdown();
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  return 0;
+}
+
+// `chirindo trial-erase` — remove the retained arguments for one args_hash or
+// one order reference. Exit 0 when every file could be read, 1 when some
+// could not (an erasure that may be incomplete), 2 on a usage error.
+function cmdTrialErase(args: ParsedArgs): number {
+  const dir = resolvePath((args.flags.get("dir") as string) ?? DATA_DIR);
+  const ah = args.flags.get("args-hash");
+  const ref = args.flags.get("order-ref");
+  const usage = "usage: chirindo trial-erase [--dir <path>] (--args-hash <sha256:hex> | --order-ref <ref>)\n";
+  if ((ah === undefined) === (ref === undefined) || ah === true || ref === true) {
+    process.stderr.write(usage);
+    return 2;
+  }
+  if (typeof ah === "string" && !/^sha256:[0-9a-f]{64}$/.test(ah)) {
+    process.stderr.write("chirindo trial-erase: --args-hash must be sha256: followed by 64 lowercase hex characters\n");
+    return 2;
+  }
+  if (typeof ref === "string" && !PRINTABLE_256.test(ref)) {
+    process.stderr.write("chirindo trial-erase: --order-ref must be 1 to 256 printable ASCII characters\n");
+    return 2;
+  }
+  const r = eraseRetained(dir, typeof ah === "string" ? { argsHash: ah } : { orderRefSha256: sha256Tagged(ref as string) });
+  for (const p of r.removed) process.stdout.write(JSON.stringify({ removed: p }) + "\n");
+  process.stdout.write(JSON.stringify(r.unreadable > 0 ? { removed_count: r.removed.length, unreadable: r.unreadable } : { removed_count: r.removed.length }) + "\n");
+  if (r.unreadable > 0) process.stderr.write(`chirindo trial-erase: ${r.unreadable} retained files could not be read; the erasure may be incomplete\n`);
+  return r.unreadable > 0 ? 1 : 0;
+}
+
 async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   if (
@@ -1058,6 +1216,10 @@ async function main(argv: string[]): Promise<number> {
       return await cmdCheckpoint(args);
     case "verify":
       return await cmdVerify(args);
+    case "trial-recorder":
+      return await cmdTrialRecorder(args);
+    case "trial-erase":
+      return cmdTrialErase(args);
     default:
       process.stderr.write(`unknown command: ${args.command}\n`);
       process.stderr.write(helpText());

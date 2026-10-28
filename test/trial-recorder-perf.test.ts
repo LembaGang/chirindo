@@ -57,7 +57,8 @@ describe("trial recorder: cost at length", () => {
 
     const p1 = p95(first.ms);
     const p2 = p95(second.ms);
-    console.log(`D3(a) p95 after 100 entries: ${p1.toFixed(2)} ms; after 10,000 entries: ${p2.toFixed(2)} ms`);
+    // Written directly: vitest holds back console output of passing tests.
+    process.stdout.write(`D3(a) p95 after 100 entries: ${p1.toFixed(2)} ms; after 10,000 entries: ${p2.toFixed(2)} ms\n`);
     expect(fillOk).toBe(true);
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);

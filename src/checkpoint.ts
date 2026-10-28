@@ -10,8 +10,12 @@
 import { appendFileSync } from "node:fs";
 import {
   Chain,
+  RECORD_VERSION,
+  jcsBytes,
   publicKeyFromPrivate,
   readChainFile,
+  signEd25519,
+  type CheckpointContent,
   type LoadedFullIdentity,
   type SignedCheckpoint,
   type SignedRecord,
@@ -37,6 +41,29 @@ export function buildCheckpoint(
     privateKey: identity.privateKey,
     agent: GATE_AGENT,
   }).checkpoint(ts);
+}
+
+// The checkpoint buildCheckpoint signs, from a head the caller already holds
+// (its count and last entry hash) instead of the records, so that signing
+// one costs the same at any chain length. Content and member order are
+// Chain.checkpoint's, so the bytes equal buildCheckpoint's for the same head
+// and ts.
+export function buildCheckpointFromHead(
+  head: { sessionId: string; count: number; lastEntryHash: string },
+  identity: LoadedFullIdentity,
+  ts?: string,
+): SignedCheckpoint {
+  if (head.count < 1) throw new Error("cannot checkpoint an empty chain");
+  const content: CheckpointContent = {
+    v: RECORD_VERSION,
+    type: "checkpoint",
+    session_id: head.sessionId,
+    count: head.count,
+    last_entry_hash: head.lastEntryHash,
+    ts: ts ?? new Date().toISOString(),
+    kid: identity.kid,
+  };
+  return { ...content, sig: signEd25519(identity.privateKey, jcsBytes(content)) };
 }
 
 export function appendSidecarLine(sidecarPath: string, line: SidecarLine): void {

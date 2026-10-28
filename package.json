@@ -27,6 +27,13 @@
   "bin": {
     "chirindo": "dist/cli.js"
   },
+  "exports": {
+    "./trial-recorder": {
+      "types": "./dist/trial/index.d.ts",
+      "import": "./dist/trial/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist",
     "README.md",

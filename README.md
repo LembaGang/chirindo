@@ -567,6 +567,212 @@ receipt does and does not attest.
 A worked example of all three, run against production with an offline
 checker, is in [`examples/ordering-evidence/`](examples/ordering-evidence/).
 
+## Chirindo trial recorder
+
+The trial recorder lets a merchant's checkout service record each agent cart
+as a signed, hash-chained entry and have the witness countersign checkpoints
+of that chain. It is the recording and witnessing half of the gate, with
+nothing blocked: `record()` is synchronous, never throws and returns a plain
+object, and every failure becomes a line in a file, never a failed checkout.
+
+### What it does not show
+
+These are limits of the evidence an entry can support, copied verbatim from
+the evidence verifier (`examples/evidence-bundle/lib/limits.mjs`):
+
+- **L1.** A gate entry is the operator's own signed statement of what its gate saw and decided. The bundle does not show that a decision was wise, that the agent read the instruction correctly, or that any member's contents are true.
+- **L3.** The witness receipt is Headless Oracle's signed statement that at received_at it was shown a checkpoint signed by the key with that thumbprint; it is only as reliable as Headless Oracle and its signing key. The witness is operated by Headless Oracle, which also publishes the gate software: it is independent of an operator other than Headless Oracle, not of Headless Oracle.
+- **L5.** This version checks instructions only in the minimal profile of Annex A. Verifiable Intent and AP2 members are carried with their digests and marked PRESENT, not verified.
+- **L7.** Times on the principal's, the issuer's, the operator's and Headless Oracle's clocks are those parties' statements, and the block timestamp is set by the block producer within the chain's rules. Only the orderings that need no clock rest on signatures and hashes alone.
+- **L24.** v0.10. For a card payment, the payment proof is the card network's authorization record, which the issuer holds; this bundle neither carries nor verifies it. What this verdict shows is whether the decision and the order the gate recorded were witnessed before the charge's authorization time as stated, and whether that order matches the stated charge: the stated charge and its time are the statements of the person running the verifier, taken from the processor's records.
+- **L25.** v0.10. The committed order is the agent's statement at decision time, as the gate recorded it: its merchant, items, prices, refundability, dates and places are what the agent's call named. The bundle does not show that the merchant fulfilled that order, that the charge was for it beyond the fields compared, or that an item's attributes are true.
+
+### What it records, and where
+
+Each `record()` that passes its checks writes one entry. Its tool name is
+`record_agent_cart`, its decision `allow`, and its arguments are exactly
+`{ "order": <order> }`, plus `"agent_context": <agent_context>` when given:
+the place where spec v0.10 section 4.3, "The committed order", reads the
+order. Entries are the format the proxy writes, so
+`chirindo verify <chain> --key <dir>/identity.json` reads them unchanged.
+The chain holds only hashes; the arguments are kept beside it, one file per
+entry, because an evidence file needs them.
+
+Under the data directory (`chirindo init --dir <dir>` creates its identity;
+the recorder never creates keys):
+
+| path | holds |
+|---|---|
+| `chains/<session_id>.jsonl` | this process's chain |
+| `chains/<session_id>.jsonl.witness.ndjson` | its witness sidecar |
+| `chains/<session_id>.lock` | the process id, while the recorder runs |
+| `args/<session_id>/<floor(count/1000)>/<count>-<32 hex>.json` | retained arguments `{ args_hash, order_ref_sha256, call_seq, arguments }` |
+| `gaps.ndjson` | one line per call that made no entry |
+| `witness-timing.ndjson` | one line per witness POST and per `awaitWitness` |
+
+The 32 hex characters are the start of `args_hash` after `sha256:`; no file
+name holds a colon. Directories are created 0700 and files 0600 where the OS
+honours modes. Each recorder process writes its own chain under
+`<dir>/chains/`, so finding an order means looking across all of them.
+
+`record({ order_ref, order, agent_context?, call_seq? })` returns
+`{ ok: true, entry_hash, args_hash, count, session_id }`, or
+`{ ok: false, reason, paths, session_id }`, where `paths` holds RFC 6901
+pointers of the members that decided it, never values. The checks run in
+this order, and the first failure decides:
+
+| reason | when |
+|---|---|
+| `invalid-input` | not a plain object of JSON values within 256 KB (integers within the safe range) |
+| `refused-field` | a member outside the allow-list below, at any depth |
+| `refused-value` | a free-text field holds a card-number-like or e-mail-like token (below) |
+| `invalid-input` | `order_ref` is not 1 to 256 printable ASCII characters, `call_seq` not a non-negative integer, or an `agent_context` value is outside its format |
+| `invalid-order` | the order is not the committed order of spec section 4.3 |
+| `write-failed` | the retained file or the entry could not be written (a retained file is removed when its entry could not be) |
+| `internal` | anything else, including a call after `close()` |
+
+Allowed members: `order_ref`, `order`, `agent_context`, `call_seq`. In
+`agent_context`: `channel` (`acp`, `ucp`, `ap2`, `mcp`,
+`stripe-approval-hook` or `other`); `platform_signature` (`header_name`,
+`value`, optional `key_id` and `alg`, each at most 4,096 characters);
+`payment_token_limits` (`currency`, three upper-case letters;
+`max_amount_minor`, a decimal string with no sign and no leading zero;
+optional `expires_at`, an RFC 3339 UTC time); `agent_name` (at most 256
+characters); `mandate` (`format` `ap2`, `vi` or `other`; `value` at most
+65,536 characters). In the order, the members of spec section 4.3, with an
+item `name` of at most 256 characters.
+
+Screening reads only the free-text fields: an item's `name`, `location` and
+`category`, and `agent_context.agent_name`. A card-number-like token is 13 to
+19 contiguous digits, or digit groups of 3 to 6 digits joined by one kind of
+separator throughout (single spaces or single hyphens), 13 to 19 digits in
+all, whose first digit is 2 to 6 and which passes the Luhn check, standing
+alone (not touching a letter or digit). In an item's `name`, `location` and
+`category` an e-mail-like token (`local@domain.tld`) is refused too.
+Identifiers, references, SKUs, amounts, dates and the other `agent_context`
+fields are your own values and are never screened. Screening is a guard
+against a mistake, not a data-protection control: do not put personal data
+in an order.
+
+### When to call it
+
+Each time your code creates or changes the agent's cart, and once more just
+before your code calls your payment processor. Inside a payment platform's
+approval hook, pass the cart only, and keep any witness wait inside that
+hook's own time limit.
+
+Pass `call_seq`, a counter your code increments for every call, so that the
+numbers that never arrived can be found: `call_seq` is kept with each entry
+(in its retained file) and with each failure (in its gap line). Your counter
+restarts when your process restarts, so the numbers repeat across restarts.
+
+`awaitWitness(entry_hash, maxMs)` resolves, never rejects, with
+`{ ok: true, received_at, covering_count }` once a verified witness receipt
+covers the entry, or `{ ok: false, reason }` with `timeout` (at `maxMs`,
+capped at 3,500), `no-witness`, `unknown-entry` (not one of this process's
+last 10,000 entries), `stopped` or `closed`. At most one witness POST is in
+flight; a new head waits while one is, and the later checkpoint covers the
+heads in between. So the record made just before the charge can wait up to
+one witness round trip more than its own POST: allow for that in your wait
+limit. On `quota_exceeded`, `payment_required` or `invalid_key` the recorder
+stops sending until 00:00 UTC or a restart, and says so once in the log.
+
+`close(timeoutMs)` (default 5,000) sends a final checkpoint of the head and
+waits at most that long for it; what is still unanswered is recorded as
+`witness_timeout`. After a restart, the recorder looks at up to 10 earlier
+chains in the data directory, signed by this identity, that no running
+recorder holds and that have
+not changed for 10 minutes, and sends one checkpoint for each head that no
+receipt covers. Such a receipt carries a late `received_at`, and shows only
+that the head existed by then.
+
+### What reaches the witness
+
+Each checkpoint POST carries the checkpoint members `v`, `type`,
+`session_id`, `count`, `last_entry_hash`, `ts`, `kid` and `sig`, and the
+gate's public key; the account key, when one is configured, as
+`Authorization: Bearer` on that POST only; and, as with any HTTPS request,
+your server's IP address. Never an order, an argument or an entry. The
+timing file holds counts, hashes, times and outcomes only, never a key, a
+signature or an error body.
+
+### Gaps
+
+Every `record()` that makes no entry appends a line to `gaps.ndjson`:
+`{ ts, session_id, order_ref_sha256, call_seq, reason, paths }`. Some
+failures the recorder never sees: your own timeout, the recorder
+unreachable, your process restarting. Count your own failed calls and report
+each with `reportGap({ order_ref, call_seq?, reason })` (or `POST /gap`),
+where `reason` is `caller-timeout`, `unreachable` or `other`. If a gap line
+cannot be written, the call still returns, and one stderr line says so.
+
+### Erasure
+
+```
+chirindo trial-erase --dir <dir> --args-hash <sha256:hex>
+chirindo trial-erase --dir <dir> --order-ref <order_ref>
+```
+
+Removes every retained file for that `args_hash`, or for that order
+reference (matched by its SHA-256), and prints one JSON line per file, then
+`{"removed_count": N}`. It never touches a chain or a sidecar. After
+erasure:
+
+- the chain still shows that an entry existed, and its hashes;
+- a hash of short or guessable content can itself identify that content;
+- the witness's receipts (counts and times only) are kept by Headless Oracle;
+- no evidence file can be built for that entry.
+
+A retained file whose entry was never appended (the process stopped between
+the two writes) is an orphan: no entry names its hash, so it is evidence of
+nothing.
+
+### The loopback endpoint
+
+```
+chirindo trial-recorder --dir <dir> --server-label <name> [--port 7419] \
+  [--host 127.0.0.1|::1] [--token-file <file>] [--jwks-uri <https-url>] \
+  [--witness <base-url> --witness-key <hex|jwk-file> --witness-name <name>] \
+  [--witness-account-key-file <path>]
+```
+
+It prints `{"listening":"http://127.0.0.1:<port>"}` once bound and serves
+`POST /record`, `POST /await` (`{ "entry_hash", "max_ms" }`), `POST /gap`
+and `GET /health`. Call `http://127.0.0.1:<port>`, not `localhost`: the
+`Host` header must name the bound address and port. Each POST needs
+`Content-Type: application/json`; bodies are capped at 256 KB and a
+duplicate member is refused. A reply is 200 only when its `ok` is true; a
+refused input is 422, an `awaitWitness` timeout 504, and a failure on the
+recorder's side 503, each with the result object. **Without `--token-file`,
+any process on this host can call it**; with one, each POST needs
+`Authorization: Bearer <token>`.
+
+### In your service
+
+Create one recorder per process. The package is ESM only:
+
+```js
+import { createTrialRecorder } from "@headlessoracle/chirindo/trial-recorder";
+
+const recorder = createTrialRecorder({
+  dir: "/var/lib/chirindo",
+  serverLabel: "checkout",
+  witness: { baseUrl: "https://api.headlessoracle.com", name: "headlessoracle.com", pinnedKey: "<hex>" },
+});
+const r = recorder.record({ order_ref: "R-1001", order, call_seq: n++ });
+// ... on shutdown
+await recorder.close();
+```
+
+From CommonJS, load it with
+`const { createTrialRecorder } = await import("@headlessoracle/chirindo/trial-recorder")`.
+`createTrialRecorder` throws on invalid options or a missing identity;
+nothing after it throws. The package now has an `exports` map, so deep
+imports such as `@headlessoracle/chirindo/dist/...` no longer resolve; only
+`@headlessoracle/chirindo/trial-recorder` and
+`@headlessoracle/chirindo/package.json` do. The `chirindo` command is
+unchanged.
+
 ## Getting started
 
 The goal of this section: take you from "I use Cursor or Claude Code

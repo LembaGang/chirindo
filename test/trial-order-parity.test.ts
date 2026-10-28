@@ -126,7 +126,7 @@ describe("trial recorder: order rules equal orderProblem at the verdict", () => 
 
   it("(g) at least one malformed order per refusal branch, and each member of each loop, is refused by both", () => {
     const covered = new Set(BRANCHES.map((b) => b.branch));
-    console.log(`D3(g) orderProblem refusal branches covered: ${covered.size}; malformed cases: ${BRANCHES.length + LOOP_CASES.length}`);
+    process.stdout.write(`D3(g) orderProblem refusal branches covered: ${covered.size}; malformed cases: ${BRANCHES.length + LOOP_CASES.length}\n`);
     expect([...covered].sort((a, b) => a - b)).toEqual(Array.from({ length: 19 }, (_, i) => i + 1));
     for (const c of [...BRANCHES, ...LOOP_CASES]) {
       expect(problem(c.order), c.name).not.toBeNull();

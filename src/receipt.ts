@@ -91,6 +91,13 @@ export interface ReceiptInputs {
   x402PaymentRef?: string;
   decision: GateDecision;
   ts?: string;
+  // OPTIONAL chain head the caller already holds: the seq of the entry to
+  // write and the previous entry's hash (genesisPrevHash for seq 0). When
+  // given, the chain file is not re-read, so an append costs the same at any
+  // chain length (the trial recorder keeps its head in memory). Omitted =>
+  // the head is read from the chain file, as before; the bytes written are
+  // the same either way.
+  head?: { seq: number; prevHash: string };
 }
 
 // `agent` in every receipt this gate writes: the vendor and the version of
@@ -140,12 +147,19 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
       `x402_payment_ref must be "sha256:" + 64 lowercase hex chars, got: ${inputs.x402PaymentRef}`,
     );
   }
-  const file = readChainFileOrEmpty(inputs.chainPath);
-  const seq = file.records.length;
-  const prev_hash =
-    seq === 0
-      ? genesisPrevHash(inputs.sessionId)
-      : entryHashOfCanonical(jcsBytes(contentOf(file.records[seq - 1]!)));
+  let seq: number;
+  let prev_hash: string;
+  if (inputs.head !== undefined) {
+    seq = inputs.head.seq;
+    prev_hash = inputs.head.prevHash;
+  } else {
+    const file = readChainFileOrEmpty(inputs.chainPath);
+    seq = file.records.length;
+    prev_hash =
+      seq === 0
+        ? genesisPrevHash(inputs.sessionId)
+        : entryHashOfCanonical(jcsBytes(contentOf(file.records[seq - 1]!)));
+  }
 
   const event = buildEvent(inputs);
   const commitment = requestCommitment(event);
