@@ -622,9 +622,9 @@ honours modes. Each recorder process writes its own chain under
 `{ ok: false, reason, paths, session_id }`, where `paths` holds RFC 6901
 pointers of the members that decided it. Member names that are plain
 identifiers (`[A-Za-z0-9_-]`, at most 64) are written into `paths` as they
-are, any other name as `~invalid-key`; values never are. The input is read
-once, into a snapshot that every check and the write use. The checks run in
-this order, and the first failure decides:
+are, any other name as `~invalid-key`; values never are. The input is
+checked, then copied once into a snapshot that every later check and the
+write use. The checks run in this order, and the first failure decides:
 
 | reason | when |
 |---|---|
@@ -639,7 +639,8 @@ this order, and the first failure decides:
 
 If a part-written line cannot be cut from the chain, the chain is broken:
 one gap line with reason `chain-broken` says so, and every later `record()`
-in that process is refused with `write-failed`.
+in that process is refused with `write-failed`. That chain's file then ends
+in the part-written line, so `chirindo verify` rejects it.
 
 Allowed members: `order_ref`, `order`, `agent_context`, `call_seq`. In
 `agent_context`: `channel` (`acp`, `ucp`, `ap2`, `mcp`,
@@ -772,6 +773,11 @@ any process on this host can call it**; with one, each POST needs
 session id.
 
 ### In your service
+
+The trial recorder is not yet in a published npm release:
+`@headlessoracle/chirindo` 0.5.3 does not include it. Until a release,
+install it from a build of this repository or from a tarball made with
+`npm pack`.
 
 Create one recorder per process. The package is ESM only:
 
