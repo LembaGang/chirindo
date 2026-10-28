@@ -53,6 +53,7 @@ export function buildCheckpointFromHead(
   identity: LoadedFullIdentity,
   ts?: string,
 ): SignedCheckpoint {
+  if (!Number.isSafeInteger(head.count)) throw new Error("checkpoint count must be a safe integer");
   if (head.count < 1) throw new Error("cannot checkpoint an empty chain");
   const content: CheckpointContent = {
     v: RECORD_VERSION,

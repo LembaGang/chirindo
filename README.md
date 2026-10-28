@@ -573,7 +573,9 @@ The trial recorder lets a merchant's checkout service record each agent cart
 as a signed, hash-chained entry and have the witness countersign checkpoints
 of that chain. It is the recording and witnessing half of the gate, with
 nothing blocked: `record()` is synchronous, never throws and returns a plain
-object, and every failure becomes a line in a file, never a failed checkout.
+object; every call that makes no entry is recorded in `gaps.ndjson`, or, if
+that file cannot be written, in one stderr line; the recorder never fails
+your checkout.
 
 ### What it does not show
 
@@ -596,7 +598,7 @@ the place where spec v0.10 section 4.3, "The committed order", reads the
 order. Entries are the format the proxy writes, so
 `chirindo verify <chain> --key <dir>/identity.json` reads them unchanged.
 The chain holds only hashes; the arguments are kept beside it, one file per
-entry, because an evidence file needs them.
+entry, because the evidence format needs them.
 
 Under the data directory (`chirindo init --dir <dir>` creates its identity;
 the recorder never creates keys):
@@ -618,18 +620,26 @@ honours modes. Each recorder process writes its own chain under
 `record({ order_ref, order, agent_context?, call_seq? })` returns
 `{ ok: true, entry_hash, args_hash, count, session_id }`, or
 `{ ok: false, reason, paths, session_id }`, where `paths` holds RFC 6901
-pointers of the members that decided it, never values. The checks run in
+pointers of the members that decided it. Member names that are plain
+identifiers (`[A-Za-z0-9_-]`, at most 64) are written into `paths` as they
+are, any other name as `~invalid-key`; values never are. The input is read
+once, into a snapshot that every check and the write use. The checks run in
 this order, and the first failure decides:
 
 | reason | when |
 |---|---|
 | `invalid-input` | not a plain object of JSON values within 256 KB (integers within the safe range) |
 | `refused-field` | a member outside the allow-list below, at any depth |
+| `invalid-order`, `invalid-input` | a screened free-text field is longer than 256 characters: an item's `name`, `location` or `category` (`invalid-order`), or `agent_name` (`invalid-input`); checked before it is screened |
 | `refused-value` | a free-text field holds a card-number-like or e-mail-like token (below) |
 | `invalid-input` | `order_ref` is not 1 to 256 printable ASCII characters, `call_seq` not a non-negative integer, or an `agent_context` value is outside its format |
 | `invalid-order` | the order is not the committed order of spec section 4.3 |
-| `write-failed` | the retained file or the entry could not be written (a retained file is removed when its entry could not be) |
+| `write-failed` | the retained file or the entry could not be written (a retained file is removed when its entry could not be, and a part-written line is cut from the chain), or the chain is broken (below) |
 | `internal` | anything else, including a call after `close()` |
+
+If a part-written line cannot be cut from the chain, the chain is broken:
+one gap line with reason `chain-broken` says so, and every later `record()`
+in that process is refused with `write-failed`.
 
 Allowed members: `order_ref`, `order`, `agent_context`, `call_seq`. In
 `agent_context`: `channel` (`acp`, `ucp`, `ap2`, `mcp`,
@@ -637,7 +647,8 @@ Allowed members: `order_ref`, `order`, `agent_context`, `call_seq`. In
 `value`, optional `key_id` and `alg`, each at most 4,096 characters);
 `payment_token_limits` (`currency`, three upper-case letters;
 `max_amount_minor`, a decimal string with no sign and no leading zero;
-optional `expires_at`, an RFC 3339 UTC time); `agent_name` (at most 256
+optional `expires_at`, an RFC 3339 UTC time naming a real instant, so
+`2026-02-30T00:00:00Z` and `24:00:00` are refused); `agent_name` (at most 256
 characters); `mandate` (`format` `ap2`, `vi` or `other`; `value` at most
 65,536 characters). In the order, the members of spec section 4.3, with an
 item `name` of at most 256 characters.
@@ -670,21 +681,29 @@ restarts when your process restarts, so the numbers repeat across restarts.
 `{ ok: true, received_at, covering_count }` once a verified witness receipt
 covers the entry, or `{ ok: false, reason }` with `timeout` (at `maxMs`,
 capped at 3,500), `no-witness`, `unknown-entry` (not one of this process's
-last 10,000 entries), `stopped` or `closed`. At most one witness POST is in
+last 10,000 entries), `stopped`, `closed` or `internal`. At most one witness POST is in
 flight; a new head waits while one is, and the later checkpoint covers the
 heads in between. So the record made just before the charge can wait up to
 one witness round trip more than its own POST: allow for that in your wait
-limit. On `quota_exceeded`, `payment_required` or `invalid_key` the recorder
-stops sending until 00:00 UTC or a restart, and says so once in the log.
+limit. On `quota_exceeded`, `payment_required`, `invalid_key` or
+`witness_plan_required` the recorder stops sending until 00:00 UTC or a
+restart, and says so once in the log.
 
-`close(timeoutMs)` (default 5,000) sends a final checkpoint of the head and
-waits at most that long for it; what is still unanswered is recorded as
-`witness_timeout`. After a restart, the recorder looks at up to 10 earlier
-chains in the data directory, signed by this identity, that no running
-recorder holds and that have
-not changed for 10 minutes, and sends one checkpoint for each head that no
-receipt covers. Such a receipt carries a late `received_at`, and shows only
-that the head existed by then.
+`close(timeoutMs)` (default 5,000) sends a final checkpoint of the head
+unless it is already witnessed or in flight, and waits at most that long; a
+POST still unanswered is recorded as `witness_timeout`, and a head never
+sent because sending was stopped as `witness_stopped`.
+
+After a restart, the recorder looks at up to 10 earlier chains in the data
+directory, signed by this identity, that no running recorder holds and that
+have not changed for 10 minutes, and sends one checkpoint for each head that
+no receipt covers; after each of its own POSTs, one such head goes before
+its next own head. It reads only a chain's first line and last complete
+line (a torn last line is ignored): it does not verify the lines between.
+Such a checkpoint's receipt carries a late `received_at`, and shows that the
+head existed by then; it does not show that the chain verifies. A stale lock
+left by a crashed process can make that session look live if its process
+id has been reused; such a chain is then skipped.
 
 ### What reaches the witness
 
@@ -715,13 +734,17 @@ chirindo trial-erase --dir <dir> --order-ref <order_ref>
 
 Removes every retained file for that `args_hash`, or for that order
 reference (matched by its SHA-256), and prints one JSON line per file, then
-`{"removed_count": N}`. It never touches a chain or a sidecar. After
-erasure:
+`{"removed_count": N}`. It never touches a chain, a sidecar, `gaps.ndjson`
+or `witness-timing.ndjson`, and empty retained-file directories may remain.
+After erasure:
 
 - the chain still shows that an entry existed, and its hashes;
 - a hash of short or guessable content can itself identify that content;
-- the witness's receipts (counts and times only) are kept by Headless Oracle;
-- no evidence file can be built for that entry.
+- a gap line still holds the SHA-256 of an order reference and its
+  `call_seq`;
+- the witness's receipts (count, session id, head hash, times) are kept by
+  Headless Oracle;
+- the evidence format can no longer be completed for that record.
 
 A retained file whose entry was never appended (the process stopped between
 the two writes) is an orphan: no entry names its hash, so it is evidence of
@@ -745,7 +768,8 @@ duplicate member is refused. A reply is 200 only when its `ok` is true; a
 refused input is 422, an `awaitWitness` timeout 504, and a failure on the
 recorder's side 503, each with the result object. **Without `--token-file`,
 any process on this host can call it**; with one, each POST needs
-`Authorization: Bearer <token>`.
+`Authorization: Bearer <token>`. `GET /health` needs no token and shows the
+session id.
 
 ### In your service
 

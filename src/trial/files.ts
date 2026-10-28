@@ -77,7 +77,9 @@ export function writeRetained(
   ensureDir(bucket);
   const path = join(bucket, `${count}-${argsHash.slice("sha256:".length, "sha256:".length + 32)}.json`);
   try {
-    writeFileSync(path, JSON.stringify(content), { encoding: "utf8", mode: FILE_MODE, flag: "wx" });
+    // "w": a file left with this name by an earlier failed append is an orphan
+    // that no entry names, so it may be replaced.
+    writeFileSync(path, JSON.stringify(content), { encoding: "utf8", mode: FILE_MODE, flag: "w" });
   } catch (e) {
     rmSync(path, { force: true });
     throw e;

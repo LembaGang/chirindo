@@ -65,7 +65,8 @@ export function createTrialServer(o: TrialServerOptions): TrialServer {
   const authorized = (req: IncomingMessage): boolean => {
     if (tokenDigest === undefined) return true;
     const h = req.headers["authorization"];
-    if (typeof h !== "string" || !h.startsWith("Bearer ")) return false;
+    // The scheme is case-insensitive (RFC 9110 section 11.1); the token is not.
+    if (typeof h !== "string" || !/^bearer /i.test(h)) return false;
     return timingSafeEqual(digest(h.slice("Bearer ".length)), tokenDigest);
   };
 
@@ -97,7 +98,10 @@ export function createTrialServer(o: TrialServerOptions): TrialServer {
     const type = String(req.headers["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
     if (type !== "application/json") return refuse(res, 415, "content-type-not-json");
     const raw = await readBody(req);
-    if (raw === null) return send(res, 413, { error: "body-too-large" }, { connection: "close" });
+    if (raw === null) {
+      res.on("finish", () => req.destroy());
+      return send(res, 413, { error: "body-too-large" }, { connection: "close" });
+    }
     let body: unknown;
     try {
       body = strictJsonParse(raw.toString("utf8"));

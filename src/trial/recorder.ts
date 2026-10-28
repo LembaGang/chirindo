@@ -10,7 +10,7 @@
 // signed from that head. The chain is never re-read and records are not kept.
 
 import { randomBytes } from "node:crypto";
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, statSync, truncateSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { appendReceipt } from "../receipt.js";
 import { appendSidecarLine, buildCheckpointFromHead } from "../checkpoint.js";
@@ -76,7 +76,8 @@ const CATCH_UP_POSTS = 10;
 const CATCH_UP_QUIET_MS = 10 * 60_000;
 // The witness refused this caller, not this checkpoint: sending more today
 // would only be refused again.
-const STOP_CODES = new Set(["quota_exceeded", "payment_required", "invalid_key"]);
+const STOP_CODES = new Set(["quota_exceeded", "payment_required", "invalid_key", "witness_plan_required"]);
+const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/;
 
 // Options after validation; the CLI builds these from its own flag parser.
 export interface ResolvedTrialOptions {
@@ -86,6 +87,9 @@ export interface ResolvedTrialOptions {
   witness?: WitnessTarget;
   log: (line: string) => void;
   now: () => string;
+  // Tests only (fault injection): the chain append and its truncation.
+  appendEntry?: typeof appendReceipt;
+  truncateChain?: (path: string, length: number) => void;
 }
 
 function fail(msg: string): never {
@@ -200,8 +204,35 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
   ensureDir(join(o.dir, "args"));
   writeLock(o.dir, sessionId);
 
+  // The caller's callbacks never throw into the recorder: a log that throws
+  // is ignored, and a clock that throws or answers no ISO UTC time falls back
+  // to the system clock.
+  const log = (line: string) => {
+    try {
+      o.log(line);
+    } catch {
+      /* the caller's logger failed; nothing to report it to */
+    }
+  };
+  const now = (): string => {
+    try {
+      const t = o.now();
+      if (typeof t === "string" && ISO_UTC.test(t)) return t;
+    } catch {
+      /* fall through to the system clock */
+    }
+    return new Date().toISOString();
+  };
+  const appendEntry = o.appendEntry ?? appendReceipt;
+  const truncateChain = o.truncateChain ?? truncateSync;
+
   let head = { seq: 0, prevHash: genesisPrevHash(sessionId) };
   let chainCreated = false;
+  // The chain's known-good length: an append that fails part-way is cut back
+  // to it, so a torn line never has the next entry glued to it. If the cut
+  // fails, the chain is broken and every later record is refused.
+  let chainBytes = 0;
+  let chainBroken = false;
   let closing: Promise<void> | null = null;
   let closed = false;
   // entry_hash -> count, the last REMEMBERED_ENTRIES entries.
@@ -226,7 +257,7 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
   const logOnce = (key: string, line: string) => {
     if (logged.has(key)) return;
     logged.add(key);
-    o.log(line);
+    log(line);
   };
   const stopped = () => Date.now() < stoppedUntil;
 
@@ -241,7 +272,7 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
   const gapLine = (orderRef: string | null, callSeq: number | null, reason: string, paths: string[]): boolean => {
     try {
       appendJsonLine(gapsPathOf(o.dir), {
-        ts: o.now(),
+        ts: now(),
         session_id: sessionId,
         order_ref_sha256: orderRef === null ? null : sha256Tagged(orderRef),
         call_seq: callSeq,
@@ -294,8 +325,13 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
     }
   };
 
-  const finish = (f: InFlight, outcome: WitnessOutcome) => {
+  const finish = (f: InFlight, reply: WitnessOutcome) => {
     inflight = null;
+    // A receipt that names no received_at answers nothing: an error outcome.
+    const outcome: WitnessOutcome =
+      reply.receipt !== null && typeof reply.receipt["received_at"] !== "string"
+        ? { receipt: null, error: "bad_witness_response" }
+        : reply;
     const error = outcome.error;
     writeSidecar(f.head.sidecar, { checkpoint: f.cp, witness_receipt: outcome.receipt, witness_error: error });
     timingLine({
@@ -303,12 +339,13 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
       count: f.head.count,
       last_entry_hash: f.head.hash,
       sent_at: f.sentAt,
-      replied_at: o.now(),
+      replied_at: now(),
       outcome: error ?? "ok",
     });
-    if (f.head.own && outcome.receipt !== null) {
+    // A fork receipt neither advances the witnessed head nor answers a wait.
+    if (f.head.own && outcome.receipt !== null && outcome.receipt["fork"] !== "true") {
       lastOwnOk = Math.max(lastOwnOk, f.head.count);
-      if (outcome.receipt["fork"] !== "true") {
+      {
         const r = { count: f.head.count, received_at: String(outcome.receipt["received_at"]) };
         receipts.push(r);
         settleWaiters((w) => (w.count <= r.count ? { ok: true, received_at: r.received_at, covering_count: r.count } : null));
@@ -331,39 +368,56 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
     pump();
   };
 
-  // At most one POST in flight; the newest own head first, then catch-up heads.
-  // Heads in between are covered by the later checkpoint.
-  const pump = () => {
-    if (inflight !== null || closed || o.witness === undefined) return;
-    let next: Head | null = null;
-    if (!stopped()) {
-      if (pendingOwn !== null && pendingOwn.count > lastAttemptedOwn) {
-        next = pendingOwn;
-        lastAttemptedOwn = next.count;
-      } else if (catchUp.length > 0) {
-        next = catchUp.shift()!;
-      }
-    }
-    if (next === null) {
-      notifyIdle();
-      return;
-    }
-    const h = next;
-    let cp: SignedCheckpoint;
+  // At most one POST in flight. Own heads go first (the newest; heads in
+  // between are covered by the later checkpoint), but after each own POST one
+  // waiting catch-up head goes before the next own head, so a busy session
+  // cannot starve the catch-up.
+  let lastSentWasOwn = false;
+  const pump = (): void => {
     try {
-      cp = buildCheckpointFromHead({ sessionId: h.sessionId, count: h.count, lastEntryHash: h.hash }, identity, o.now());
+      if (inflight !== null || closed || o.witness === undefined) return;
+      let next: Head | null = null;
+      if (!stopped()) {
+        const ownReady = pendingOwn !== null && pendingOwn.count > lastAttemptedOwn;
+        if (catchUp.length > 0 && (lastSentWasOwn || !ownReady)) {
+          next = catchUp.shift()!;
+        } else if (ownReady) {
+          next = pendingOwn!;
+          lastAttemptedOwn = next.count;
+        }
+      }
+      if (next === null) {
+        notifyIdle();
+        return;
+      }
+      const h = next;
+      lastSentWasOwn = h.own;
+      let cp: SignedCheckpoint;
+      try {
+        cp = buildCheckpointFromHead({ sessionId: h.sessionId, count: h.count, lastEntryHash: h.hash }, identity, now());
+      } catch (e) {
+        logOnce("build", `[chirindo] trial-recorder: checkpoint not built: ${(e as Error).message}`);
+        pump();
+        return;
+      }
+      const f: InFlight = { head: h, cp, sentAt: now(), abandoned: false, settled: Promise.resolve() };
+      inflight = f;
+      f.settled = witnessCheckpoint(cp, identity.publicKey, o.witness, WITNESS_POST_TIMEOUT_MS, stop.signal)
+        .catch((): WitnessOutcome => ({ receipt: null, error: "witness_unreachable" }))
+        .then((outcome) => {
+          try {
+            if (!f.abandoned) finish(f, outcome);
+          } catch (e) {
+            if (inflight === f) inflight = null;
+            logOnce("finish", `[chirindo] trial-recorder: witness outcome not recorded: ${(e as Error).message}`);
+          }
+        })
+        .catch(() => {
+          /* nothing may escape as an unhandled rejection */
+        });
     } catch (e) {
-      logOnce("build", `[chirindo] trial-recorder: checkpoint not built: ${(e as Error).message}`);
-      pump();
-      return;
+      logOnce("pump", `[chirindo] trial-recorder: witness driver error: ${(e as Error).message}`);
     }
-    const f: InFlight = { head: h, cp, sentAt: o.now(), abandoned: false, settled: Promise.resolve() };
-    inflight = f;
-    f.settled = witnessCheckpoint(cp, identity.publicKey, o.witness, WITNESS_POST_TIMEOUT_MS, stop.signal)
-      .catch((): WitnessOutcome => ({ receipt: null, error: "witness_unreachable" }))
-      .then((outcome) => {
-        if (!f.abandoned) finish(f, outcome);
-      });
   };
 
   const remember = (hash: string, count: number) => {
@@ -404,7 +458,7 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
             );
           } catch (e) {
             if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
-              o.log(`[chirindo] trial-recorder: catch-up skipped session ${c.sessionId}: malformed sidecar`);
+              log(`[chirindo] trial-recorder: catch-up skipped session ${c.sessionId}: malformed sidecar`);
               continue;
             }
           }
@@ -417,7 +471,7 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
       }
       if (queued > 0) pump();
     } catch (e) {
-      o.log(`[chirindo] trial-recorder: catch-up not run (${(e as NodeJS.ErrnoException).code ?? "error"})`);
+      log(`[chirindo] trial-recorder: catch-up not run (${(e as NodeJS.ErrnoException).code ?? "error"})`);
     }
   };
   if (o.witness !== undefined) setImmediate(runCatchUp);
@@ -431,6 +485,7 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
         if (closed || closing !== null) return refuse(input, "internal", []);
         const c = checkRecordInput(input);
         if (!c.ok) return refuse(input, c.reason, c.paths);
+        if (chainBroken) return refuse(input, "write-failed", []);
         const ah = argsHash(c.args);
         const count = head.seq + 1;
         let retained: string;
@@ -448,9 +503,10 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
         try {
           if (!chainCreated) {
             ensureFile(chainPath);
+            chainBytes = statSync(chainPath).size;
             chainCreated = true;
           }
-          entry = appendReceipt({
+          entry = appendEntry({
             chainPath,
             sessionId,
             identity,
@@ -459,17 +515,28 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
             toolArgs: c.args,
             decision: { kind: "allow" },
             ...(o.jwksUri !== undefined ? { jwksUri: o.jwksUri } : {}),
-            ts: o.now(),
+            ts: now(),
             head: { seq: head.seq, prevHash: head.prevHash },
           });
         } catch {
           try {
             rmSync(retained);
           } catch {
-            /* an orphan the assembler ignores */
+            /* an orphan: no entry names its hash */
+          }
+          if (chainCreated) {
+            try {
+              truncateChain(chainPath, chainBytes);
+            } catch {
+              chainBroken = true;
+              gapLine(null, null, "chain-broken", []);
+              log(`[chirindo] trial-recorder: a failed append could not be cut back; chain ${sessionId} is broken and every later record is refused (write-failed)`);
+            }
           }
           return refuse(input, "write-failed", []);
         }
+        // appendRecordLine writes exactly this line.
+        chainBytes += Buffer.byteLength(JSON.stringify(entry) + "\n", "utf8");
         const entryHash = entryHashOfCanonical(jcsBytes(contentOf(entry)));
         head = { seq: count, prevHash: entryHash };
         remember(entryHash, count);
@@ -495,7 +562,7 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
 
     async awaitWitness(entryHash, maxMs) {
       const t0 = Date.now();
-      const sentAt = o.now();
+      const sentAt = now();
       const count = typeof entryHash === "string" ? known.get(entryHash) : undefined;
       const done = (r: AwaitResult): AwaitResult => {
         timingLine({
@@ -503,7 +570,7 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
           count: count ?? null,
           last_entry_hash: typeof entryHash === "string" && /^sha256:[0-9a-f]{64}$/.test(entryHash) ? entryHash : null,
           sent_at: sentAt,
-          replied_at: o.now(),
+          replied_at: now(),
           outcome: r.ok ? "ok" : r.reason,
           await: true,
           waited_ms: Date.now() - t0,
@@ -567,7 +634,7 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
                 count: left.head.count,
                 last_entry_hash: left.head.hash,
                 sent_at: left.sentAt,
-                replied_at: o.now(),
+                replied_at: now(),
                 outcome: "witness_timeout",
               });
               await left.settled;
@@ -575,8 +642,9 @@ export function openTrialRecorder(o: ResolvedTrialOptions): TrialRecorder {
             const p = pendingOwn as Head | null;
             if (p !== null && p.count > lastAttemptedOwn) {
               try {
-                const cp = buildCheckpointFromHead({ sessionId, count: p.count, lastEntryHash: p.hash }, identity, o.now());
-                writeSidecar(ownSidecar, { checkpoint: cp, witness_receipt: null, witness_error: "witness_timeout" });
+                const cp = buildCheckpointFromHead({ sessionId, count: p.count, lastEntryHash: p.hash }, identity, now());
+                // Never sent: because sending was stopped, or because time ran out.
+                writeSidecar(ownSidecar, { checkpoint: cp, witness_receipt: null, witness_error: stopped() ? "witness_stopped" : "witness_timeout" });
               } catch {
                 /* nothing more to record */
               }

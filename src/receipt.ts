@@ -150,6 +150,13 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
   let seq: number;
   let prev_hash: string;
   if (inputs.head !== undefined) {
+    if (
+      !Number.isSafeInteger(inputs.head.seq) ||
+      inputs.head.seq < 0 ||
+      !/^sha256:[0-9a-f]{64}$/.test(inputs.head.prevHash)
+    ) {
+      throw new Error('head must be { seq: a non-negative safe integer, prevHash: "sha256:" + 64 lowercase hex chars }');
+    }
     seq = inputs.head.seq;
     prev_hash = inputs.head.prevHash;
   } else {

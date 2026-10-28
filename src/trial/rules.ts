@@ -194,6 +194,14 @@ const strMax = (v: unknown, max: number, min = 0) => isStr(v) && v.length >= min
 
 export const isCallSeq = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 
+// An RFC 3339 UTC time that names a real instant, by the same round trip as
+// dateOk: 2026-02-30T00:00:00Z and 2026-01-01T24:00:00Z are refused.
+function timeOk(s: unknown): boolean {
+  if (!isStr(s) || !RFC3339_UTC.test(s)) return false;
+  const d = new Date(s);
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 19) === s.slice(0, 19);
+}
+
 // Formats outside the order: the first failing pointer, or null.
 function formatFailure(input: Obj): string | null {
   if (!(isStr(input["order_ref"]) && PRINTABLE_256.test(input["order_ref"]))) return "/order_ref";
@@ -216,7 +224,7 @@ function formatFailure(input: Obj): string | null {
     if (!(isStr(pl["max_amount_minor"]) && AMOUNT.test(pl["max_amount_minor"]))) return at("payment_token_limits", "max_amount_minor");
     if (has(pl, "expires_at")) {
       const e = pl["expires_at"];
-      if (!(isStr(e) && RFC3339_UTC.test(e) && Number.isFinite(Date.parse(e)))) return at("payment_token_limits", "expires_at");
+      if (!timeOk(e)) return at("payment_token_limits", "expires_at");
     }
   }
   if (has(ac, "agent_name") && !strMax(ac["agent_name"], 256, 1)) return at("agent_name");
@@ -272,11 +280,40 @@ export function orderFailure(o: unknown): string | null {
   return null;
 }
 
-export function checkRecordInput(input: unknown): Checked {
-  if (!isObj(input) || !isJsonValue(input, 0)) return { ok: false, reason: "invalid-input", paths: [] };
-  if (Buffer.byteLength(JSON.stringify(input), "utf8") > MAX_INPUT_BYTES) return { ok: false, reason: "invalid-input", paths: [] };
+// The length caps of the screened free-text fields, checked before they are
+// screened (so an oversized string is never scanned): an item's name,
+// location and category (order rules), and agent_context.agent_name.
+function capFailure(input: Obj): Checked | null {
+  const order = input["order"];
+  if (isObj(order) && Array.isArray(order["items"])) {
+    const items = order["items"] as unknown[];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!isObj(it)) continue;
+      for (const k of ["name", "location", "category"]) {
+        const v = it[k];
+        if (isStr(v) && v.length > 256) return { ok: false, reason: "invalid-order", paths: [pointer(["order", "items", i, k])] };
+      }
+    }
+  }
+  const ac = input["agent_context"];
+  if (isObj(ac) && isStr(ac["agent_name"]) && ac["agent_name"].length > 256) {
+    return { ok: false, reason: "invalid-input", paths: ["/agent_context/agent_name"] };
+  }
+  return null;
+}
+
+export function checkRecordInput(raw: unknown): Checked {
+  if (!isObj(raw) || !isJsonValue(raw, 0)) return { ok: false, reason: "invalid-input", paths: [] };
+  const text = JSON.stringify(raw);
+  if (Buffer.byteLength(text, "utf8") > MAX_INPUT_BYTES) return { ok: false, reason: "invalid-input", paths: [] };
+  // One snapshot for every later check and for the write: a getter or a
+  // caller's later change cannot make the checked and the written differ.
+  const input = JSON.parse(text) as Obj;
   const fields = refusedFields(input);
   if (fields.length > 0) return { ok: false, reason: "refused-field", paths: fields.slice(0, MAX_PATHS) };
+  const cap = capFailure(input);
+  if (cap !== null) return cap;
   const values = refusedValues(input);
   if (values.length > 0) return { ok: false, reason: "refused-value", paths: values.slice(0, MAX_PATHS) };
   const format = formatFailure(input);
