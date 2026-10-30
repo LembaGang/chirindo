@@ -7,8 +7,29 @@ messages.
 
 ## 0.6.0 - 2026-10-30
 
-This is B-432, the purchase check.
+This release adds two package exports: the purchase check (B-432) and the trial recorder (B-419).
 
+- **The trial recorder:** `@headlessoracle/chirindo/trial-recorder`, a new
+  package export (B-419).
+  - It lets a merchant's checkout service record each agent cart as a
+    signed, hash-chained entry and have the witness countersign checkpoints
+    of that chain. It is the recording and witnessing half of the gate,
+    with nothing blocked: `record()` is synchronous, never throws and
+    returns a plain object; every call that makes no entry is recorded in
+    `gaps.ndjson`.
+  - Export: `createTrialRecorder`.
+  - The README section "Chirindo trial recorder" states what it does not
+    show.
+- **`chirindo trial-recorder`:** the recorder as a loopback endpoint,
+  serving `POST /record`, `POST /await`, `POST /gap` and `GET /health`.
+- **`chirindo trial-erase`:** removes every retained file for an
+  `args_hash`, or for an order reference. It never touches a chain.
+- **The package has an `exports` map,** so deep imports such as
+  `@headlessoracle/chirindo/dist/...` no longer resolve; only
+  `@headlessoracle/chirindo/trial-recorder`,
+  `@headlessoracle/chirindo/purchase-check` and
+  `@headlessoracle/chirindo/package.json` do. The `chirindo` command is
+  unchanged.
 - **The purchase check:** `@headlessoracle/chirindo/purchase-check`, a new
   package export.
   - Before a provider charges, it checks a purchase against an Annex A.3

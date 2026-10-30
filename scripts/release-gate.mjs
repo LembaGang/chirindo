@@ -49,6 +49,7 @@ import { createHash, createPublicKey } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { CR_FILES, REQUIRED_EXPORTS, crFindings, exportFindings, forbiddenPaths, packedFiles, probeExports } from "./release-gate-checks.mjs";
 
 // Derived from the script's own location once this lands in scripts/.
 // CHIRINDO_REPO overrides it so the gate can be run out-of-tree (review, CI).
@@ -329,6 +330,32 @@ async function runPackGate() {
     } catch (e) {
       record("CLI/E2E", false, String(e.stderr ?? e.message).trim().split("\n")[0]);
     }
+
+    // --- EXPORTS -------------------------------------------------------------
+    // RED WHEN: a consumer's import of ./purchase-check or ./trial-recorder
+    // does not resolve through the exports map, or lacks a documented name
+    // (B-428 R2). SURFACE above reads only the recorder's index.
+    try {
+      const bad = exportFindings(probeExports(work));
+      const n = Object.values(REQUIRED_EXPORTS).flat().length;
+      record("EXPORTS", bad.length === 0,
+        bad.length ? bad.join("; ") : `${Object.keys(REQUIRED_EXPORTS).length} specifiers import, ${n}/${n} names present`);
+    } catch (e) {
+      record("EXPORTS", false, String(e.stderr ?? e.message).trim().split("\n")[0]);
+    }
+
+    // --- PACKED-PATHS --------------------------------------------------------
+    // RED WHEN: the artifact carries a test/, scripts/ or keys/ path, a .env
+    // file, or a file holding a PEM private key header (B-428 R2).
+    const forbidden = forbiddenPaths(installed);
+    record("PACKED-PATHS", forbidden.length === 0,
+      forbidden.length ? forbidden.join("; ") : `${packedFiles(installed).length} files, none forbidden`);
+
+    // --- CR ------------------------------------------------------------------
+    // RED WHEN: a carriage return reaches README.md, LICENSE, NOTICE,
+    // package.json or dist/cli.js (B-428 R2).
+    const cr = crFindings(installed);
+    record("CR", cr.length === 0, cr.length ? cr.join("; ") : `${CR_FILES.length}/${CR_FILES.length} files LF only`);
   } catch (e) {
     record("HARNESS", false, String(e.stderr ?? e.message).trim().split("\n").slice(0, 3).join(" | "));
     if (!keep) rmSync(work, { recursive: true, force: true });
