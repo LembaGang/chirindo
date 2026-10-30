@@ -1,9 +1,11 @@
 // Two receipts (allow, then deny) written by appendReceipt at commit 84b52d7,
 // from a detached worktree of that commit, with the fixed inputs of
-// test/purchase-receipts.test.ts (B-432 test 3). A receipt written without
-// `check` must still equal these bytes. A version bump changes agent.version
-// and so this vector, by design.
+// test/purchase-receipts-vector.test.ts (B-432 test 3). A receipt written
+// without `check` must still equal these bytes. They carry agent.version
+// "0.5.3", the package version at 84b52d7; that test pins src/version.ts to
+// VERSION_84B52D7, so the vector holds through a version bump (B-428).
 
+export const VERSION_84B52D7 = "0.5.3";
 export const KID_84B52D7 = "aVBtapLd11SUVKIMGJfPzOEDuN0sXcmzJQNVT-_sKEU";
 export const CHAIN_SHA256_84B52D7 = "065a0507b551463ea225671594e90370c36225821fd34ffd813f393726e86dd2";
 export const CHAIN_84B52D7 =

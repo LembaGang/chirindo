@@ -5,9 +5,9 @@ Published versions and their dates are listed on npm
 Releases before 0.5.1 have no entry here; their notes are their commit
 messages.
 
-## Unreleased
+## 0.6.0 - 2026-10-30
 
-Not yet released; no version is assigned. This is B-432, the purchase check.
+This is B-432, the purchase check.
 
 - **The purchase check:** `@headlessoracle/chirindo/purchase-check`, a new
   package export.

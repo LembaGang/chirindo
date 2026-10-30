@@ -774,10 +774,8 @@ session id.
 
 ### In your service
 
-The trial recorder is not yet in a published npm release:
-`@headlessoracle/chirindo` 0.5.3 does not include it. Until a release,
-install it from a build of this repository or from a tarball made with
-`npm pack`.
+The trial recorder ships from 0.6.0:
+`npm install @headlessoracle/chirindo@0.6.0`.
 
 Create one recorder per process. The package is ESM only:
 
@@ -808,7 +806,7 @@ unchanged.
 
 The purchase check is for a payment provider whose agents buy for its customers. Before minting a credential or charging, the provider's code sends the instruction it signed for its customer and the order to Chirindo. Chirindo answers allow or deny with the reasons, and writes each decision it makes on a well-formed request as a signed, hash-chained receipt before it answers.
 
-The purchase check is not yet in a published npm release: `@headlessoracle/chirindo` 0.5.3 does not include it. Until a release, install it from a build of this repository, or from a tarball made with `npm pack`.
+The purchase check ships from 0.6.0: `npm install @headlessoracle/chirindo@0.6.0`.
 
 ### What it claims, and its limits
 

@@ -1,21 +1,18 @@
 // B-432 test 3, receipts (design §5 and §8.3): a deny receipt verifies and
-// holds `check`; a receipt written without `check` equals an 84b52d7 vector
-// byte for byte; a step 1 refusal writes nothing. Also the retained arguments
+// holds `check`; a step 1 refusal writes nothing. (The 84b52d7 byte vector is
+// in purchase-receipts-vector.test.ts.) Also the retained arguments
 // (T0 ruling 6): one file per receipt, the arguments value itself as JCS
 // bytes, whose SHA-256 is the receipt's args_hash.
 
-import { createHash, createPublicKey } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { PURCHASE_CHECK_VERSION, type PurchaseCheckMember } from "../src/purchase/member.js";
 import { jcsSha256 } from "../src/purchase/m6.js";
-import { appendReceipt } from "../src/receipt.js";
-import { IDENTITY_FILENAME, PRIVATE_KEY_FILENAME, loadFullIdentity, runVerify, writeIdentity } from "../src/vendor/recorder/index.js";
-import { CHAIN_84B52D7, CHAIN_SHA256_84B52D7, KID_84B52D7 } from "./fixtures/purchase-check-84b52d7.js";
+import { IDENTITY_FILENAME, runVerify } from "../src/vendor/recorder/index.js";
 import { cleanupTmpDir } from "./helpers.js";
-import { GATE, argsFiles, chainPathOf, checkDir, checkOf, checked, clockAt, itemOf, openCheck, order, recordsOf, signedText } from "./purchase-helpers.js";
+import { argsFiles, chainPathOf, checkDir, checkOf, checked, clockAt, itemOf, openCheck, order, recordsOf, signedText } from "./purchase-helpers.js";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach(cleanupTmpDir));
@@ -94,28 +91,8 @@ describe("test 3: receipts", () => {
     expect(JSON.parse(bytes!.toString("utf8")).denied_instruction_sha256).toBe(r.instruction_sha256);
   });
 
-  it("a receipt written without check equals the 84b52d7 vector byte for byte", () => {
-    const dir = mkdtempSync(join(tmpdir(), "purchase-vec-"));
-    dirs.push(dir);
-    writeIdentity(dir, GATE.priv, createPublicKey(GATE.priv));
-    const identity = loadFullIdentity(join(dir, IDENTITY_FILENAME), join(dir, PRIVATE_KEY_FILENAME));
-    expect(identity.kid).toBe(KID_84B52D7);
-    const ord = { merchant_id: "hotel.example", merchant_order_id: "H-1", currency: "EUR", total_minor: "28000", items: [{ sku: "ROOM", quantity: 2, unit_price_minor: "14000" }] };
-    const write = (chainPath: string, withCheck: boolean) => {
-      const base = { chainPath, sessionId: "b432-byte-vector", identity, server: "purchase-check", toolName: "check", jwksUri: "https://gate.example/.well-known/jwks.json" };
-      const member = (reasons: string[]): PurchaseCheckMember => ({ v: PURCHASE_CHECK_VERSION, instruction_sha256: "sha256:" + "a".repeat(64), order_sha256: jcsSha256(ord), merchant_id: "hotel.example", merchant_order_id: "H-1", checkout_ref: null, at: "2026-11-05T12:00:00.000Z", reasons, exceeded: [] });
-      appendReceipt({ ...base, toolArgs: { order: ord, instruction_sha256: "sha256:" + "a".repeat(64) }, decision: { kind: "allow" }, ts: "2026-11-05T12:00:00.000Z", ...(withCheck ? { check: member([]) } : {}) });
-      appendReceipt({ ...base, toolArgs: { order: ord, denied_instruction_sha256: "sha256:" + "b".repeat(64) }, decision: { kind: "deny", reason: "x" }, ts: "2026-11-05T12:00:01.000Z", ...(withCheck ? { check: { ...member(["expired"]), at: "2026-11-05T12:00:01.000Z" } } : {}) });
-      return readFileSync(chainPath, "utf8");
-    };
-    const plain = write(join(dir, "plain.jsonl"), false);
-    expect(sha256(CHAIN_84B52D7)).toBe("sha256:" + CHAIN_SHA256_84B52D7);
-    expect(plain).toBe(CHAIN_84B52D7);
-    // The control: the same receipts with check differ, and still verify.
-    const withCheck = write(join(dir, "with-check.jsonl"), true);
-    expect(withCheck).not.toBe(CHAIN_84B52D7);
-    expect(runVerify({ chainPath: join(dir, "with-check.jsonl"), identityPath: join(dir, IDENTITY_FILENAME) })).toMatchObject({ kind: "valid", count: 2 });
-  });
+  // The 84b52d7 byte vector is in test/purchase-receipts-vector.test.ts, which
+  // pins src/version.ts to the version that vector was written at (B-428).
 
   it("a step 1 refusal writes nothing", async () => {
     const dir = fresh();
