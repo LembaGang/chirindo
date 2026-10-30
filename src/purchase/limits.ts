@@ -172,7 +172,7 @@ export interface Judgement {
   order: Obj | null;
 }
 
-function checkOptions(o: PurchaseOptions): void {
+export function checkOptions(o: PurchaseOptions): void {
   if (typeof o !== "object" || o === null) throw new TypeError("purchase options must be an object");
   if (typeof o.kid !== "string" || o.kid === "") throw new TypeError("kid must be a non-empty string");
   if (typeof o.at !== "string" || !ISO_UTC.test(o.at) || !isCalendarInstant(o.at)) {
@@ -181,18 +181,29 @@ function checkOptions(o: PurchaseOptions): void {
   if (!Number.isSafeInteger(o.usesSoFar) || o.usesSoFar < 0) throw new TypeError("usesSoFar must be a non-negative safe integer");
 }
 
-// Design §4.2 steps 1 to 4. Throws only on invalid options.
-export function judgePurchase(instructionText: unknown, order: unknown, opts: PurchaseOptions): Judgement {
-  checkOptions(opts);
-  const deny = (step: 1 | 2, reasons: string[], fields: Partial<Judgement> = {}): Judgement => ({
-    step,
-    reasons,
-    exceeded: [],
-    card_limits: [],
-    instruction_sha256: null,
-    instruction: null,
-    order: null,
-    ...fields,
+// An instruction that passed steps 1 and 2, with its order: what step 2b (the
+// repeat lookup, createPurchaseCheck's) and step 3 read.
+export interface Prepared {
+  instruction: Obj;
+  // The M6 digest.
+  digest: string;
+  order: Obj;
+}
+
+// Design §4.2 steps 1 and 2. Never throws.
+export function judgeInput(instructionText: unknown, order: unknown): { ok: true; prepared: Prepared } | { ok: false; judgement: Judgement } {
+  const deny = (step: 1 | 2, reasons: string[], fields: Partial<Judgement> = {}): { ok: false; judgement: Judgement } => ({
+    ok: false,
+    judgement: {
+      step,
+      reasons,
+      exceeded: [],
+      card_limits: [],
+      instruction_sha256: null,
+      instruction: null,
+      order: null,
+      ...fields,
+    },
   });
 
   // Step 1: the input. Every failure is a reason.
@@ -222,20 +233,31 @@ export function judgePurchase(instructionText: unknown, order: unknown, opts: Pu
   const step2 = m6.unsupported.map((k) => `unsupported-limit:${k}`);
   if (![c["valid_from"], c["valid_until"], value["iat"]].every(isCalendarInstant)) step2.push("instruction-invalid:time-not-calendar");
   if (step2.length > 0) return deny(2, step2, { instruction_sha256: digest, instruction: ins, order: o });
+  return { ok: true, prepared: { instruction: value, digest: m6.digest, order: o } };
+}
 
-  // Step 3: the limits, every failure listed in the order of design §4.2.
-  const { card_limits, exceeded } = cardLimitsOf(value, o, { kid: opts.kid, authorizedAt: opts.at }, opts.usesSoFar + 1);
+// Design §4.2 steps 3 and 4: the limits, every failure listed in the order of
+// §4.2; allow if and only if no reason. `opts` must have passed checkOptions.
+export function judgeLimits(p: Prepared, opts: PurchaseOptions): Judgement {
+  const c = p.instruction["constraints"] as Obj;
+  const { card_limits, exceeded } = cardLimitsOf(p.instruction, p.order, { kid: opts.kid, authorizedAt: opts.at }, opts.usesSoFar + 1);
   const reasons: string[] = [];
   if (compareInstants(opts.at, c["valid_from"] as string) < 0) reasons.push("not-yet-valid");
   if (compareInstants(opts.at, c["valid_until"] as string) > 0) reasons.push("expired");
-  if (!(value["agent_kid"] as string[]).includes(opts.kid)) reasons.push("agent-not-named");
+  if (!(p.instruction["agent_kid"] as string[]).includes(opts.kid)) reasons.push("agent-not-named");
   if (opts.usesSoFar + 1 > ((c["max_uses"] as number | undefined) ?? 1)) reasons.push("uses-exhausted");
   for (const l of card_limits) {
     if (l.result === "outside") reasons.push(`limit-exceeded:${l.limit}`);
     else if (l.result === "not-evaluated") reasons.push(`order-field-missing:${l.limit}`);
   }
-  // Step 4: allow if and only if no reason.
-  return { step: 3, reasons, exceeded, card_limits, instruction_sha256: m6.digest, instruction: ins, order: o };
+  return { step: 3, reasons, exceeded, card_limits, instruction_sha256: p.digest, instruction: p.instruction, order: p.order };
+}
+
+// Design §4.2 steps 1 to 4, without the repeat lookup. Throws only on invalid options.
+export function judgePurchase(instructionText: unknown, order: unknown, opts: PurchaseOptions): Judgement {
+  checkOptions(opts);
+  const r = judgeInput(instructionText, order);
+  return r.ok ? judgeLimits(r.prepared, opts) : r.judgement;
 }
 
 export interface Evaluation {

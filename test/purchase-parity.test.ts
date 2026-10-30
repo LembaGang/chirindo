@@ -17,7 +17,7 @@ import { describe, expect, it, vi } from "vitest";
 import { judgePurchase, type Judgement } from "../src/purchase/limits.js";
 import { parseStrictJson, parseStrictJsonBytes, type Parsed } from "../src/purchase/m6.js";
 import { TIME_RE, compareInstants, tsMs } from "../src/purchase/time.js";
-import { AT, GATE, PRINCIPAL, STRANGER, cardOf, constraintsOf, itemOf, order, signedText, type Obj } from "./purchase-helpers.js";
+import { AT, GATE, PRINCIPAL, STRANGER, cardOf, constraintsOf, expectVocabulary, itemOf, order, signedText, type Obj } from "./purchase-helpers.js";
 // @ts-expect-error -- plain .mjs without declarations; it is the reference being compared against
 import { ANNEX_A3 as REF_A3, cardLimitsOf as refCardLimitsOf, m6Instruction } from "../examples/evidence-bundle/lib/instructions.mjs";
 // @ts-expect-error -- as above
@@ -49,7 +49,11 @@ function ref(text: string, ord: Obj, at = AT, usesSoFar = 0): { problem: string 
   if (m.problem !== undefined) return { problem: m.problem };
   return refCardLimitsOf(m.value, ord, { kid: GATE.kid, authorizedAt: at }, usesSoFar + 1) as RefLimits;
 }
-const check = (text: string, ord: unknown, at = AT, usesSoFar = 0): Judgement => judgePurchase(text, ord, { kid: GATE.kid, at, usesSoFar });
+const check = (text: string, ord: unknown, at = AT, usesSoFar = 0): Judgement => {
+  const j = judgePurchase(text, ord, { kid: GATE.kid, at, usesSoFar });
+  expectVocabulary(j.reasons);
+  return j;
+};
 const evaluated = (r: ReturnType<typeof ref>): RefLimits => {
   expect("problem" in r ? r.problem : null).toBeNull();
   return r as RefLimits;

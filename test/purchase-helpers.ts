@@ -3,8 +3,14 @@
 // inside every one of them.
 
 import { createPrivateKey, createPublicKey, type KeyObject } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { expect } from "vitest";
+import { openPurchaseCheck, type PurchaseCheck, type ResolvedPurchaseOptions } from "../src/purchase/check.js";
 import { ANNEX_A3, signInstruction } from "../src/purchase/m6.js";
-import { rfc7638Thumbprint } from "../src/vendor/recorder/index.js";
+import { reasonPatterns } from "../src/purchase/reasons.js";
+import { readChainFile, rfc7638Thumbprint, writeIdentity, type SignedRecord } from "../src/vendor/recorder/index.js";
+import { makeTmpDir } from "./helpers.js";
 
 export type Obj = Record<string, unknown>;
 
@@ -94,4 +100,57 @@ export function order(edit: (o: Obj) => void = () => {}): Obj {
   const o = baseOrder();
   edit(o);
   return o;
+}
+
+// T1 ruling 3: every reason a test sees matches exactly one pattern of the
+// frozen vocabulary. Called on every result the purchase tests examine.
+export function expectVocabulary(reasons: readonly string[]): void {
+  for (const r of reasons) expect([r, reasonPatterns(r).map((p) => p.prefix)]).toEqual([r, [expect.any(String)]]);
+}
+
+// ---- createPurchaseCheck -------------------------------------------------------
+
+// A data directory whose identity is GATE, so the base instruction's agent_kid names it.
+export function checkDir(prefix = "chirindo-purchase-"): string {
+  const dir = makeTmpDir(prefix);
+  writeIdentity(dir, GATE.priv, createPublicKey(GATE.priv));
+  return dir;
+}
+
+// A settable gate clock.
+export function clockAt(t: string = AT): { t: string; now: () => string } {
+  const c = { t, now: () => c.t };
+  return c;
+}
+
+export function openCheck(dir: string, clock: { now: () => string }, extra: Partial<ResolvedPurchaseOptions> = {}): PurchaseCheck & { logs: string[] } {
+  const logs: string[] = [];
+  const pc = openPurchaseCheck({ dir, serverLabel: "purchase-check", now: clock.now, log: (l) => logs.push(l), ...extra });
+  return Object.assign(pc, { logs });
+}
+
+// check(), with the vocabulary held on its answer.
+export function checked(pc: PurchaseCheck, instruction: unknown, ord: unknown) {
+  const r = pc.check({ instruction, order: ord } as never);
+  expectVocabulary(r.reasons);
+  return r;
+}
+
+export const chainsDirOf = (dir: string) => join(dir, "purchase-chains");
+export const chainPathOf = (dir: string, sessionId: string) => join(dir, "purchase-chains", `${sessionId}.jsonl`);
+export const recordsOf = (dir: string, sessionId: string): SignedRecord[] => readChainFile(chainPathOf(dir, sessionId)).records;
+export const checkOf = (r: SignedRecord) => (r as unknown as { check: Obj }).check;
+
+// Every retained-arguments file under dir/purchase-args, by its path relative to it.
+export function argsFiles(dir: string): Map<string, Buffer> {
+  const out = new Map<string, Buffer>();
+  const root = join(dir, "purchase-args");
+  let sessions: string[] = [];
+  try {
+    sessions = readdirSync(root);
+  } catch {
+    return out;
+  }
+  for (const s of sessions) for (const f of readdirSync(join(root, s))) out.set(`${s}/${f}`, readFileSync(join(root, s, f)));
+  return out;
 }

@@ -6,9 +6,13 @@
 
 import { describe, expect, it } from "vitest";
 import { evaluatePurchase, judgePurchase } from "../src/purchase/limits.js";
-import { AT, GATE, STRANGER, cardOf, constraintsOf, itemOf, order, signedText, type Obj } from "./purchase-helpers.js";
+import { AT, GATE, STRANGER, cardOf, constraintsOf, expectVocabulary, itemOf, order, signedText, type Obj } from "./purchase-helpers.js";
 
-const run = (text: unknown, ord: unknown, at = AT, usesSoFar = 0) => evaluatePurchase(text, ord, { kid: GATE.kid, at, usesSoFar });
+const run = (text: unknown, ord: unknown, at = AT, usesSoFar = 0) => {
+  const e = evaluatePurchase(text, ord, { kid: GATE.kid, at, usesSoFar });
+  expectVocabulary(e.reasons);
+  return e;
+};
 const tampered = () => {
   const o = JSON.parse(signedText()) as Obj;
   o["text"] = "anything";

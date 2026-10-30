@@ -36,6 +36,7 @@ import {
   type RecordContent,
   type SignedRecord,
 } from "./vendor/recorder/index.js";
+import type { PurchaseCheckMember } from "./purchase/member.js";
 import { GATE_VERSION } from "./version.js";
 
 export interface GateDecisionAllow {
@@ -98,6 +99,11 @@ export interface ReceiptInputs {
   // the head is read from the chain file, as before; the bytes written are
   // the same either way.
   head?: { seq: number; prevHash: string };
+  // OPTIONAL — the purchase check's decision (src/purchase/member.ts), the
+  // top-level `check` member. Only createPurchaseCheck sets it. Omitted ⇒ the
+  // key is not a member and the bytes are those of a receipt written before
+  // it existed (test/purchase-receipts.test.ts holds this to an 84b52d7 vector).
+  check?: PurchaseCheckMember;
 }
 
 // `agent` in every receipt this gate writes: the vendor and the version of
@@ -196,7 +202,9 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
   // That's the backward-compatibility guarantee: a verifier given an old
   // receipt and a new verifier given the same old receipt compute the same
   // canonical bytes, so signatures keep verifying.
-  const partial: RecordContent = {
+  // `check` is typed outside src/vendor/ (RecordContent is closed there), so
+  // the content here is RecordContent and, when set, `check`.
+  const partial: RecordContent & { check?: PurchaseCheckMember } = {
     v: RECORD_VERSION,
     seq,
     session_id: inputs.sessionId,
@@ -218,6 +226,8 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
     ...(inputs.x402PaymentRef !== undefined
       ? { x402_payment_ref: inputs.x402PaymentRef }
       : {}),
+    // Same contract again: absent ⇒ not a member ⇒ the pre-B-432 bytes.
+    ...(inputs.check !== undefined ? { check: inputs.check } : {}),
     prev_hash,
     kid: inputs.identity.kid,
   };
@@ -226,7 +236,7 @@ export function appendReceipt(inputs: ReceiptInputs): SignedRecord {
   // gate_receipt, then re-canonicalize + sign. That rewrite changes the bytes,
   // so the entry_hash is entryHashOfCanonical(jcsBytes(content)), not this.
   const provisionalEntryHash = entryHashOfCanonical(jcsBytes(partial));
-  const content: RecordContent = {
+  const content: RecordContent & { check?: PurchaseCheckMember } = {
     ...partial,
     gate: { ...partial.gate!, gate_receipt: provisionalEntryHash },
   };
