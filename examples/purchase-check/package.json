@@ -1,0 +1,13 @@
+{
+  "name": "chirindo-purchase-check-examples",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Three runnable examples of the purchase check, each on a provider's documented approval format, against the published @headlessoracle/chirindo 0.6.0. Not part of the npm package.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@headlessoracle/chirindo": "0.6.0"
+  }
+}
