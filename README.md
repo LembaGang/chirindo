@@ -816,11 +816,11 @@ The purchase check is not yet in a published npm release: `@headlessoracle/chiri
 
 That claim holds only with these five limits:
 
-1. It checks only purchases the provider sends through it. A purchase made around it is not checked, and a deny binds only if the provider obeys it. A repeat allow is not a second purchase.
-2. The instruction is signed by the provider, stating what its customer approved. Chirindo does not see or verify the customer's approval. The provider also holds the gate key. The record is the provider's own signed, chained record, with checkpoints sent to Headless Oracle's witness.
-4. Spend is not summed across purchases. Each purchase is checked against the cap and uses are counted, so an instruction allows up to max_uses purchases, each up to the cap. Counts are shared only within one directory and one process.
-5. The order is what the caller states. The cap is judged on its stated total, and Chirindo does not see the charge. Only an after-the-fact comparison with the charge shows a mismatch (L24).
-6. These leave no receipt: input refused at step 1, record-failed, and a repeat (it returns the earlier receipt). `evaluatePurchase` is a dry run, not a record.
+- **Limit 1.** It checks only purchases the provider sends through it. A purchase made around it is not checked, and a deny binds only if the provider obeys it. A repeat allow is not a second purchase.
+- **Limit 2.** The instruction is signed by the provider, stating what its customer approved. Chirindo does not see or verify the customer's approval. The provider also holds the gate key. The record is the provider's own signed, chained record, with checkpoints sent to Headless Oracle's witness.
+- **Limit 4.** Spend is not summed across purchases. Each purchase is checked against the cap and uses are counted, so an instruction allows up to max_uses purchases, each up to the cap. Counts are shared only within one directory and one process.
+- **Limit 5.** The order is what the caller states. The cap is judged on its stated total, and Chirindo does not see the charge. Only an after-the-fact comparison with the charge shows a mismatch (L24).
+- **Limit 6.** These leave no receipt: input refused at step 1, record-failed, and a repeat (it returns the earlier receipt). `evaluatePurchase` is a dry run, not a record.
 
 The full list:
 
@@ -831,7 +831,7 @@ The full list:
    - Start-up re-reads every chain in `purchase-chains/` to rebuild the counts, so start-up time grows with history.
 5. The order is what the caller states. The cap is judged on its stated total, and Chirindo does not see the charge. Only an after-the-fact comparison with the charge shows a mismatch (L24).
 6. These leave no receipt: input refused at step 1, record-failed, and a repeat (it returns the earlier receipt). `evaluatePurchase` is a dry run, not a record.
-7. Today's evidence-bundle verifier does not read `check`. In a bundle a deny shows only as a record that cites no instruction; its reason is read from the receipt itself. A verifier update is noted for B-420.
+7. Today's evidence-bundle verifier does not read `check`. In a bundle a deny shows only as a record that cites no instruction; its reason is read from the receipt itself. A verifier that reads it is planned.
 8. The witness is Headless Oracle's own, not independent (L3).
 9. The MCP gate does not check purchases (v0.2).
 10. A later evidence bundle judges the instruction's time window at the charge's authorization time, as the processor states it, not at the time of the check. A charge authorized after valid_until shows as outside the instruction, even when the check allowed it in time.
