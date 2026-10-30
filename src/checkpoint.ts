@@ -81,6 +81,12 @@ export interface ProxyCheckpointOptions {
   witness?: WitnessTarget;
   log: (msg: string) => void;
   now?: () => string;
+  // OPTIONAL — the chain head the caller holds in memory. When given, each
+  // checkpoint is signed from it (buildCheckpointFromHead) and the chain file
+  // is not re-read, so a checkpoint costs the same at any chain length. The
+  // bytes equal the re-read path's for the same head and ts. The proxy does
+  // not set it; the purchase check does (B-432 T2 ruling 3).
+  head?: () => { sessionId: string; count: number; lastEntryHash: string };
 }
 
 // The proxy's checkpoint driver. Building a checkpoint is synchronous (it must
@@ -163,6 +169,10 @@ export class ProxyCheckpointer {
 
   private buildHead(): SignedCheckpoint | null {
     try {
+      if (this.o.head !== undefined) {
+        const h = this.o.head();
+        return h.count === 0 ? null : buildCheckpointFromHead(h, this.o.identity, this.o.now?.());
+      }
       const { records } = readChainFile(this.o.chainPath);
       if (records.length === 0) return null;
       return buildCheckpoint(records, this.o.identity, this.o.now?.());

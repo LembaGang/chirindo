@@ -330,7 +330,16 @@ export function openPurchaseCheck(o: ResolvedPurchaseOptions): PurchaseCheck {
   let closed = false;
   const checkpointer =
     o.witness !== undefined
-      ? new ProxyCheckpointer({ chainPath, identity, every: 1, witness: o.witness, log: o.log, now: () => new Date().toISOString() })
+      ? new ProxyCheckpointer({
+          chainPath,
+          identity,
+          every: 1,
+          witness: o.witness,
+          log: o.log,
+          now: () => new Date().toISOString(),
+          // Signed from the in-memory head, never by re-reading the chain (T2 ruling 3).
+          head: () => ({ sessionId, count: head.seq, lastEntryHash: head.prevHash }),
+        })
       : null;
 
   const answer = (fields: Partial<CheckResult> & Pick<CheckResult, "decision" | "reasons">): CheckResult => ({
