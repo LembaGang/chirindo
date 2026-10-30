@@ -129,6 +129,13 @@ describe("test 8: each provider's documented example passes M6", () => {
     expect(p["text"]).toBe("Monthly plan");
   });
 
+  it("Prava text: the session's top-level description when it has one, else the product descriptions joined", () => {
+    const described = { ...PRAVA_SESSION, description: "Monthly plan at Acme Store, up to USD 40.00 a charge" };
+    expect(mapPravaMandate({ mandate: PRAVA_MANDATE, session: described }, opts())["text"]).toBe("Monthly plan at Acme Store, up to USD 40.00 a charge");
+    const twoLines = { ...PRAVA_SESSION, purchase_context: { custom: [{ ...PRAVA_SESSION.purchase_context.custom[0], product_details: [{ description: "Plan" }, { description: "Add-on" }] }] } };
+    expect(mapPravaMandate({ mandate: PRAVA_MANDATE, session: twoLines }, opts())["text"]).toBe("Plan; Add-on");
+  });
+
   it("an open intent or allowance (no merchant) sets no merchants limit; Prava scope any sets none", () => {
     const { merchant: _m, ...open } = CROSSMINT_INTENT;
     expect(card(mapCrossmintOrderIntent(open, opts()))).toEqual({ currency: "USD", max_total_minor: "15000" });

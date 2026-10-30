@@ -799,9 +799,138 @@ From CommonJS, load it with
 `createTrialRecorder` throws on invalid options or a missing identity;
 nothing after it throws. The package now has an `exports` map, so deep
 imports such as `@headlessoracle/chirindo/dist/...` no longer resolve; only
-`@headlessoracle/chirindo/trial-recorder` and
+`@headlessoracle/chirindo/trial-recorder`,
+`@headlessoracle/chirindo/purchase-check` and
 `@headlessoracle/chirindo/package.json` do. The `chirindo` command is
 unchanged.
+
+## Purchase check (before you charge)
+
+The purchase check is for a payment provider whose agents buy for its customers. Before minting a credential or charging, the provider's code sends the instruction it signed for its customer and the order to Chirindo. Chirindo answers allow or deny with the reasons, and writes each decision it makes on a well-formed request as a signed, hash-chained receipt before it answers.
+
+The purchase check is not yet in a published npm release: `@headlessoracle/chirindo` 0.5.3 does not include it. Until a release, install it from a build of this repository, or from a tarball made with `npm pack`.
+
+### What it claims, and its limits
+
+> Before you charge, Chirindo checks each purchase against the instruction you signed for your customer, refuses one outside it, and keeps a signed, chained record of each decision it makes and its reason.
+
+That claim holds only with these five limits:
+
+1. It checks only purchases the provider sends through it. A purchase made around it is not checked, and a deny binds only if the provider obeys it. A repeat allow is not a second purchase.
+2. The instruction is signed by the provider, stating what its customer approved. Chirindo does not see or verify the customer's approval. The provider also holds the gate key. The record is the provider's own signed, chained record, with checkpoints sent to Headless Oracle's witness.
+4. Spend is not summed across purchases. Each purchase is checked against the cap and uses are counted, so an instruction allows up to max_uses purchases, each up to the cap. Counts are shared only within one directory and one process.
+5. The order is what the caller states. The cap is judged on its stated total, and Chirindo does not see the charge. Only an after-the-fact comparison with the charge shows a mismatch (L24).
+6. These leave no receipt: input refused at step 1, record-failed, and a repeat (it returns the earlier receipt). `evaluatePurchase` is a dry run, not a record.
+
+The full list:
+
+1. It checks only purchases the provider sends through it. A purchase made around it is not checked, and a deny binds only if the provider obeys it. A repeat allow is not a second purchase.
+2. The instruction is signed by the provider, stating what its customer approved. Chirindo does not see or verify the customer's approval. The provider also holds the gate key. The record is the provider's own signed, chained record, with checkpoints sent to Headless Oracle's witness.
+3. The description is carried and signed over, not checked. The v0.1 mappers set no item or category limits.
+4. Spend is not summed across purchases. Each purchase is checked against the cap and uses are counted, so an instruction allows up to max_uses purchases, each up to the cap. Counts are shared only within one directory and one process.
+   - Start-up re-reads every chain in `purchase-chains/` to rebuild the counts, so start-up time grows with history.
+5. The order is what the caller states. The cap is judged on its stated total, and Chirindo does not see the charge. Only an after-the-fact comparison with the charge shows a mismatch (L24).
+6. These leave no receipt: input refused at step 1, record-failed, and a repeat (it returns the earlier receipt). `evaluatePurchase` is a dry run, not a record.
+7. Today's evidence-bundle verifier does not read `check`. In a bundle a deny shows only as a record that cites no instruction; its reason is read from the receipt itself. A verifier update is noted for B-420.
+8. The witness is Headless Oracle's own, not independent (L3).
+9. The MCP gate does not check purchases (v0.2).
+10. A later evidence bundle judges the instruction's time window at the charge's authorization time, as the processor states it, not at the time of the check. A charge authorized after valid_until shows as outside the instruction, even when the check allowed it in time.
+
+### The API
+
+The package is ESM only. Create one check per data directory and process:
+
+```js
+import { createPurchaseCheck } from "@headlessoracle/chirindo/purchase-check";
+
+const pc = createPurchaseCheck({ dir: "/var/lib/chirindo" }); // after `chirindo init --dir /var/lib/chirindo`
+const r = pc.check({ instruction: instructionJsonText, order });
+if (r.decision === "allow") {
+  // charge: r.receipt is the signed receipt of this decision, already written
+}
+// ... on shutdown
+await pc.close();
+```
+
+**`createPurchaseCheck({ dir, serverLabel?, jwksUri?, witness?, now? })`**
+- It loads the identity `chirindo init` made, and refuses a kid that is not the RFC 7638 thumbprint of its key.
+- It takes an exclusive lock on the directory.
+- It verifies every chain in `<dir>/purchase-chains/`.
+- It throws on invalid options, a held or stale lock, or a chain that does not verify. Nothing after it throws.
+
+**`check({ instruction, order })`** is synchronous and never throws.
+- `instruction` is the instruction's JSON text, so that a duplicate member can be detected. It is an Annex A.3 `signed-instruction-ed25519/0.3` instruction with card limits only.
+- `order` is the committed order of spec 4.3.
+- It returns `{ decision, reasons, exceeded, card_limits, instruction_sha256, at, receipt, repeat }`.
+- An allow is returned only after its receipt is written. Any failure to write gives deny `record-failed`: alone on what would have been an allow, after the deny's own reasons on a deny.
+- An identical order checked again under the same instruction, merchant and order reference returns the earlier allow, with `repeat: true`. It writes nothing and uses nothing.
+
+**The receipt.** It is an ordinary chirindo receipt, so `chirindo verify` reads it. It has `tool_name` "check" and a top-level `check` member holding the decision, its reasons and the order's digest. On an allow, `event.outcome` is "executed", which on a purchase-check receipt means "the check allowed". The arguments of each receipt are kept in `<dir>/purchase-args/`.
+
+**`evaluatePurchase(instruction, order, { kid, at, usesSoFar })`** is the same judge as a dry run. It writes nothing and consumes no use. Its answer is neither a decision nor a record, and a provider must not charge on it.
+
+**`signInstruction(body, privateKey)`** signs an instruction body with the provider's Ed25519 key, as principal.
+
+### The HTTP form
+
+```
+chirindo purchase-check --dir <dir> --token-file <file> [--port 7420] \
+  [--host 127.0.0.1|::1] [--server-label <name>] [--jwks-uri <https-url>] \
+  [--witness <base-url> --witness-key <hex|jwk-file> --witness-name <name>]
+```
+
+It prints `{"listening":"http://127.0.0.1:<port>"}` once bound, and serves `POST /v1/check` with the body `{ "instruction": "<JSON text>", "order": { ... } }`.
+
+**Requests:**
+- The token is required: each request needs `Authorization: Bearer <token>`.
+- Call `http://127.0.0.1:<port>`, not `localhost`: the `Host` header must name the bound address and port.
+- The body needs `Content-Type: application/json`. It is capped at 256 KB, read as UTF-8 that must be valid, and parsed strictly.
+- No CORS header is sent.
+
+**Status codes:**
+
+| Code | Meaning |
+|---|---|
+| 200 | A decided answer: an allow, a deny with a receipt, or a repeat. |
+| 422 | A refused input, with no receipt. |
+| 503 | `record-failed`. |
+| 400 | Invalid UTF-8 or JSON. |
+| 401 | No token, or a wrong one. |
+| 403 | The Host header is wrong. |
+| 404 | Any path other than `/v1/check`. |
+| 405 | Any method other than POST. |
+| 413 | The body is over 256 KB. |
+| 415 | The body is not `application/json`. |
+
+The CLI and the library cannot run on one directory at once, because of the lock.
+
+### A stale lock
+
+If a process holding the directory ends without closing (a crash, a kill), `<dir>/purchase-chains/.lock` remains. The next start refuses and names the lock's pid and path. Check that no process holds the directory, then remove that file. The lock is never removed automatically.
+
+### Reasons
+
+Every reason matches exactly one pattern of the frozen vocabulary of `purchase-check/0.1`, published in [docs/purchase-check-reasons.md](docs/purchase-check-reasons.md) and exported as `PURCHASE_REASON_PATTERNS`. A change to the vocabulary is a new `check.v`.
+
+### Mappers
+
+The mappers follow each provider's public documentation as read on 30 Oct 2026; no provider has reviewed or endorsed them.
+
+They build an instruction body from a provider's own approval object. The provider then signs it as principal, with `signInstruction`. The functions:
+- `mapCrossmintOrderIntent` takes an order intent.
+- `mapBasisTheoryAllowance` takes an allowance.
+- `mapPravaMandate` takes a mandate together with the session that set it up.
+
+Each takes `{ principalKey, agentKids, maxUses, approvedAt, iat? }`.
+
+**What a mapper sets:**
+- An amount becomes minor units by a fixed currency table (`CURRENCY_EXPONENTS`). An unknown currency refuses. Precision finer than the minor unit is floored, so the cap is never above what was approved.
+- A merchant becomes the origin of its URL (`merchantIdOf`), and the provider must build `order.merchant_id` with the same function.
+- Times become Z instants.
+
+**What a mapper refuses:** each refusal is a `MapperError` with a stable code. Among them: an unknown currency, a URL with userinfo or a scheme other than http or https, a time that does not parse, and a Prava session with more than one merchant entry.
+
+**For Prava:** `valid_until` is the earlier of the mandate's `validUntil` and the approval time plus the session's `effective_until_minutes` (default 15). For a recurring mandate, that can make an instruction valid for minutes, narrower than the mandate itself. A caller may sign a fresh instruction for each charge.
 
 ## Getting started
 

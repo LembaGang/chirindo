@@ -32,6 +32,10 @@
       "types": "./dist/trial/index.d.ts",
       "import": "./dist/trial/index.js"
     },
+    "./purchase-check": {
+      "types": "./dist/purchase/index.d.ts",
+      "import": "./dist/purchase/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

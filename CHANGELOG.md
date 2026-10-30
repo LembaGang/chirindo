@@ -5,6 +5,37 @@ Published versions and their dates are listed on npm
 Releases before 0.5.1 have no entry here; their notes are their commit
 messages.
 
+## Unreleased
+
+Not yet released; no version is assigned. This is B-432, the purchase check.
+
+- **The purchase check:** `@headlessoracle/chirindo/purchase-check`, a new
+  package export.
+  - Before a provider charges, it checks a purchase against an Annex A.3
+    card-only instruction the provider signed for its customer.
+  - It answers allow or deny with the reasons, and writes each decision on a
+    well-formed request as a signed, hash-chained receipt before it answers.
+  - Exports: `createPurchaseCheck`, `evaluatePurchase` (a dry run),
+    `signInstruction`, the mappers (`mapCrossmintOrderIntent`,
+    `mapBasisTheoryAllowance`, `mapPravaMandate`), `merchantIdOf`,
+    `toMinorUnits`, `toZ`, `CURRENCY_EXPONENTS`, `PURCHASE_REASON_PATTERNS`
+    and `createPurchaseServer`.
+  - The README section "Purchase check (before you charge)" states its claim
+    and its limits.
+- **`chirindo purchase-check`:** the check as a loopback HTTP endpoint,
+  `POST /v1/check`. A token is required.
+- **A new receipt member:** a purchase-check receipt carries a top-level
+  `check` member. A receipt without it is byte-identical to one written
+  before this change.
+- **`docs/purchase-check-reasons.md`:** the frozen reason vocabulary,
+  `purchase-check/0.1`.
+- **`ProxyCheckpointer`** can sign checkpoints from a head the caller holds.
+  The proxy does not use this, and is unchanged.
+- **Development only (not in the package):** `npm test` runs
+  `scripts/test-guard.mjs`. It reads free memory, then runs vitest normally
+  at 3,000,000 KB and above, with `--no-file-parallelism` from 1,000,000 to
+  2,999,999 KB, and not at all below 1,000,000 KB.
+
 ## 0.5.3 - 2026-10-18
 
 Security fix. In the package, `README.md`, the version in `package.json`

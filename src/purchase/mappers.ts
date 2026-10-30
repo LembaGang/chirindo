@@ -247,8 +247,13 @@ export function mapPravaMandate(input: { mandate: unknown; session: unknown }, o
       refuse("max-uses-over-max-charges", `maxUses ${o.maxUses} is more than mandate_setup.max_charges ${maxCharges as number}`);
     }
   }
-  // Prava's session carries no description of its own; the product lines' are joined.
+  // The session's own top-level description when it carries one (T3 ruling
+  // 1); otherwise the product lines' descriptions, joined.
   const products = entry === undefined ? undefined : (entry as Obj)["product_details"];
-  const text = Array.isArray(products) ? products.map((p) => (isObj(p) && isStr(p["description"]) ? p["description"] : "")).join("; ") : "";
+  const text = isStr(session["description"])
+    ? session["description"]
+    : Array.isArray(products)
+      ? products.map((p) => (isObj(p) && isStr(p["description"]) ? p["description"] : "")).join("; ")
+      : "";
   return body(o, text, validUntil, card);
 }
