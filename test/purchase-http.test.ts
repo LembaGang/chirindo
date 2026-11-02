@@ -159,10 +159,21 @@ describe("chirindo purchase-check", () => {
     const url = await listeningUrl(c);
     expect(url, c.stderr()).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     const headers = { "content-type": "application/json", host: new URL(url!).host, authorization: `Bearer ${TOKEN}` };
-    // The real clock is 2026-10-30, before the base instruction's window: a decided deny.
-    const r = await httpCall(url!, { path: "/v1/check", headers, body: json(signedText(), order()) });
+    // The CLI reads the real clock (it has no clock option), so the instruction's
+    // window is set a year after it: a decided deny on any date. It was the
+    // base window, which held only while the real clock was before 2026-11-01.
+    const from = new Date(Date.now() + 365 * 86_400_000);
+    const until = new Date(from.getTime() + 30 * 86_400_000);
+    const ins = signedText((b) => {
+      const c = b["constraints"] as Record<string, unknown>;
+      c["valid_from"] = from.toISOString().slice(0, 19) + "Z";
+      c["valid_until"] = until.toISOString().slice(0, 19) + "Z";
+    });
+    const r = await httpCall(url!, { path: "/v1/check", headers, body: json(ins, order()) });
     expect(r.status).toBe(200);
     expect(bodyOf(r)).toMatchObject({ decision: "deny", receipt: { seq: 0 } });
+    expect((bodyOf(r) as { reasons: string[] }).reasons).toContain("not-yet-valid");
+    expectVocabulary((bodyOf(r) as { reasons: string[] }).reasons);
     expect(c.stderr()).toMatch(/token=required/);
     c.child.kill("SIGTERM");
     const code = await c.exited;

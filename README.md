@@ -610,6 +610,10 @@ it never throws.
   signed the transfer.
 - It proves nothing about the checkpoint's content, only that the statement
   is bound to that receipt when you pass `--receipt`.
+- It cannot tell whether the same transaction is also named by another
+  attestation. One transaction could be named by more than one; only
+  Headless Oracle's own records prevent that reuse, and this check cannot see
+  them.
 - It trusts the RPC nodes you chose to report the chain truthfully. Give two,
   run by different operators; if they disagree the verdict is `UNESTABLISHED`.
 - The attestation does not carry the payee. `--pay-to` is yours to supply:
