@@ -575,7 +575,8 @@ statement that a named transaction paid for the checkpoint whose receipt
 hashes to `receipt_sha256`. It is served beside the receipt and at
 `GET https://api.headlessoracle.com/v1/witness/checkpoints/<checkpoint_id>/payment`.
 `chirindo payment verify` checks that statement against the chain, so you do
-not have to take Headless Oracle's word for it:
+not have to take Headless Oracle's word for it. It ships from 0.7.0:
+`npm install @headlessoracle/chirindo@0.7.0`.
 
 ```bash
 chirindo payment verify attestation.json --receipt receipt.json \

@@ -5,6 +5,38 @@ Published versions and their dates are listed on npm
 Releases before 0.5.1 have no entry here; their notes are their commit
 messages.
 
+## 0.7.0 - 2026-11-02
+
+This release adds one package export: the payment check (B-464).
+
+- **The payment check:** `@headlessoracle/chirindo/payment-verify`, a new
+  package export.
+  - It checks a Headless Oracle witness payment attestation
+    (`witness-payment-attestation/0.1`, witness-spec/0.6.1) against the
+    chain itself: the Ed25519 signature against the witness key set, the
+    binding to the checkpoint receipt when given, then the named
+    transaction on Base by plain JSON-RPC from nodes the caller chooses
+    (success, a Transfer of the attested asset to the payee of at least the
+    attested amount). Nothing reaches a node unless the signature verifies.
+  - It never throws, and names every check. Its verdict is `VERIFIED`,
+    `CONTRADICTED` or `UNESTABLISHED`; two nodes that disagree give
+    `UNESTABLISHED`.
+  - Export: `verifyPaymentAttestation`.
+  - The README section "Checking a paid checkpoint" states what it proves
+    and its limits, among them that it cannot tell whether one transaction
+    is also named by another attestation.
+- **`chirindo payment verify`:** the same check from the command line,
+  `chirindo payment verify <attestation.json> --rpc <url> [--rpc <url2>]
+  --pay-to <0x-address> [--receipt <file>] [--keys <file|https-url>]
+  [--json]`. Exit 0 `VERIFIED`, 1 `CONTRADICTED`, 2 `UNESTABLISHED` or a
+  usage error.
+- **Repository only (not in the package):** `examples/purchase-check/`,
+  three runnable purchase-check examples on a Crossmint order intent, a
+  Basis Theory allowance and a Prava mandate, using the published 0.6.0.
+- **Development only (not in the package):** the release gate's pack mode
+  also imports `./payment-verify` and checks `verifyPaymentAttestation`. The
+  purchase-check CLI test no longer depends on the date it runs on.
+
 ## 0.6.0 - 2026-10-30
 
 This release adds two package exports: the purchase check (B-432) and the trial recorder (B-419).
