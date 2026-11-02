@@ -567,6 +567,55 @@ receipt does and does not attest.
 A worked example of all three, run against production with an offline
 checker, is in [`examples/ordering-evidence/`](examples/ordering-evidence/).
 
+### Checking a paid checkpoint
+
+A checkpoint paid by x402 (witness-spec/0.6.1) comes with a payment
+attestation, `witness-payment-attestation/0.1`: Headless Oracle's signed
+statement that a named transaction paid for the checkpoint whose receipt
+hashes to `receipt_sha256`. It is served beside the receipt and at
+`GET https://api.headlessoracle.com/v1/witness/checkpoints/<checkpoint_id>/payment`.
+`chirindo payment verify` checks that statement against the chain, so you do
+not have to take Headless Oracle's word for it:
+
+```bash
+chirindo payment verify attestation.json --receipt receipt.json \
+  --pay-to 0x26D4Ffe98017D2f160E2dAaE9d119e3d8b860AD3 \
+  --rpc https://mainnet.base.org --rpc https://base.drpc.org
+```
+
+It checks, in order, and prints each check by name: the type; the Ed25519
+signature against the witness key set (`--keys <file|https-url>`, default
+https://api.headlessoracle.com/v5/keys); with `--receipt`, that the receipt
+hashes to `receipt_sha256` and its identity gives `checkpoint_id`; then, from
+every `--rpc` node by plain JSON-RPC, that the node is on Base mainnet, the
+transaction exists and succeeded, and it carries a Transfer of the attested
+asset to `--pay-to` of at least the attested amount. For a settlement the
+attestation calls `failed`, only a successful matching transfer on chain is a
+contradiction. Nothing reaches the chain unless the signature verifies.
+
+| Exit | Verdict | Meaning |
+|---|---|---|
+| 0 | `VERIFIED` | the signed statement holds and every node agrees |
+| 1 | `CONTRADICTED` | the signature, the receipt binding or the chain contradicts it |
+| 2 | `UNESTABLISHED` | bad input, no key for `public_key_id`, a node unreachable or on another chain, the nodes disagree, or a network other than Base |
+
+`--json` prints the whole verdict, every check with its result. The same
+check is `verifyPaymentAttestation` from `@headlessoracle/chirindo/payment-verify`;
+it never throws.
+
+**What it proves, and its limits:**
+
+- It proves a transfer happened on chain and that Headless Oracle's signed
+  statement names it. It does not prove who paid: the sender is whoever
+  signed the transfer.
+- It proves nothing about the checkpoint's content, only that the statement
+  is bound to that receipt when you pass `--receipt`.
+- It trusts the RPC nodes you chose to report the chain truthfully. Give two,
+  run by different operators; if they disagree the verdict is `UNESTABLISHED`.
+- The attestation does not carry the payee. `--pay-to` is yours to supply:
+  take it from the 402 challenge you paid, or from
+  https://headlessoracle.com/.well-known/x402.json.
+
 ## Chirindo trial recorder
 
 The trial recorder lets a merchant's checkout service record each agent cart

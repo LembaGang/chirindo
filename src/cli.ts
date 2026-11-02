@@ -86,6 +86,7 @@ import { eraseRetained, sha256Tagged } from "./trial/files.js";
 import { PRINTABLE_256 } from "./trial/rules.js";
 import { openPurchaseCheck } from "./purchase/check.js";
 import { createPurchaseServer } from "./purchase/http.js";
+import { DEFAULT_PAYMENT_KEYS_URL, verifyPaymentAttestation, type PaymentKey } from "./payment.js";
 
 // The Evidence plan key for the witness (v0.5) may come from this variable;
 // --witness-account-key-file takes precedence over it.
@@ -131,6 +132,9 @@ Usage:
                        [--jwks-uri <https-url>] [--witness <base-url>]
                        [--witness-key <hex|jwk-file>] [--witness-name <name>]
                        [--witness-account-key-file <path>]
+  chirindo payment verify <attestation.json> --rpc <url> [--rpc <url2>]
+                       --pay-to <0x-address> [--receipt <file>]
+                       [--keys <file|https-url>] [--json]
 
 Defaults:
   data dir = ./${DATA_DIR}/
@@ -151,6 +155,19 @@ Trial recorder:
   call it. trial-erase removes the retained arguments for an args_hash or an
   order reference and prints one JSON line per file removed, then
   {"removed_count": N}.
+
+Checking a paid checkpoint:
+  payment verify checks a witness payment attestation
+  (witness-payment-attestation/0.1) against the chain itself: the Ed25519
+  signature against the witness key set (--keys, default
+  ${DEFAULT_PAYMENT_KEYS_URL}), the binding to --receipt when given, then
+  the named transaction on Base by plain JSON-RPC from every --rpc node:
+  success, a Transfer of the attested asset to --pay-to of at least the
+  attested amount. Exit 0 VERIFIED, 1 CONTRADICTED, 2 UNESTABLISHED (bad
+  input, no key, a node unreachable or on another chain, or nodes that
+  disagree). It does not prove who paid, proves nothing about the
+  checkpoint's content, and trusts the nodes you chose: give two run by
+  different operators.
 
 Purchase check:
   purchase-check serves POST /v1/check ({ "instruction": "<JSON text>",
@@ -270,7 +287,7 @@ interface ParsedArgs {
 // <chain>` would swallow the chain path as the flag's value and the command
 // would fail with a confusing usage error — the flag must work in any
 // position, because a scripted caller will not be careful about ordering.
-const BOOLEAN_FLAGS = new Set(["allow-unproven-delivery", "allow-nonstandard-tool-names"]);
+const BOOLEAN_FLAGS = new Set(["allow-unproven-delivery", "allow-nonstandard-tool-names", "json"]);
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command = argv[0];
@@ -1313,6 +1330,73 @@ function cmdTrialErase(args: ParsedArgs): number {
   return r.unreadable > 0 ? 1 : 0;
 }
 
+// `chirindo payment verify` (B-464): a witness payment attestation against the
+// chain. Exit 0 VERIFIED, 1 CONTRADICTED, 2 UNESTABLISHED or a usage error.
+async function cmdPayment(args: ParsedArgs): Promise<number> {
+  const usage = "usage: chirindo payment verify <attestation.json> --rpc <url> [--rpc <url2>] --pay-to <0x-address> [--receipt <file>] [--keys <file|https-url>] [--json]\n";
+  const [sub, attPath] = args.positional;
+  if (sub !== "verify" || attPath === undefined || args.positional.length !== 2) {
+    process.stderr.write(usage);
+    return 2;
+  }
+  const read = (p: string, what: string): string | null => {
+    try {
+      return readFileSync(resolvePath(p), "utf8");
+    } catch (e) {
+      process.stderr.write(`chirindo payment verify: cannot read ${what} ${p} (${(e as NodeJS.ErrnoException).code ?? "unreadable"})\n`);
+      return null;
+    }
+  };
+  const rpcs = args.multi.get("rpc") ?? [];
+  const payTo = args.flags.get("pay-to");
+  if (rpcs.length === 0 || typeof payTo !== "string") {
+    process.stderr.write("chirindo payment verify: --rpc <url> and --pay-to <0x-address> are required\n" + usage);
+    return 2;
+  }
+  const attText = read(attPath, "the attestation");
+  if (attText === null) return 2;
+  let receipt: string | undefined;
+  const receiptFlag = args.flags.get("receipt");
+  if (receiptFlag !== undefined) {
+    if (typeof receiptFlag !== "string") { process.stderr.write(usage); return 2; }
+    const t = read(receiptFlag, "the receipt");
+    if (t === null) return 2;
+    receipt = t;
+  }
+  let keys: PaymentKey[] | undefined;
+  let keysUrl: string | undefined;
+  const keysFlag = args.flags.get("keys");
+  if (keysFlag !== undefined) {
+    if (typeof keysFlag !== "string") { process.stderr.write(usage); return 2; }
+    if (/^https?:\/\//.test(keysFlag)) {
+      keysUrl = keysFlag;
+    } else {
+      const t = read(keysFlag, "the key set");
+      if (t === null) return 2;
+      try {
+        const body = JSON.parse(t) as { keys?: unknown };
+        if (!Array.isArray(body.keys)) throw new Error("no keys[] array");
+        keys = body.keys as PaymentKey[];
+      } catch (e) {
+        process.stderr.write(`chirindo payment verify: --keys ${keysFlag} is not a key set (${(e as Error).message})\n`);
+        return 2;
+      }
+    }
+  }
+  const v = await verifyPaymentAttestation(attText, { rpcUrl: rpcs, payTo, receipt, keys, keysUrl });
+  if (args.flags.get("json") === true) {
+    process.stdout.write(JSON.stringify(v) + "\n");
+    return v.exit_code;
+  }
+  for (const c of v.checks) process.stdout.write(`${c.result.toUpperCase().padEnd(7)} ${c.name}: ${c.detail}\n`);
+  for (const n of v.nodes) {
+    for (const c of n.checks) process.stdout.write(`${c.result.toUpperCase().padEnd(7)} ${c.name} [${n.rpc}]: ${c.detail}\n`);
+  }
+  process.stdout.write(`${v.verdict} — ${v.summary}\n`);
+  process.stdout.write("Limits:\n" + v.limits.map((l) => `  - ${l}\n`).join(""));
+  return v.exit_code;
+}
+
 async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   if (
@@ -1341,6 +1425,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdTrialErase(args);
     case "purchase-check":
       return await cmdPurchaseCheck(args);
+    case "payment":
+      return await cmdPayment(args);
     default:
       process.stderr.write(`unknown command: ${args.command}\n`);
       process.stderr.write(helpText());

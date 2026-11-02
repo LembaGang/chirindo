@@ -25,6 +25,7 @@ afterAll(() => dirs.forEach(cleanupTmpDir));
 
 const PURCHASE = "@headlessoracle/chirindo/purchase-check";
 const TRIAL = "@headlessoracle/chirindo/trial-recorder";
+const PAYMENT = "@headlessoracle/chirindo/payment-verify";
 // A PEM header's start, kept apart from "PRIVATE KEY" on every line: the
 // repo's pre-push hook refuses a line holding both.
 const BEGIN = "-----BEGIN";
@@ -51,11 +52,13 @@ function fake(opts: { purchaseNames?: string[]; exportsMap?: Record<string, unkn
   const exportsMap = opts.exportsMap ?? {
     "./trial-recorder": { import: "./dist/trial/index.js" },
     "./purchase-check": { import: "./dist/purchase/index.js" },
+    "./payment-verify": { import: "./dist/payment.js" },
     "./package.json": "./package.json",
   };
   put("package.json", JSON.stringify({ name: "@headlessoracle/chirindo", version: "0.6.0", type: "module", exports: exportsMap }, null, 2) + "\n");
   put("dist/purchase/index.js", (opts.purchaseNames ?? PURCHASE_NAMES).map((n) => `export function ${n}() {}\n`).join(""));
   put("dist/trial/index.js", "export function createTrialRecorder() {}\n");
+  put("dist/payment.js", "export function verifyPaymentAttestation() {}\n");
   put("dist/cli.js", "#!/usr/bin/env node\nprocess.exitCode = 2;\n");
   put("README.md", "# chirindo\n");
   put("LICENSE", "Apache License\n");
@@ -64,8 +67,8 @@ function fake(opts: { purchaseNames?: string[]; exportsMap?: Record<string, unkn
 }
 
 describe("release gate pack mode: EXPORTS", () => {
-  it("both specifiers import through the exports map with every documented name (the control)", () => {
-    expect(REQUIRED_EXPORTS).toEqual({ [PURCHASE]: PURCHASE_NAMES, [TRIAL]: ["createTrialRecorder"] });
+  it("every specifier imports through the exports map with every documented name (the control)", () => {
+    expect(REQUIRED_EXPORTS).toEqual({ [PURCHASE]: PURCHASE_NAMES, [TRIAL]: ["createTrialRecorder"], [PAYMENT]: ["verifyPaymentAttestation"] });
     const probe = probeExports(fake().consumer);
     expect(probe[PURCHASE].ok).toBe(true);
     expect(exportFindings(probe)).toEqual([]);
@@ -83,7 +86,7 @@ describe("release gate pack mode: EXPORTS", () => {
   });
 
   it("red: ./trial-recorder missing from the exports map, though its file is packed", () => {
-    const f = fake({ exportsMap: { "./purchase-check": { import: "./dist/purchase/index.js" } } });
+    const f = fake({ exportsMap: { "./purchase-check": { import: "./dist/purchase/index.js" }, "./payment-verify": { import: "./dist/payment.js" } } });
     expect(exportFindings(probeExports(f.consumer))).toEqual([`${TRIAL} (import failed: ERR_PACKAGE_PATH_NOT_EXPORTED)`]);
   });
 
@@ -91,12 +94,12 @@ describe("release gate pack mode: EXPORTS", () => {
     const f = fake();
     rmSync(f.pkg, { recursive: true, force: true });
     const bad = exportFindings(probeExports(f.consumer));
-    expect(bad).toHaveLength(2);
+    expect(bad).toHaveLength(3);
     for (const line of bad) expect(line).toMatch(/\(import failed: ERR_MODULE_NOT_FOUND\)$/);
   });
 
   it("red: a specifier that was never probed", () => {
-    expect(exportFindings({ [PURCHASE]: { ok: true, names: Object.fromEntries(PURCHASE_NAMES.map((n) => [n, "function"])) } })).toEqual([`${TRIAL} (not probed)`]);
+    expect(exportFindings({ [PURCHASE]: { ok: true, names: Object.fromEntries(PURCHASE_NAMES.map((n) => [n, "function"])) } })).toEqual([`${TRIAL} (not probed)`, `${PAYMENT} (not probed)`]);
   });
 });
 

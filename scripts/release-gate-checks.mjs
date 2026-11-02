@@ -22,6 +22,7 @@ export const REQUIRED_EXPORTS = {
     "mapPravaMandate",
   ],
   "@headlessoracle/chirindo/trial-recorder": ["createTrialRecorder"],
+  "@headlessoracle/chirindo/payment-verify": ["verifyPaymentAttestation"],
 };
 
 // Files whose bytes reach a reader or a shell as they are: a CR in dist/cli.js
