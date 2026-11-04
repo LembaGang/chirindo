@@ -968,12 +968,16 @@ Every reason matches exactly one pattern of the frozen vocabulary of `purchase-c
 
 The mappers follow each provider's public documentation as read on 30 Oct 2026; no provider has reviewed or endorsed them.
 
+The Reap and Skyfire mappers follow those providers' public documentation as read on 4 Nov 2026; neither provider has reviewed or endorsed them.
+
 They build an instruction body from a provider's own approval object. The provider then signs it as principal, with `signInstruction`. The functions:
 - `mapCrossmintOrderIntent` takes an order intent.
 - `mapBasisTheoryAllowance` takes an allowance.
 - `mapPravaMandate` takes a mandate together with the session that set it up.
+- `mapReapMandate` takes a mandate as `GET /agentic/mandates/:id` returns it. Reap's documentation marks mandates as not yet released.
+- `mapSkyfirePayToken` takes the decoded payload of a PAY or KYA-PAY token. It does not verify the token's signature.
 
-Each takes `{ principalKey, agentKids, maxUses, approvedAt, iat? }`.
+Each takes `{ principalKey, agentKids, maxUses, approvedAt, iat? }`. `mapReapMandate` also requires `validUntil`, because a Reap mandate states no end.
 
 **What a mapper sets:**
 - An amount becomes minor units by a fixed currency table (`CURRENCY_EXPONENTS`). An unknown currency refuses. Precision finer than the minor unit is floored, so the cap is never above what was approved.
@@ -981,6 +985,10 @@ Each takes `{ principalKey, agentKids, maxUses, approvedAt, iat? }`.
 - Times become Z instants.
 
 **What a mapper refuses:** each refusal is a `MapperError` with a stable code. Among them: an unknown currency, a URL with userinfo or a scheme other than http or https, a time that does not parse, and a Prava session with more than one merchant entry.
+
+**For Reap:** only an `ACTIVE` mandate maps. `amount` is the ceiling for each charge, `maxUses` may not exceed `maxCharges`, and `frequency` is not checked.
+
+**For Skyfire:** `amt` with `cur` is the cap, a total for the token. `aud`, the seller agent account id, is the one merchant, so `order.merchant_id` is that id, not a URL origin. `exp` is `valid_until`. When `sps` is `pay_per_use`, `maxUses` may not exceed `mnr`.
 
 **For Prava:** `valid_until` is the earlier of the mandate's `validUntil` and the approval time plus the session's `effective_until_minutes` (default 15). For a recurring mandate, that can make an instruction valid for minutes, narrower than the mandate itself. A caller may sign a fresh instruction for each charge.
 

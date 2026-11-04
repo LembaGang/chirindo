@@ -47,6 +47,8 @@ describe("the ./purchase-check export", () => {
         "mapBasisTheoryAllowance",
         "mapCrossmintOrderIntent",
         "mapPravaMandate",
+        "mapReapMandate",
+        "mapSkyfirePayToken",
         "merchantIdOf",
         "reasonPatterns",
         "signInstruction",

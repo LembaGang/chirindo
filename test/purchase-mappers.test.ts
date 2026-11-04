@@ -21,6 +21,8 @@ import {
   mapBasisTheoryAllowance,
   mapCrossmintOrderIntent,
   mapPravaMandate,
+  mapReapMandate,
+  mapSkyfirePayToken,
   merchantIdOf,
   toMinorUnits,
   toZ,
@@ -213,5 +215,110 @@ describe("test 8: conversions", () => {
     expect(vu({ ...PRAVA_MANDATE, validUntil: null }, thirty)).toBe("2026-07-26T00:30:00.000Z");
     expect(vu({ ...PRAVA_MANDATE, validUntil: "2026-07-26T00:05:00Z" })).toBe("2026-07-26T00:05:00Z");
     expect(vu({ ...PRAVA_MANDATE, validUntil: "2028-07-26T12:00:00Z" })).toBe("2026-07-26T00:15:00.000Z");
+  });
+});
+
+// B-459 (2026-11-04). Reap, the "Response" example of "What the mandate
+// controls" on docs.reap.global/agentic-payments/recurring-purchases.md (read
+// 2026-11-04T17:03:11Z; the page marks mandates as not yet released; the
+// <...> values are the page's placeholders). Skyfire, the payload of
+// docs.skyfire.xyz/docs/example-pay-token.md (read 2026-11-04T17:03:19Z; the
+// page's // comments dropped, its sti card values not used by the mapper).
+const REAP_MANDATE = {
+  id: "<mandate-id>",
+  status: "ACTIVE",
+  enrollmentId: "<enrollment-id>",
+  frequency: "MONTHLY",
+  maxCharges: 12,
+  merchantScope: "LISTED",
+  merchant: { name: "<merchant-name>", url: "https://example.com", country: "US" },
+  amount: { amount: 150, currency: "USD" },
+};
+const SKYFIRE_PAY = {
+  iss: "https://example.net/pay_token_issuer",
+  iat: 1742245254,
+  exp: 1773867654,
+  jti: "b9821893-7699-4d24-af06-803a6a16476b",
+  sub: "8b810549-7443-494f-b4ad-5bc65871e32b",
+  aud: "37888095-2721-48d9-a2df-bfe4075f223a",
+  env: "sandbox",
+  ssi: "274efc47-024e-466f-b278-152d2ee73955",
+  btg: "16c135ce-a99a-453d-a7b5-4958fd91de5f",
+  spr: "0.01",
+  sps: "pay_per_use",
+  amt: "15",
+  cur: "USD",
+  val: "15000000",
+  mnr: 1600,
+  stp: "card",
+};
+const REAP_UNTIL = "2027-07-26T00:00:00Z";
+
+describe("B-459: Reap mandate and Skyfire PAY token", () => {
+  it("each documented example passes M6, and an order inside it is allowed", () => {
+    const cases: [string, Obj, { merchant: string; total: string; at: string }][] = [
+      ["Reap mandate", mapReapMandate(REAP_MANDATE, { ...opts(), validUntil: REAP_UNTIL }), { merchant: "https://example.com", total: "14000", at: "2026-08-01T00:00:00.000Z" }],
+      ["Skyfire PAY token", mapSkyfirePayToken(SKYFIRE_PAY, opts({ approvedAt: "2025-03-17T21:00:54Z" })), { merchant: SKYFIRE_PAY.aud, total: "1000", at: "2025-04-01T00:00:00.000Z" }],
+    ];
+    for (const [name, b, use] of cases) {
+      const text = sign(b);
+      const parsed = parseStrictJson(text) as { ok: true; value: unknown };
+      expect([name, m6Check(parsed.value)]).toMatchObject([name, { ok: true, unsupported: [] }]);
+      expect(m6Instruction(Buffer.from(text, "utf8"), ANNEX_A3).problem).toBeUndefined();
+      const order = { merchant_id: use.merchant, merchant_order_id: "A-1", currency: "USD", total_minor: use.total, items: [{ sku: "X", quantity: 1, unit_price_minor: use.total }] };
+      const e = evaluatePurchase(text, order, { kid: GATE.kid, at: use.at, usesSoFar: 0 });
+      expectVocabulary(e.reasons);
+      expect([name, e.reasons]).toEqual([name, []]);
+    }
+  });
+
+  it("the mapped members", () => {
+    const r = mapReapMandate(REAP_MANDATE, { ...opts(), validUntil: REAP_UNTIL });
+    expect(card(r)).toEqual({ currency: "USD", max_total_minor: "15000", merchants: ["https://example.com"] });
+    expect(constraints(r)).toMatchObject({ valid_from: "2026-07-26T00:00:00Z", valid_until: REAP_UNTIL, max_uses: 2 });
+    expect(r["text"]).toBe("<merchant-name>");
+    const s = mapSkyfirePayToken(SKYFIRE_PAY, opts({ approvedAt: "2025-03-17T21:00:54Z" }));
+    expect(card(s)).toEqual({ currency: "USD", max_total_minor: "1500", merchants: [SKYFIRE_PAY.aud] });
+    expect(constraints(s)).toMatchObject({ valid_from: "2025-03-17T21:00:54Z", valid_until: "2026-03-18T21:00:54Z", max_uses: 2 });
+    expect(s["text"]).toBe(SKYFIRE_PAY.ssi);
+  });
+
+  it("Reap: scope ANY sets no merchants; a fractional JSON number amount converts", () => {
+    const any = { ...REAP_MANDATE, merchantScope: "ANY", merchant: null };
+    expect(card(mapReapMandate(any, { ...opts(), validUntil: REAP_UNTIL }))).toEqual({ currency: "USD", max_total_minor: "15000" });
+    const frac = { ...REAP_MANDATE, amount: { amount: 49.99, currency: "USD" } };
+    expect(card(mapReapMandate(frac, { ...opts(), validUntil: REAP_UNTIL }))["max_total_minor"]).toBe("4999");
+  });
+
+  it("Reap refusals", () => {
+    const o = { ...opts(), validUntil: REAP_UNTIL };
+    for (const status of ["REQUIRES_ACTION", "PAUSED", "CONSUMED", "EXPIRED", "FAILED", "CANCELLED", "REVOKED", undefined]) {
+      expect([status, code(() => mapReapMandate({ ...REAP_MANDATE, status }, o))]).toEqual([status, "reap-status"]);
+    }
+    expect(code(() => mapReapMandate(REAP_MANDATE, opts() as never))).toBe("bad-option");
+    expect(code(() => mapReapMandate({ ...REAP_MANDATE, merchant: null }, o))).toBe("reap-scope");
+    expect(code(() => mapReapMandate({ ...REAP_MANDATE, merchantScope: "listed" }, o))).toBe("reap-scope");
+    expect(code(() => mapReapMandate(REAP_MANDATE, { ...o, maxUses: 13 }))).toBe("max-uses-over-max-charges");
+    for (const amount of [-1, Number.NaN, Infinity, 1e21, "150"]) {
+      expect([amount, code(() => mapReapMandate({ ...REAP_MANDATE, amount: { amount, currency: "USD" } }, o))]).toEqual([amount, "bad-amount"]);
+    }
+    expect(code(() => mapReapMandate({ ...REAP_MANDATE, amount: { amount: 150, currency: "XYZ" } }, o))).toBe("unknown-currency");
+    expect(code(() => mapReapMandate({ ...REAP_MANDATE, merchant: { url: "ftp://example.com" } }, o))).toBe("unsupported-scheme");
+  });
+
+  it("Skyfire refusals", () => {
+    const o = opts({ approvedAt: "2025-03-17T21:00:54Z" });
+    expect(code(() => mapSkyfirePayToken(SKYFIRE_PAY, opts({ approvedAt: "2025-03-17T21:00:54Z", maxUses: 1601 })))).toBe("max-uses-over-max-requests");
+    for (const exp of ["1773867654", 1.5, -1, 1e20, undefined]) {
+      expect([exp, code(() => mapSkyfirePayToken({ ...SKYFIRE_PAY, exp }, o))]).toEqual([exp, "bad-time"]);
+    }
+    for (const aud of ["", 7, undefined]) {
+      expect([aud, code(() => mapSkyfirePayToken({ ...SKYFIRE_PAY, aud }, o))]).toEqual([aud, "bad-field"]);
+    }
+    expect(code(() => mapSkyfirePayToken({ ...SKYFIRE_PAY, amt: 15 }, o))).toBe("bad-amount");
+    expect(code(() => mapSkyfirePayToken({ ...SKYFIRE_PAY, cur: "USDC" }, o))).toBe("unknown-currency");
+    // mnr counts only when the scheme is pay_per_use.
+    const sub = { ...SKYFIRE_PAY, sps: "subscription" };
+    expect(constraints(mapSkyfirePayToken(sub, opts({ approvedAt: "2025-03-17T21:00:54Z", maxUses: 5000 })))["max_uses"]).toBe(5000);
   });
 });

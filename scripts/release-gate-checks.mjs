@@ -20,6 +20,8 @@ export const REQUIRED_EXPORTS = {
     "mapCrossmintOrderIntent",
     "mapBasisTheoryAllowance",
     "mapPravaMandate",
+    "mapReapMandate",
+    "mapSkyfirePayToken",
   ],
   "@headlessoracle/chirindo/trial-recorder": ["createTrialRecorder"],
   "@headlessoracle/chirindo/payment-verify": ["verifyPaymentAttestation"],

@@ -28,7 +28,10 @@ export type MapperErrorCode =
   | "bad-field"
   | "prava-custom-entries"
   | "prava-scope"
-  | "max-uses-over-max-charges";
+  | "max-uses-over-max-charges"
+  | "max-uses-over-max-requests"
+  | "reap-status"
+  | "reap-scope";
 
 export class MapperError extends Error {
   constructor(
@@ -256,4 +259,84 @@ export function mapPravaMandate(input: { mandate: unknown; session: unknown }, o
       ? products.map((p) => (isObj(p) && isStr(p["description"]) ? p["description"] : "")).join("; ")
       : "";
   return body(o, text, validUntil, card);
+}
+
+// B-459. Read 2026-11-04 (cited in test/purchase-mappers.test.ts).
+
+// A JSON number amount in major units (Reap's amount.amount) as the decimal
+// string toMinorUnits takes. Only a finite, non-negative number whose
+// shortest form is plain decimal: 1e21 or -1 refuses, never rounds.
+function decimalOfNumber(n: unknown): string {
+  if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return refuse("bad-amount", "the amount is not a finite non-negative number");
+  const s = String(n);
+  if (!/^\d+(\.\d+)?$/.test(s)) refuse("bad-amount", `the amount ${s} has no plain decimal form`);
+  return s;
+}
+
+export interface ReapMapOptions extends MapOptions {
+  // Reap's mandate states no end; the provider names one. Required.
+  validUntil: string;
+}
+
+// A Reap mandate, as GET /agentic/mandates/:id returns it. amount is the
+// ceiling for each charge (Reap: "The final quote total has to stay at or
+// below it"). Only an ACTIVE mandate maps: any other status refuses. A LISTED
+// scope names the merchant in merchant.url; ANY sets no merchants limit.
+// maxUses may not exceed maxCharges. frequency is not checked (the cadence is
+// Reap's to enforce), and nor is the mandate's own state after mapping.
+export function mapReapMandate(mandate: unknown, o: ReapMapOptions): Obj {
+  if (!isObj(mandate)) refuse("bad-field", "the mandate is not an object");
+  const m = mandate as Obj;
+  if (m["status"] !== "ACTIVE") refuse("reap-status", `status ${JSON.stringify(m["status"])} is not ACTIVE`);
+  if (!isObj(o) || o.validUntil === undefined) refuse("bad-option", "validUntil is required: a Reap mandate states no end");
+  const amount = m["amount"];
+  if (!isObj(amount)) refuse("bad-field", "amount is not an object");
+  const a = amount as Obj;
+  const card: Card = { currency: a["currency"] as string, max_total_minor: toMinorUnits(decimalOfNumber(a["amount"]), a["currency"]) };
+  const scope = m["merchantScope"];
+  const merchant = m["merchant"];
+  if (scope === "LISTED") {
+    if (!isObj(merchant)) refuse("reap-scope", "the scope is LISTED and no merchant is named");
+    card.merchants = [merchantIdOf((merchant as Obj)["url"])];
+  } else if (scope !== "ANY") {
+    refuse("reap-scope", "the merchant scope is neither LISTED nor ANY");
+  }
+  const maxCharges = m["maxCharges"];
+  if (!Number.isSafeInteger(maxCharges) || (maxCharges as number) < 1) refuse("bad-field", "maxCharges is not a positive integer");
+  if (Number.isSafeInteger(o.maxUses) && o.maxUses > (maxCharges as number)) {
+    refuse("max-uses-over-max-charges", `maxUses ${o.maxUses} is more than maxCharges ${maxCharges as number}`);
+  }
+  const name = isObj(merchant) && isStr((merchant as Obj)["name"]) ? ((merchant as Obj)["name"] as string) : "";
+  return body(o, name, toZ(o.validUntil), card);
+}
+
+// A JWT NumericDate (whole seconds since the epoch) as a Z instant.
+function numericDateToZ(v: unknown, what: string): string {
+  if (!Number.isSafeInteger(v) || (v as number) < 0 || (v as number) > 253402300799) return refuse("bad-time", `${what} is not a NumericDate in whole seconds`);
+  return `${new Date((v as number) * 1000).toISOString().slice(0, 19)}Z`;
+}
+
+// The payload of a Skyfire PAY (or KYA-PAY) token, already decoded: amt in
+// currency units with cur is the cap, a total for the token as Crossmint's
+// (limit 4); aud, the seller agent account, is the one merchant, so the
+// provider sets order.merchant_id to the seller's account id; exp is
+// valid_until. When sps is pay_per_use, maxUses may not exceed mnr. The
+// mapper does not verify the token's own signature: the provider maps a
+// token it issued or has verified.
+export function mapSkyfirePayToken(payload: unknown, o: MapOptions): Obj {
+  if (!isObj(payload)) refuse("bad-field", "the token payload is not an object");
+  const p = payload as Obj;
+  const card: Card = { currency: p["cur"] as string, max_total_minor: toMinorUnits(p["amt"], p["cur"]) };
+  const aud = p["aud"];
+  if (!isStr(aud) || aud === "") refuse("bad-field", "aud, the seller agent account, is not a non-empty string");
+  card.merchants = [aud as string];
+  const validUntil = numericDateToZ(p["exp"], "exp");
+  if (p["sps"] === "pay_per_use" && p["mnr"] !== undefined) {
+    const mnr = p["mnr"];
+    if (!Number.isSafeInteger(mnr) || (mnr as number) < 1) refuse("bad-field", "mnr is not a positive integer");
+    if (Number.isSafeInteger(o?.maxUses) && o.maxUses > (mnr as number)) {
+      refuse("max-uses-over-max-requests", `maxUses ${o.maxUses} is more than mnr ${mnr as number}`);
+    }
+  }
+  return body(o, isStr(p["ssi"]) ? p["ssi"] : "", validUntil, card);
 }

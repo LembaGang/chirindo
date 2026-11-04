@@ -29,7 +29,7 @@ const PAYMENT = "@headlessoracle/chirindo/payment-verify";
 // A PEM header's start, kept apart from "PRIVATE KEY" on every line: the
 // repo's pre-push hook refuses a line holding both.
 const BEGIN = "-----BEGIN";
-const PURCHASE_NAMES = ["createPurchaseCheck", "evaluatePurchase", "signInstruction", "mapCrossmintOrderIntent", "mapBasisTheoryAllowance", "mapPravaMandate"];
+const PURCHASE_NAMES = ["createPurchaseCheck", "evaluatePurchase", "signInstruction", "mapCrossmintOrderIntent", "mapBasisTheoryAllowance", "mapPravaMandate", "mapReapMandate", "mapSkyfirePayToken"];
 
 interface Fake {
   consumer: string;

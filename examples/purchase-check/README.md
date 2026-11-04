@@ -1,11 +1,15 @@
 # Purchase check examples
 
-Three runnable scripts, one for each provider format the purchase check maps:
-a Crossmint order intent, a Basis Theory allowance and a Prava mandate. Each
-script uses the published `@headlessoracle/chirindo` 0.6.0. This folder is not
-part of the npm package.
+Five runnable scripts, one for each provider format the purchase check maps:
+a Crossmint order intent, a Basis Theory allowance, a Prava mandate, a Reap
+mandate and a Skyfire PAY token. The first three use the published
+`@headlessoracle/chirindo` 0.6.0. The Reap and Skyfire scripts use mappers not
+yet in a published release, so they run against this repository's own build
+(`../../dist`). This folder is not part of the npm package.
 
 The examples use each provider's public documentation as read on 2026-10-30; no provider has reviewed or endorsed them.
+
+The Reap and Skyfire examples use each provider's public documentation as read on 2026-11-04; no provider has reviewed or endorsed them.
 
 Each script copies its provider's documented example verbatim, and names the
 page and the time it was read. It maps the example with the package's mapper
@@ -23,6 +27,11 @@ npm install
 node crossmint-order-intent.mjs
 node basis-theory-allowance.mjs
 node prava-mandate.mjs
+
+npm --prefix ../.. install
+npm --prefix ../.. run build
+node reap-mandate.mjs
+node skyfire-pay-token.mjs
 ```
 
 Node 20 or later.
@@ -71,6 +80,40 @@ Prava mandate: USD max_total_minor 4000, merchants ["https://acme.example.com"],
 (a) inside the instruction: USD 3500 minor at https://acme.example.com -> allow []
 (b) over the cap: USD 4500 minor at https://acme.example.com -> deny ["limit-exceeded:max_total_minor"]
 (c) at a different merchant: USD 2000 minor at https://other.example.net -> deny ["limit-exceeded:merchants"]
+receipts written: 3
+chirindo verify: VALID, 3 entries
+```
+
+## reap-mandate.mjs
+
+The Reap mandate from the "Response" example of "Recurring Purchases": USD
+150 per charge at `https://example.com`, monthly, up to 12 charges. Reap's page
+says mandates are not available yet and their endpoints are not live, so this
+runs on the documented shape only. The mandate states no end; the script
+names one, 30 days from approval.
+
+```
+Reap mandate: USD max_total_minor 15000, merchants ["https://example.com"], max_uses 12
+(a) inside the instruction: USD 14000 minor at https://example.com -> allow []
+(b) over the cap: USD 16000 minor at https://example.com -> deny ["limit-exceeded:max_total_minor"]
+(c) at a different merchant: USD 5000 minor at https://other.example.net -> deny ["limit-exceeded:merchants"]
+receipts written: 3
+chirindo verify: VALID, 3 entries
+```
+
+## skyfire-pay-token.mjs
+
+The payload of Skyfire's "Example PAY Token": USD 15 for the seller agent
+account in `aud`, up to 1600 requests, expiring 2026-03-18T21:00:54Z. That
+time has passed, so the script runs the check on an injected clock inside the
+token's window; on the real clock every order would be denied as expired. The
+mapper reads the decoded payload and does not verify the token's signature.
+
+```
+Skyfire PAY token: USD max_total_minor 1500, merchants ["37888095-2721-48d9-a2df-bfe4075f223a"], max_uses 3
+(a) inside the instruction: USD 1000 minor at 37888095-2721-48d9-a2df-bfe4075f223a -> allow []
+(b) over the cap: USD 2000 minor at 37888095-2721-48d9-a2df-bfe4075f223a -> deny ["limit-exceeded:max_total_minor"]
+(c) at a different merchant: USD 500 minor at 00000000-0000-4000-8000-000000000000 -> deny ["limit-exceeded:merchants"]
 receipts written: 3
 chirindo verify: VALID, 3 entries
 ```
