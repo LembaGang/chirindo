@@ -1133,6 +1133,112 @@ appended to the chain. Run `chirindo verify` again — still VALID.
 That's the observe→enforce transition: same gate, same receipts, one
 extra line in `policy.json`.
 
+## Answering an issuer's written request
+
+`chirindo issuer-pack` builds one zip for a payment provider to send when an issuer or acquirer asks in writing about one customer's purchases. It reads a purchase-check directory and never writes to it. The pack carries the customer's instruction, the provider's consent reference, every decision selected with its reasons, the chain that holds them whole, the arguments of the selected receipts, the verifier's output, a PDF summary and the limits below.
+
+Not reviewed or endorsed by any card network. The rule requires the provider to supply this information on written request; it does not name this format.
+
+### The command
+
+```
+chirindo issuer-pack --dir <purchase-check-dir> --out <pack.zip> \
+  (--from <Z-instant> --to <Z-instant> | --order-ref <merchant>:<order_ref> | --instruction <sha256:hex>) \
+  --instructions-dir <dir> --request-file <request.json> --consent-file <consent.json> [--consent-missing-ok] \
+  --provider-key <pkcs8-pem> [--charge-file <stated-charge.json>] \
+  [--key <identity.json> | --jwks <https-url>] \
+  [--witness <base-url> --witness-key <hex|jwk-file> --witness-name <name> | --witness-file-only --witness-key <hex|jwk-file>] \
+  [--now <Z-instant>] [--allow-failed] [--same-party]
+```
+
+- **Selection.** A gate-clock range (start inclusive, end exclusive), one order by merchant and order reference (split at the last colon), or every decision under one instruction.
+- **One customer per pack.** The selected decisions must all cite one instruction, and every chain that holds one of them must hold only decisions under that instruction. So run one purchase-check chain per customer instruction. A shared chain is refused, because carrying it whole would hand over other customers' hashes, counts and times.
+- **`--instructions-dir`.** The purchase check keeps each decision's arguments, not the instruction's text, so the provider supplies the texts: every `*.json` file there is read as an instruction, and the decision's `instruction_sha256` picks it.
+- **`--request-file`.** `{"requester": "...", "reference": "...", "received": "..."}`, as the provider states them. Carried, not checked.
+- **`--consent-file`.** `{"sha256:<hex>": {"reference": "...", "app_login_id": "..."}}`, one entry per instruction. `app_login_id` is optional and is carried as the provider's statement.
+- **`--provider-key`.** The provider's Ed25519 private key, which signs `MANIFEST.json`. It must be the instruction's principal key.
+- **`--charge-file`.** Carried in `charge/` as supplied. This package has no evidence-bundle verifier, so no bundle verdict is computed, and `pack.json` says so.
+- **`--now`.** Sets the manifest's creation time and the member times: equal inputs and an equal `--now` give byte-identical zips.
+- **`--same-party`.** Prints L14, for a pack where one party runs both the gate and the witness.
+
+On success it prints `{"out", "manifest_sha256", "members", "failure"}`. The manifest cannot list its own hash, so quote the printed one.
+
+### Refusals
+
+A refusal writes no zip and prints one JSON line, `{"refusal", "message"}`:
+
+| Exit | Refusal | When |
+|---|---|---|
+| 2 | `invalid-input` | bad flags or files, or a provider key that is not the instruction's principal key |
+| 3 | `chain-broken` | a chain holding a selected decision fails `chirindo verify`, or the witness shows TAMPERED (a longer history or a fork) |
+| 4 | `decision-without-instruction` | the instruction's text is not in `--instructions-dir` |
+| 4 | `decision-without-args` | a selected receipt's retained arguments are missing or do not hash to its `args_hash` |
+| 5 | `no-records` | the selection matches no decision |
+| 6 | `consent-missing` | the instruction has no consent entry; `--consent-missing-ok` builds the pack and prints CONSENT NOT SUPPLIED first |
+| 7 | `shared-chain` | a carried chain also holds another instruction's decisions |
+| 7 | `several-instructions` | the selection spans more than one instruction |
+
+`--allow-failed` builds a pack whose chain fails, with the failure as the first line of the PDF and of `pack.json`, so that a dated request can still be answered truthfully.
+
+### The pack
+
+| Member | Holds |
+|---|---|
+| `MANIFEST.json` | version, generator, creation time and its clock, selection, and every other member's path, sha256 and bytes (JCS) |
+| `MANIFEST.sig` | Ed25519 over the bytes of `MANIFEST.json`, by the provider's key |
+| `summary.pdf` | A4 text: the notices, the first-screen limits, the request, the selection, the instruction, each chain's verification, one row per decision, the mapping table, every limit |
+| `pack.json` | the same, machine-readable |
+| `instructions/<hex>.json` | the instruction's text as supplied |
+| `consent/<hex>.json` | the provider's consent reference |
+| `chains/<session>.jsonl` | each chain holding a selected decision, whole |
+| `args/<entry-hash-hex>.json` | the arguments of the selected receipts only |
+| `witness/` | the witness sidecar of each chain, any receipts read online, and the pinned witness key |
+| `keys/` | the gate's public identity and JWKS, and the provider's public key |
+| `verify/<session>.txt`, `.json` | the verifier's output and command line, labelled online, sidecar or chain only, and the offline command |
+| `request/`, `charge/` | as supplied |
+| `LIMITS.txt` | the limits below, verbatim |
+
+`chirindo issuer-pack-check <pack.zip>` checks a pack from its members alone, offline: each member against the manifest, the signature against `keys/provider-jwk.json`, and each chain with the pack's gate key and witness sidecar. It exits 0 when every check passes.
+
+### What the pack carries for each category
+
+| Category as named | Source | Pack carries | State | Limit |
+|---|---|---|---|---|
+| "2 previous Transactions that the Issuer did not report as Fraud Activity", "more than 120 calendar days before the Dispute was submitted" | Table 11-28, ID# 0030254 | earlier decisions under the same instruction | NOT CARRIED | Decisions are not Transactions; no processing record or fraud report. |
+| "A detailed description of the merchandise or services purchased" | Table 11-28, ID# 0030254 | committed order items | CARRIED WITH LIMIT | Purchase-check limit 3: "The description is carried and signed over, not checked." L25. |
+| "Purchase order number the Cardholder was sent" | Table 11-28, ID# 0030254 | merchant order id | CARRIED WITH LIMIT | Does not show it was sent to the Cardholder. |
+| "Customer account or login ID used to authenticate the Cardholder at the time of the Transaction. This also includes login IDs for an Agentic Payment Provider" | Table 11-28, ID# 0030254 | the APP login ID when the provider supplies one, else nothing | CARRIED WITH LIMIT when supplied, else NOT CARRIED | The provider's statement, carried as supplied; the gate holds a principal key bound to no person, account or payer (L12). |
+| "Full delivery address" | Table 11-28, ID# 0030254 | nothing | NOT CARRIED | Not in the committed order. |
+| "Device ID", "device fingerprint", "Cardholder’s public IP address" | Table 11-28, ID# 0030254 | nothing | NOT CARRIED | The gate sees the provider's server, not the Cardholder's device. |
+| 4.1.24.3 instruction and "expiration date" | 4.1.24.3, ID# 0031169 | instruction text, valid_until | CARRIED WITH LIMIT | Limit 2: "The instruction is signed by the provider". |
+| 4.1.24.3 consent and acknowledgement | 4.1.24.3, ID# 0031169 | consent reference | CARRIED WITH LIMIT | The provider's statement, unverified. |
+| 4.1.24.3 identity verification | 4.1.24.3, ID# 0031169 | nothing | NOT CARRIED | Not seen by the gate. |
+| 4.1.24.4 "Use only the Cardholder-defined criteria" | 4.1.24.4, ID# 0031170 | each decision and reason | CARRIED WITH LIMIT | Limit 1: only purchases "the provider sends through it". |
+| 4.1.24.6 refund-policy consent | 4.1.24.6, ID#0031172 | refundable-only result | CARRIED WITH LIMIT | Shows the instruction's limit applied, not a separate consent. |
+| 4.1.24.8 order confirmation | 4.1.24.8, ID# 0031174 | nothing | NOT CARRIED | The provider's own record. |
+| Settlement (cards) | L24 | nothing | NOT CARRIED | L24: "the payment proof is the card network's authorization record, which the issuer holds; this bundle neither carries nor verifies it." |
+| Card authorization (cards) | L24 | nothing | NOT CARRIED | The pack carries no authorization record; any stated charge is the provider's statement (charge/). |
+| Mastercard First-Party Trust data elements | none read | none | NOT MAPPED | Not mapped in v1: no Mastercard source was readable when this version was written. |
+
+The rule quotes are from the "Visa Core Rules and Visa Product and Service Rules" of 18 April 2026. The pack quotes 4.1.24.3, ID# 0031169: "The Agentic Payment Provider must retain this information for the duration of the agreement and provide it to the Cardholder or Issuer upon written request." Each decision is the provider's gate's decision on a purchase it was sent. It is not the Cardholder's consent.
+
+### The limits the pack prints
+
+- **Purchase-check limits 1 to 8 and 10**, as in the full list above.
+- **The evidence-bundle limits L1, L3, L7, L8, L9, L12, L24 and L25**, and L14 with `--same-party`:
+  - L1: A gate entry is the operator's own signed statement of what its gate saw and decided. The bundle does not show that a decision was wise, that the agent read the instruction correctly, or that any member's contents are true.
+  - L3: The witness receipt is Headless Oracle's signed statement that at received_at it was shown a checkpoint signed by the key with that thumbprint; it is only as reliable as Headless Oracle and its signing key. The witness is operated by Headless Oracle, which also publishes the gate software: it is independent of an operator other than Headless Oracle, not of Headless Oracle.
+  - L7: Times on the principal's, the issuer's, the operator's and Headless Oracle's clocks are those parties' statements, and the block timestamp is set by the block producer within the chain's rules. Only the orderings that need no clock rest on signatures and hashes alone.
+  - L8: This bundle is named in none of the card network rules read for this specification (scope: the pages its sources list; the dispute chapters of the Visa Core Rules and the body of the Mastercard Chargeback Guide could not be read). It is evidence a decider may weigh within the existing reason codes.
+  - L9: The bundle carries what its assembler chose to put in. A verifier can show that the pieces present bind; it cannot show that a piece which would contradict them was left out, except where the witness's receipts show a longer history than the log carried (TRUNCATED) or a different one (FAIL).
+  - L12: The principal key in a minimal instruction is bound to no person, account or payer; the bundle shows that the holder of that key signed the instruction.
+  - L14: Headless Oracle operates both the gate whose key signed this log and the witness, so the log and the witness receipt are statements by one party.
+  - L24: v0.10. For a card payment, the payment proof is the card network's authorization record, which the issuer holds; this bundle neither carries nor verifies it. What this verdict shows is whether the decision and the order the gate recorded were witnessed before the charge's authorization time as stated, and whether that order matches the stated charge: the stated charge and its time are the statements of the person running the verifier, taken from the processor's records.
+  - L25: v0.10. The committed order is the agent's statement at decision time, as the gate recorded it: its merchant, items, prices, refundability, dates and places are what the agent's call named. The bundle does not show that the merchant fulfilled that order, that the charge was for it beyond the fields compared, or that an item's attributes are true.
+- **And:** The request, the consent references and any stated charge are the provider's statements, carried as supplied.
+
+The PDF's first screen holds purchase-check limits 2, 1, 6 and 7, then L1, L9, L3 and that last sentence.
+
 ## Honesty about what `isError: true` does and doesn't do
 
 MCP's spec describes tool execution errors this way:

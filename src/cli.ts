@@ -87,6 +87,7 @@ import { PRINTABLE_256 } from "./trial/rules.js";
 import { openPurchaseCheck } from "./purchase/check.js";
 import { createPurchaseServer } from "./purchase/http.js";
 import { DEFAULT_PAYMENT_KEYS_URL, verifyPaymentAttestation, type PaymentKey } from "./payment.js";
+import { buildIssuerPack, checkIssuerPack, type Selection, type WitnessMode } from "./issuer/pack.js";
 
 // The Evidence plan key for the witness (v0.5) may come from this variable;
 // --witness-account-key-file takes precedence over it.
@@ -132,6 +133,17 @@ Usage:
                        [--jwks-uri <https-url>] [--witness <base-url>]
                        [--witness-key <hex|jwk-file>] [--witness-name <name>]
                        [--witness-account-key-file <path>]
+  chirindo issuer-pack --dir <purchase-check-dir> --out <pack.zip>
+                       (--from <Z-instant> --to <Z-instant> | --order-ref <merchant>:<order_ref>
+                        | --instruction <sha256:hex>)
+                       --instructions-dir <dir> --request-file <request.json>
+                       --consent-file <consent.json> [--consent-missing-ok]
+                       --provider-key <pkcs8-pem> [--charge-file <stated-charge.json>]
+                       [--key <identity.json> | --jwks <https-url>]
+                       [--witness <base-url> --witness-key <hex|jwk-file> --witness-name <name>
+                        | --witness-file-only --witness-key <hex|jwk-file> [--witness-name <name>]]
+                       [--now <Z-instant>] [--allow-failed] [--same-party]
+  chirindo issuer-pack-check <pack.zip>
   chirindo payment verify <attestation.json> --rpc <url> [--rpc <url2>]
                        --pay-to <0x-address> [--receipt <file>]
                        [--keys <file|https-url>] [--json]
@@ -168,6 +180,18 @@ Checking a paid checkpoint:
   disagree). It does not prove who paid, proves nothing about the
   checkpoint's content, and trusts the nodes you chose: give two run by
   different operators.
+
+Issuer pack:
+  issuer-pack answers a written request about one customer's purchases: one
+  zip (MANIFEST.json signed by --provider-key, summary.pdf, pack.json, the
+  chain whole, the selected receipts' arguments, the instruction, the
+  consent reference, verifier output, LIMITS.txt). It reads --dir and never
+  writes there. It prints {"out", "manifest_sha256", "members"} on success;
+  a refusal writes no zip, prints one JSON line {"refusal", "message"} and
+  exits 2 invalid-input, 3 chain-broken, 4 decision-without-instruction or
+  decision-without-args, 5 no-records, 6 consent-missing, 7 shared-chain or
+  several-instructions (one customer per pack). issuer-pack-check checks a
+  pack offline from its members alone: exit 0 when every check passes.
 
 Purchase check:
   purchase-check serves POST /v1/check ({ "instruction": "<JSON text>",
@@ -287,7 +311,7 @@ interface ParsedArgs {
 // <chain>` would swallow the chain path as the flag's value and the command
 // would fail with a confusing usage error — the flag must work in any
 // position, because a scripted caller will not be careful about ordering.
-const BOOLEAN_FLAGS = new Set(["allow-unproven-delivery", "allow-nonstandard-tool-names", "json"]);
+const BOOLEAN_FLAGS = new Set(["allow-unproven-delivery", "allow-nonstandard-tool-names", "json", "consent-missing-ok", "allow-failed", "witness-file-only", "same-party"]);
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command = argv[0];
@@ -1397,6 +1421,111 @@ async function cmdPayment(args: ParsedArgs): Promise<number> {
   return v.exit_code;
 }
 
+// `chirindo issuer-pack` (B-439): the CLI over src/issuer/pack.ts.
+async function cmdIssuerPack(args: ParsedArgs): Promise<number> {
+  const out = (o: unknown) => process.stdout.write(JSON.stringify(o) + "\n");
+  const usage = (message: string): number => {
+    out({ refusal: "invalid-input", message });
+    return 2;
+  };
+  const str = (name: string): string | undefined => {
+    const v = args.flags.get(name);
+    return typeof v === "string" ? v : undefined;
+  };
+  for (const name of ["dir", "out", "instructions-dir", "request-file", "consent-file", "provider-key", "from", "to", "order-ref", "instruction", "charge-file", "key", "jwks", "witness", "witness-key", "witness-name", "now"]) {
+    if (args.flags.get(name) === true) return usage(`--${name} takes a value`);
+  }
+  for (const name of ["dir", "out", "instructions-dir", "request-file", "consent-file", "provider-key"]) {
+    if (str(name) === undefined) return usage(`--${name} is required`);
+  }
+  const outPath = resolvePath(str("out")!);
+  if (existsSync(outPath)) return usage(`--out ${outPath} exists; the pack is never written over a file`);
+  const picks = [str("from") !== undefined || str("to") !== undefined, str("order-ref") !== undefined, str("instruction") !== undefined].filter(Boolean).length;
+  if (picks !== 1) return usage("give exactly one selection: --from with --to, --order-ref, or --instruction");
+  let selection: Selection;
+  if (str("instruction") !== undefined) selection = { kind: "instruction", sha256: str("instruction")! };
+  else if (str("order-ref") !== undefined) {
+    // Split at the last colon: a merchant id is an origin (https://host or https://host:port).
+    const ref = str("order-ref")!;
+    const k = ref.lastIndexOf(":");
+    if (k <= 0 || k === ref.length - 1) return usage("--order-ref must be <merchant>:<order_ref>");
+    selection = { kind: "order", merchant: ref.slice(0, k), orderRef: ref.slice(k + 1) };
+  } else {
+    if (str("from") === undefined || str("to") === undefined) return usage("--from and --to go together");
+    selection = { kind: "range", from: str("from")!, to: str("to")! };
+  }
+  if (str("key") !== undefined && str("jwks") !== undefined) return usage("--key and --jwks are alternatives; pass at most one");
+  const jwks = str("jwks");
+  if (jwks !== undefined && !jwks.startsWith("https://")) return usage("--jwks must be an https:// URL");
+  let witness: WitnessMode | undefined;
+  const fileOnly = args.flags.get("witness-file-only") === true;
+  if (str("witness") !== undefined && fileOnly) return usage("--witness and --witness-file-only are alternatives");
+  if (str("witness") !== undefined || fileOnly) {
+    if (str("witness-key") === undefined) return usage("a witness check needs --witness-key (the pinned witness key)");
+    const pinned = loadPinnedWitnessKey(str("witness-key")!, undefined, "issuer-pack");
+    if (pinned === null) return 2;
+    const name = str("witness-name") ?? (fileOnly ? DEFAULT_WITNESS_NAME : undefined);
+    if (name === undefined) return usage("--witness needs --witness-name");
+    if (fileOnly) witness = { mode: "sidecar", pinned, name };
+    else {
+      let baseUrl: string;
+      try {
+        baseUrl = checkWitnessBaseUrl(str("witness")!);
+      } catch (e) {
+        return usage((e as Error).message);
+      }
+      witness = { mode: "online", baseUrl, pinned, name };
+    }
+  } else if (str("witness-key") !== undefined || str("witness-name") !== undefined) {
+    return usage("--witness-key and --witness-name need --witness or --witness-file-only");
+  }
+  const r = await buildIssuerPack({
+    dir: resolvePath(str("dir")!),
+    selection,
+    instructionsDir: resolvePath(str("instructions-dir")!),
+    requestFile: resolvePath(str("request-file")!),
+    consentFile: resolvePath(str("consent-file")!),
+    consentMissingOk: args.flags.get("consent-missing-ok") === true,
+    providerKeyFile: resolvePath(str("provider-key")!),
+    allowFailed: args.flags.get("allow-failed") === true,
+    sameParty: args.flags.get("same-party") === true,
+    ...(str("charge-file") !== undefined ? { chargeFile: resolvePath(str("charge-file")!) } : {}),
+    ...(str("key") !== undefined ? { keyFile: resolvePath(str("key")!) } : {}),
+    ...(jwks !== undefined ? { jwksUrl: jwks } : {}),
+    ...(witness !== undefined ? { witness } : {}),
+    ...(str("now") !== undefined ? { now: str("now")! } : {}),
+  });
+  if (!r.ok) {
+    out({ refusal: r.refusal, message: r.message });
+    return r.exit;
+  }
+  try {
+    writeFileSync(outPath, r.zip, { flag: "wx" });
+  } catch (e) {
+    return usage(`cannot write --out ${outPath} (${(e as NodeJS.ErrnoException).code ?? "error"})`);
+  }
+  out({ out: outPath, manifest_sha256: r.manifestSha256, members: r.members.length + 2, failure: r.failure });
+  return 0;
+}
+
+async function cmdIssuerPackCheck(args: ParsedArgs): Promise<number> {
+  const p = args.positional[0];
+  if (p === undefined) {
+    process.stderr.write("usage: chirindo issuer-pack-check <pack.zip>\n");
+    return 2;
+  }
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(resolvePath(p));
+  } catch (e) {
+    process.stderr.write(`chirindo issuer-pack-check: cannot read ${p} (${(e as NodeJS.ErrnoException).code ?? "error"})\n`);
+    return 2;
+  }
+  const c = await checkIssuerPack(bytes);
+  process.stdout.write(c.lines.join("\n") + "\n");
+  return c.ok ? 0 : 1;
+}
+
 async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   if (
@@ -1427,6 +1556,10 @@ async function main(argv: string[]): Promise<number> {
       return await cmdPurchaseCheck(args);
     case "payment":
       return await cmdPayment(args);
+    case "issuer-pack":
+      return await cmdIssuerPack(args);
+    case "issuer-pack-check":
+      return await cmdIssuerPackCheck(args);
     default:
       process.stderr.write(`unknown command: ${args.command}\n`);
       process.stderr.write(helpText());
