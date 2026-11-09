@@ -12,13 +12,15 @@ export {
   mapBasisTheoryAllowance,
   mapCrossmintOrderIntent,
   mapPravaMandate,
+  mapNeverminedCardDelegation,
   mapReapMandate,
   mapSkyfirePayToken,
+  mapStripeSharedPaymentIssuedToken,
   merchantIdOf,
   toMinorUnits,
   toZ,
 } from "./mappers.js";
-export type { MapOptions, MapperErrorCode, ReapMapOptions } from "./mappers.js";
+export type { MapOptions, MapperErrorCode, NeverminedMapOptions, ReapMapOptions } from "./mappers.js";
 export { PURCHASE_CHECK_VERSION } from "./member.js";
 export type { PurchaseCheckMember } from "./member.js";
 export { PURCHASE_REASON_PATTERNS, reasonPatterns } from "./reasons.js";

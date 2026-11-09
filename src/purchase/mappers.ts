@@ -31,7 +31,12 @@ export type MapperErrorCode =
   | "max-uses-over-max-charges"
   | "max-uses-over-max-requests"
   | "reap-status"
-  | "reap-scope";
+  | "reap-scope"
+  | "stripe-object"
+  | "stripe-status"
+  | "stripe-usage"
+  | "nevermined-provider"
+  | "max-uses-over-max-transactions";
 
 export class MapperError extends Error {
   constructor(
@@ -339,4 +344,99 @@ export function mapSkyfirePayToken(payload: unknown, o: MapOptions): Obj {
     }
   }
   return body(o, isStr(p["ssi"]) ? p["ssi"] : "", validUntil, card);
+}
+
+// B-441 day 5. Read 2026-11-09 (cited in test/purchase-mappers.test.ts).
+
+// A whole, non-negative amount in minor units, as a JSON number.
+function minorOfInteger(n: unknown, what: string): string {
+  if (!Number.isSafeInteger(n) || (n as number) < 0) return refuse("bad-amount", `${what} is not a non-negative safe integer`);
+  return String(n);
+}
+
+// A provider's lowercase ISO 4217 code, for the currencies whose unit is
+// known. Reading a zero-decimal amount as two-decimal only lowers the cap;
+// the reverse raises it a hundred times. So a currency of exponent 2 maps,
+// and one of exponent 0 maps only when `zeroDecimal` names it.
+function lowerCurrency(c: unknown, zeroDecimal: readonly string[]): string {
+  const up = isStr(c) && /^[a-z]{3}$/.test(c) ? c.toUpperCase() : null;
+  const exp = up !== null && Object.prototype.hasOwnProperty.call(CURRENCY_EXPONENTS, up) ? CURRENCY_EXPONENTS[up] : undefined;
+  if (up === null || exp === undefined || (exp === 0 && !zeroDecimal.includes(up))) {
+    return refuse("unknown-currency", `${JSON.stringify(c)} is not a lowercase currency of known unit`);
+  }
+  return up;
+}
+
+// Stripe states JPY as zero-decimal on docs.stripe.com/currencies.md ("Enter
+// 10 to charge 10 JPY"); its list of the others is not in the page as served.
+const STRIPE_ZERO_DECIMAL = ["JPY"] as const;
+
+// A Stripe Shared Payment Issued Token. usage_limits.max_amount is the most
+// that can be captured with the token, in the currency's minor unit (a total
+// for the token, as Crossmint's: limit 4), less what usage_details says is
+// already captured; usage_limits.expires_at is valid_until. The one merchant
+// is seller_details.network_business_profile, the seller platform the token
+// was created for, so order.merchant_id is that profile id; external_id, the
+// seller within that platform, is not checked. Only an active token with no
+// deactivated_at maps. An amount already captured that cannot be read
+// refuses: it is never taken as zero.
+export function mapStripeSharedPaymentIssuedToken(token: unknown, o: MapOptions): Obj {
+  if (!isObj(token)) refuse("bad-field", "the token is not an object");
+  const t = token as Obj;
+  if (t["object"] !== "shared_payment.issued_token") refuse("stripe-object", `object ${JSON.stringify(t["object"])} is not shared_payment.issued_token`);
+  if (t["status"] !== "active" || t["deactivated_at"] !== null) refuse("stripe-status", "the token is not active");
+  const ul = t["usage_limits"];
+  if (!isObj(ul)) return refuse("bad-field", "usage_limits is not an object");
+  const u = ul as Obj;
+  const currency = lowerCurrency(u["currency"], STRIPE_ZERO_DECIMAL);
+  const max = BigInt(minorOfInteger(u["max_amount"], "usage_limits.max_amount"));
+  const ud = t["usage_details"];
+  const cap = isObj(ud) && isObj((ud as Obj)["amount_captured"]) ? ((ud as Obj)["amount_captured"] as Obj) : null;
+  const used = cap !== null && cap["currency"] === u["currency"] && Number.isSafeInteger(cap["value"]) && (cap["value"] as number) >= 0 ? BigInt(cap["value"] as number) : null;
+  if (used === null) refuse("stripe-usage", "usage_details.amount_captured is not a non-negative integer in the token's currency");
+  if ((used as bigint) > max) refuse("stripe-usage", "more is captured than usage_limits.max_amount");
+  const sd = t["seller_details"];
+  const profile = isObj(sd) ? (sd as Obj)["network_business_profile"] : undefined;
+  if (!isStr(profile) || profile === "") refuse("bad-field", "seller_details.network_business_profile is not a non-empty string");
+  const card: Card = { currency, max_total_minor: (max - (used as bigint)).toString(), merchants: [profile as string] };
+  return body(o, isStr(t["id"]) ? t["id"] : "", numericDateToZ(u["expires_at"], "usage_limits.expires_at"), card);
+}
+
+export interface NeverminedMapOptions extends MapOptions {
+  // The delegation's createdAt: durationSecs runs from it. Required.
+  createdAt: string;
+}
+
+const NEVERMINED_CARD_PROVIDERS = ["stripe", "braintree", "visa"];
+
+// A Nevermined card delegation (the create request's fields, which the
+// record shares). spendingLimitCents is the lifetime cap in cents, a total
+// for the delegation (limit 4); valid_until is createdAt + durationSecs.
+// maxUses may not exceed maxTransactions; omitted, it allows any. The
+// delegation names no merchant, so no merchants limit is set: an order at any
+// merchant passes the merchant check.
+export function mapNeverminedCardDelegation(delegation: unknown, o: NeverminedMapOptions): Obj {
+  if (!isObj(delegation)) refuse("bad-field", "the delegation is not an object");
+  const d = delegation as Obj;
+  if (!NEVERMINED_CARD_PROVIDERS.includes(d["provider"] as string)) refuse("nevermined-provider", `provider ${JSON.stringify(d["provider"])} is not stripe, braintree or visa`);
+  if (!isObj(o) || o.createdAt === undefined) refuse("bad-option", "createdAt is required: durationSecs runs from it");
+  // "In cents": a two-decimal unit, so no zero-decimal currency maps.
+  const currency = lowerCurrency(d["currency"], []);
+  const card: Card = { currency, max_total_minor: minorOfInteger(d["spendingLimitCents"], "spendingLimitCents") };
+  const secs = d["durationSecs"];
+  if (!Number.isSafeInteger(secs) || (secs as number) < 1) refuse("bad-field", "durationSecs is not a positive integer");
+  const created = toZ(o.createdAt);
+  const end = new Date(Date.parse(created) + (secs as number) * 1000);
+  if (Number.isNaN(end.getTime()) || end.getUTCFullYear() > 9999) refuse("bad-time", "createdAt + durationSecs is beyond the year 9999");
+  // Date milliseconds drop sub-millisecond digits of createdAt: that floors the end.
+  const iso = end.toISOString();
+  const validUntil = iso.endsWith(".000Z") ? `${iso.slice(0, 19)}Z` : iso;
+  if (Object.keys(d).includes("maxTransactions")) {
+    const mt = d["maxTransactions"];
+    if (!Number.isSafeInteger(mt) || (mt as number) < 1) refuse("bad-field", "maxTransactions is not a positive integer");
+    if (Number.isSafeInteger(o.maxUses) && o.maxUses > (mt as number)) {
+      refuse("max-uses-over-max-transactions", `maxUses ${o.maxUses} is more than maxTransactions ${mt as number}`);
+    }
+  }
+  return body(o, isStr(d["consumerPrompt"]) ? d["consumerPrompt"] : "", validUntil, card);
 }

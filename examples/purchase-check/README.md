@@ -1,21 +1,25 @@
 # Purchase check examples
 
-Five runnable scripts, one for each provider format the purchase check maps:
+Seven runnable scripts, one for each provider format the purchase check maps:
 a Crossmint order intent, a Basis Theory allowance, a Prava mandate, a Reap
-mandate and a Skyfire PAY token. The first three use the published
-`@headlessoracle/chirindo` 0.6.0. The Reap and Skyfire scripts use mappers not
-yet in a published release, so they run against this repository's own build
+mandate, a Skyfire PAY token, a Stripe Shared Payment Issued Token and a
+Nevermined card delegation. The first three use the published
+`@headlessoracle/chirindo` 0.6.0. The other four use mappers not yet in a
+published release, so they run against this repository's own build
 (`../../dist`). This folder is not part of the npm package.
 
 The examples use each provider's public documentation as read on 2026-10-30; no provider has reviewed or endorsed them.
 
 The Reap and Skyfire examples use each provider's public documentation as read on 2026-11-04; no provider has reviewed or endorsed them.
 
+The Stripe and Nevermined examples use each provider's public documentation as read on 2026-11-09; no provider has reviewed or endorsed them.
+
 Each script copies its provider's documented example verbatim, and names the
 page and the time it was read. It maps the example with the package's mapper
 and signs it with a throwaway Ed25519 key that is never written to disk. It
 then checks three orders in a fresh temporary folder: one inside the
-instruction, one over the cap, one at a different merchant. It prints each
+instruction, one over the cap, one at a different merchant (the Nevermined
+script, whose object names no merchant, adds one past the expiry). It prints each
 decision with its reasons and the result of `chirindo verify` on the chain,
 then deletes the folder. The output holds no keys, hashes or times, so it is
 the same on every run.
@@ -32,6 +36,8 @@ npm --prefix ../.. install
 npm --prefix ../.. run build
 node reap-mandate.mjs
 node skyfire-pay-token.mjs
+node stripe-shared-payment-token.mjs
+node nevermined-card-delegation.mjs
 ```
 
 Node 20 or later.
@@ -116,6 +122,50 @@ Skyfire PAY token: USD max_total_minor 1500, merchants ["37888095-2721-48d9-a2df
 (c) at a different merchant: USD 500 minor at 00000000-0000-4000-8000-000000000000 -> deny ["limit-exceeded:merchants"]
 receipts written: 3
 chirindo verify: VALID, 3 entries
+```
+
+## stripe-shared-payment-token.mjs
+
+The example object of Stripe's "The Shared Payment Issued Token object": up to
+1000 in the minor unit of USD (USD 10.00) captured in total, for the seller
+platform in `seller_details.network_business_profile`, expiring
+2025-07-04T00:00:20Z. Less what `usage_details` says is already captured (0
+here), that is the cap. The merchant checked is the seller platform's profile
+id: `seller_details.external_id`, the seller within that platform, is not
+checked, so two sellers on one platform are one merchant here. The token's
+expiry has passed, so the script runs the check on an injected clock inside
+its window; on the real clock (run 2026-11-09) the same order is denied as
+`expired`.
+
+```
+Stripe Shared Payment Issued Token: USD max_total_minor 1000, merchants ["profile_test_61TU90nIeGjU7NNVXA6TU90m7ISQWsBxpcx9lASWWXTk"], max_uses 3
+(a) inside the instruction: USD 900 minor at profile_test_61TU90nIeGjU7NNVXA6TU90m7ISQWsBxpcx9lASWWXTk -> allow []
+(b) over the cap: USD 1500 minor at profile_test_61TU90nIeGjU7NNVXA6TU90m7ISQWsBxpcx9lASWWXTk -> deny ["limit-exceeded:max_total_minor"]
+(c) at a different merchant: USD 500 minor at profile_test_OTHER -> deny ["limit-exceeded:merchants"]
+receipts written: 3
+chirindo verify: VALID, 3 entries
+```
+
+## nevermined-card-delegation.mjs
+
+The "Stripe Delegation" request of Nevermined's "Delegations" page: USD
+100.00 (10000 cents) over the delegation's lifetime, valid 604800 seconds (7
+days) from its creation, up to 100 charges. The request carries no creation
+time, so the script fixes one, 2026-11-09T00:00:00Z, and the instruction is
+valid until 2026-11-16T00:00:00Z.
+
+**The delegation names no merchant, so the check cannot refuse an order at
+another merchant.** Case (c) shows one allowed. Only the amount, the expiry and
+the number of uses are checked.
+
+```
+Nevermined card delegation: USD max_total_minor 10000, merchants none named, valid_until 2026-11-16T00:00:00Z, max_uses 3
+(a) inside the instruction: USD 9000 minor at https://shop.example -> allow []
+(b) over the cap: USD 12000 minor at https://shop.example -> deny ["limit-exceeded:max_total_minor"]
+(c) at a different merchant: USD 500 minor at https://other.example.net -> allow []
+(d) past the expiry: USD 500 minor at https://shop.example -> deny ["expired"]
+receipts written: 4
+chirindo verify: VALID, 4 entries
 ```
 
 ## What a decision shows

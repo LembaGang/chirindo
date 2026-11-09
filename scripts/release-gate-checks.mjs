@@ -22,6 +22,8 @@ export const REQUIRED_EXPORTS = {
     "mapPravaMandate",
     "mapReapMandate",
     "mapSkyfirePayToken",
+    "mapStripeSharedPaymentIssuedToken",
+    "mapNeverminedCardDelegation",
   ],
   "@headlessoracle/chirindo/trial-recorder": ["createTrialRecorder"],
   "@headlessoracle/chirindo/payment-verify": ["verifyPaymentAttestation"],

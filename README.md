@@ -970,14 +970,18 @@ The mappers follow each provider's public documentation as read on 30 Oct 2026; 
 
 The Reap and Skyfire mappers follow those providers' public documentation as read on 4 Nov 2026; neither provider has reviewed or endorsed them.
 
+The Stripe and Nevermined mappers follow those providers' public documentation as read on 9 Nov 2026; neither provider has reviewed or endorsed them.
+
 They build an instruction body from a provider's own approval object. The provider then signs it as principal, with `signInstruction`. The functions:
 - `mapCrossmintOrderIntent` takes an order intent.
 - `mapBasisTheoryAllowance` takes an allowance.
 - `mapPravaMandate` takes a mandate together with the session that set it up.
 - `mapReapMandate` takes a mandate as `GET /agentic/mandates/:id` returns it. Reap's documentation marks mandates as not yet released.
 - `mapSkyfirePayToken` takes the decoded payload of a PAY or KYA-PAY token. It does not verify the token's signature.
+- `mapStripeSharedPaymentIssuedToken` takes a Stripe Shared Payment Issued Token object.
+- `mapNeverminedCardDelegation` takes a Nevermined card delegation.
 
-Each takes `{ principalKey, agentKids, maxUses, approvedAt, iat? }`. `mapReapMandate` also requires `validUntil`, because a Reap mandate states no end.
+Each takes `{ principalKey, agentKids, maxUses, approvedAt, iat? }`. `mapReapMandate` also requires `validUntil`, because a Reap mandate states no end. `mapNeverminedCardDelegation` also requires `createdAt`, because a delegation's `durationSecs` runs from it.
 
 **What a mapper sets:**
 - An amount becomes minor units by a fixed currency table (`CURRENCY_EXPONENTS`). An unknown currency refuses. Precision finer than the minor unit is floored, so the cap is never above what was approved.
@@ -989,6 +993,10 @@ Each takes `{ principalKey, agentKids, maxUses, approvedAt, iat? }`. `mapReapMan
 **For Reap:** only an `ACTIVE` mandate maps. `amount` is the ceiling for each charge, `maxUses` may not exceed `maxCharges`, and `frequency` is not checked.
 
 **For Skyfire:** `amt` with `cur` is the cap, a total for the token. `aud`, the seller agent account id, is the one merchant, so `order.merchant_id` is that id, not a URL origin. `exp` is `valid_until`. When `sps` is `pay_per_use`, `maxUses` may not exceed `mnr`.
+
+**For Stripe:** only an `active` token with no `deactivated_at` maps. `usage_limits.max_amount` is an integer in the currency's minor unit and a total for the token; what `usage_details` says is already captured comes off it, and a captured amount that cannot be read refuses. `usage_limits.expires_at` is `valid_until`. The one merchant is `seller_details.network_business_profile`, the seller platform, so `order.merchant_id` is that profile id; `seller_details.external_id` is not checked. The currency is Stripe's lowercase code: a two-decimal currency maps, and of the zero-decimal ones only JPY, the one Stripe's currencies page names in its text; KRW refuses.
+
+**For Nevermined:** `spendingLimitCents` is the lifetime cap in cents, a total, so only a two-decimal currency maps. `valid_until` is `createdAt` plus `durationSecs`. `maxUses` may not exceed `maxTransactions` when it is present. The delegation names no merchant, so no merchant limit is set: an order at any merchant passes the merchant check.
 
 **For Prava:** `valid_until` is the earlier of the mandate's `validUntil` and the approval time plus the session's `effective_until_minutes` (default 15). For a recurring mandate, that can make an instruction valid for minutes, narrower than the mandate itself. A caller may sign a fresh instruction for each charge.
 

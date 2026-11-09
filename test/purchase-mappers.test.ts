@@ -21,8 +21,10 @@ import {
   mapBasisTheoryAllowance,
   mapCrossmintOrderIntent,
   mapPravaMandate,
+  mapNeverminedCardDelegation,
   mapReapMandate,
   mapSkyfirePayToken,
+  mapStripeSharedPaymentIssuedToken,
   merchantIdOf,
   toMinorUnits,
   toZ,
@@ -320,5 +322,131 @@ describe("B-459: Reap mandate and Skyfire PAY token", () => {
     // mnr counts only when the scheme is pay_per_use.
     const sub = { ...SKYFIRE_PAY, sps: "subscription" };
     expect(constraints(mapSkyfirePayToken(sub, opts({ approvedAt: "2025-03-17T21:00:54Z", maxUses: 5000 })))["max_uses"]).toBe(5000);
+  });
+});
+
+// B-441 day 5 (2026-11-09). Stripe, the example object of "The Shared Payment
+// Issued Token object", docs.stripe.com/api/shared-payment/issued-token/object.md
+// (read 2026-11-09T08:47:23Z; usage_limits.max_amount is an integer in the
+// currency's minor unit, docs.stripe.com/currencies.md line 41, read
+// 08:48:13Z). Nevermined, the "Stripe Delegation" create request of
+// nevermined.ai/docs/products/payments/mandates.md (read 2026-11-09T08:47:31Z;
+// spendingLimitCents is the lifetime cap in cents; durationSecs runs from the
+// delegation's createdAt; the object names no merchant).
+const STRIPE_ISSUED = {
+  id: "spt_1RgaZcFPC5QUO6ZCDVZuVA8q",
+  object: "shared_payment.issued_token",
+  livemode: false,
+  created: 1751500820,
+  deactivated_at: null,
+  deactivated_reason: null,
+  payment_method: "pm_1RgaZbFPC5QUO6ZCe2ekOCNX",
+  seller_details: { external_id: null, network_business_profile: "profile_test_61TU90nIeGjU7NNVXA6TU90m7ISQWsBxpcx9lASWWXTk" },
+  setup_future_usage: null,
+  shared_metadata: {},
+  status: "active",
+  usage_details: { amount_captured: { value: 0, currency: "usd" } },
+  usage_limits: { currency: "usd", expires_at: 1751587220, max_amount: 1000 },
+};
+const NEVERMINED_STRIPE = {
+  provider: "stripe",
+  providerPaymentMethodId: "pm_1Abc2Def3Ghi4Jkl",
+  spendingLimitCents: 10000,
+  durationSecs: 604800,
+  maxTransactions: 100,
+  currency: "usd",
+  apiKeyId: "sk-abc123",
+};
+const STRIPE_AT = "2025-07-03T00:00:20Z";
+const NVM_CREATED = "2026-11-09T00:00:00Z";
+const nvmOpts = (over: Partial<MapOptions & { createdAt: string }> = {}) => ({ ...opts(), approvedAt: NVM_CREATED, createdAt: NVM_CREATED, ...over });
+
+describe("B-441: Stripe Shared Payment Issued Token and Nevermined card delegation", () => {
+  it("each documented example passes M6, and an order inside it is allowed", () => {
+    const cases: [string, Obj, { merchant: string; total: string; at: string }][] = [
+      ["Stripe issued token", mapStripeSharedPaymentIssuedToken(STRIPE_ISSUED, opts({ approvedAt: STRIPE_AT })), { merchant: STRIPE_ISSUED.seller_details.network_business_profile, total: "900", at: "2025-07-03T12:00:00.000Z" }],
+      ["Nevermined delegation", mapNeverminedCardDelegation(NEVERMINED_STRIPE, nvmOpts()), { merchant: "https://any.example", total: "9000", at: "2026-11-10T00:00:00.000Z" }],
+    ];
+    for (const [name, b, use] of cases) {
+      const text = sign(b);
+      const parsed = parseStrictJson(text) as { ok: true; value: unknown };
+      expect([name, m6Check(parsed.value)]).toMatchObject([name, { ok: true, unsupported: [] }]);
+      expect(m6Instruction(Buffer.from(text, "utf8"), ANNEX_A3).problem).toBeUndefined();
+      const order = { merchant_id: use.merchant, merchant_order_id: "A-1", currency: "USD", total_minor: use.total, items: [{ sku: "X", quantity: 1, unit_price_minor: use.total }] };
+      const e = evaluatePurchase(text, order, { kid: GATE.kid, at: use.at, usesSoFar: 0 });
+      expectVocabulary(e.reasons);
+      expect([name, e.reasons]).toEqual([name, []]);
+    }
+  });
+
+  it("the mapped members", () => {
+    const s = mapStripeSharedPaymentIssuedToken(STRIPE_ISSUED, opts({ approvedAt: STRIPE_AT }));
+    expect(card(s)).toEqual({ currency: "USD", max_total_minor: "1000", merchants: [STRIPE_ISSUED.seller_details.network_business_profile] });
+    expect(constraints(s)).toMatchObject({ valid_from: STRIPE_AT, valid_until: "2025-07-04T00:00:20Z", max_uses: 2 });
+    expect(s["text"]).toBe(STRIPE_ISSUED.id);
+    const n = mapNeverminedCardDelegation(NEVERMINED_STRIPE, nvmOpts());
+    // No merchants member: the delegation names no merchant.
+    expect(card(n)).toEqual({ currency: "USD", max_total_minor: "10000" });
+    expect(constraints(n)).toMatchObject({ valid_from: NVM_CREATED, valid_until: "2026-11-16T00:00:00Z", max_uses: 2 });
+  });
+
+  it("Stripe: what was already captured comes off the cap; JPY is zero-decimal", () => {
+    const used = { ...STRIPE_ISSUED, usage_details: { amount_captured: { value: 400, currency: "usd" } } };
+    expect(card(mapStripeSharedPaymentIssuedToken(used, opts({ approvedAt: STRIPE_AT })))["max_total_minor"]).toBe("600");
+    const jpy = { ...STRIPE_ISSUED, usage_details: { amount_captured: { value: 0, currency: "jpy" } }, usage_limits: { currency: "jpy", expires_at: 1751587220, max_amount: 500 } };
+    expect(card(mapStripeSharedPaymentIssuedToken(jpy, opts({ approvedAt: STRIPE_AT })))).toMatchObject({ currency: "JPY", max_total_minor: "500" });
+  });
+
+  it("Stripe refusals", () => {
+    const o = opts({ approvedAt: STRIPE_AT });
+    const ul = STRIPE_ISSUED.usage_limits;
+    expect(code(() => mapStripeSharedPaymentIssuedToken({ ...STRIPE_ISSUED, object: "shared_payment.granted_token" }, o))).toBe("stripe-object");
+    for (const status of ["deactivated", "requires_action", null, undefined]) {
+      expect([status, code(() => mapStripeSharedPaymentIssuedToken({ ...STRIPE_ISSUED, status }, o))]).toEqual([status, "stripe-status"]);
+    }
+    expect(code(() => mapStripeSharedPaymentIssuedToken({ ...STRIPE_ISSUED, deactivated_at: 1751500900 }, o))).toBe("stripe-status");
+    for (const max_amount of [-1, 10.5, "1000", 2 ** 60, undefined]) {
+      expect([max_amount, code(() => mapStripeSharedPaymentIssuedToken({ ...STRIPE_ISSUED, usage_limits: { ...ul, max_amount } }, o))]).toEqual([max_amount, "bad-amount"]);
+    }
+    // KRW: Stripe's zero-decimal list is not in the page as served, so its
+    // unit is unknown and the mapper refuses rather than risk a cap 100 times
+    // too high. Capital letters are not Stripe's spelling of a currency.
+    for (const currency of ["krw", "USD", "xyz", 840]) {
+      expect([currency, code(() => mapStripeSharedPaymentIssuedToken({ ...STRIPE_ISSUED, usage_limits: { ...ul, currency } }, o))]).toEqual([currency, "unknown-currency"]);
+    }
+    expect(code(() => mapStripeSharedPaymentIssuedToken({ ...STRIPE_ISSUED, usage_limits: null }, o))).toBe("bad-field");
+    for (const expires_at of ["1751587220", 1.5, -1, undefined]) {
+      expect([expires_at, code(() => mapStripeSharedPaymentIssuedToken({ ...STRIPE_ISSUED, usage_limits: { ...ul, expires_at } }, o))]).toEqual([expires_at, "bad-time"]);
+    }
+    for (const seller_details of [null, {}, { external_id: null, network_business_profile: "" }]) {
+      expect(code(() => mapStripeSharedPaymentIssuedToken({ ...STRIPE_ISSUED, seller_details }, o))).toBe("bad-field");
+    }
+    // An unknown amount already captured is not taken as zero.
+    for (const usage_details of [null, {}, { amount_captured: { value: 0, currency: "eur" } }, { amount_captured: { value: -1, currency: "usd" } }]) {
+      expect(code(() => mapStripeSharedPaymentIssuedToken({ ...STRIPE_ISSUED, usage_details }, o))).toBe("stripe-usage");
+    }
+    expect(code(() => mapStripeSharedPaymentIssuedToken({ ...STRIPE_ISSUED, usage_details: { amount_captured: { value: 1001, currency: "usd" } } }, o))).toBe("stripe-usage");
+  });
+
+  it("Nevermined refusals; maxTransactions omitted allows any maxUses", () => {
+    expect(code(() => mapNeverminedCardDelegation({ ...NEVERMINED_STRIPE, provider: "erc4337" }, nvmOpts()))).toBe("nevermined-provider");
+    expect(code(() => mapNeverminedCardDelegation(NEVERMINED_STRIPE, nvmOpts({ maxUses: 101 })))).toBe("max-uses-over-max-transactions");
+    const { maxTransactions: _omitted, ...unlimited } = NEVERMINED_STRIPE;
+    expect(constraints(mapNeverminedCardDelegation(unlimited, nvmOpts({ maxUses: 5000 })))["max_uses"]).toBe(5000);
+    for (const maxTransactions of [0, 1.5, "100", null]) {
+      expect([maxTransactions, code(() => mapNeverminedCardDelegation({ ...NEVERMINED_STRIPE, maxTransactions }, nvmOpts()))]).toEqual([maxTransactions, "bad-field"]);
+    }
+    for (const spendingLimitCents of [-1, 99.5, "10000", 2 ** 60, undefined]) {
+      expect([spendingLimitCents, code(() => mapNeverminedCardDelegation({ ...NEVERMINED_STRIPE, spendingLimitCents }, nvmOpts()))]).toEqual([spendingLimitCents, "bad-amount"]);
+    }
+    // "In cents" names a two-decimal unit: a zero-decimal currency refuses.
+    for (const currency of ["jpy", "krw", "USD", "xyz"]) {
+      expect([currency, code(() => mapNeverminedCardDelegation({ ...NEVERMINED_STRIPE, currency }, nvmOpts()))]).toEqual([currency, "unknown-currency"]);
+    }
+    for (const durationSecs of [0, -1, 1.5, "604800", undefined]) {
+      expect([durationSecs, code(() => mapNeverminedCardDelegation({ ...NEVERMINED_STRIPE, durationSecs }, nvmOpts()))]).toEqual([durationSecs, "bad-field"]);
+    }
+    expect(code(() => mapNeverminedCardDelegation(NEVERMINED_STRIPE, opts() as never))).toBe("bad-option");
+    expect(code(() => mapNeverminedCardDelegation(NEVERMINED_STRIPE, nvmOpts({ createdAt: "yesterday" })))).toBe("bad-time");
   });
 });
