@@ -4,7 +4,12 @@
 export const BUNDLE_TYPE = "evidence-bundle/0.10";
 // M0 reads both bundle types, whose members are the same (spec 4.2, M0).
 export const BUNDLE_TYPES = ["evidence-bundle/0.10", "evidence-bundle/0.9"];
-export const OUTPUT_TYPE = "evidence-bundle-verdict/0.10";
+// v0.11 (B-448): checks rows may carry state PRESENT, which a 0.10 validator rejects.
+export const OUTPUT_TYPE = "evidence-bundle-verdict/0.11";
+
+// Instruction profiles whose content the verifier carries with its digest and
+// does not read (spec 4.3, B-INS steps 3 and 4).
+export const UNREAD_INSTRUCTION_PROFILES = ["vi-0.1-draft", "ap2-0.2"];
 
 // Table 3-1, in its row order (the allow-list reports the first role of this
 // order that it refuses).

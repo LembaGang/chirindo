@@ -12035,7 +12035,8 @@
               "id": "M1.member",
               "member": "ins-t",
               "status": "PASS",
-              "reason": null
+              "reason": null,
+              "state": "PRESENT"
             },
             {
               "id": "M2.log",
@@ -12389,7 +12390,8 @@
               "id": "M1.member",
               "member": "ins-ap2",
               "status": "PASS",
-              "reason": null
+              "reason": null,
+              "state": "PRESENT"
             },
             {
               "id": "M2.log",
@@ -21287,7 +21289,8 @@
               "id": "M1.member",
               "member": "sup-a",
               "status": "PASS",
-              "reason": null
+              "reason": null,
+              "state": "PRESENT"
             },
             {
               "id": "M2.log",

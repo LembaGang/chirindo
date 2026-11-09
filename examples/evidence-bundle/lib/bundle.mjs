@@ -4,7 +4,7 @@ import canonicalize from "canonicalize";
 import { createHash } from "node:crypto";
 import { isPlainObject, parseStrictJson } from "../../ordering-evidence-h4/lib/formats.mjs";
 import { built } from "./built.mjs";
-import { BUNDLE_TYPE, BUNDLE_TYPES, PROFILES_OF } from "./table.mjs";
+import { BUNDLE_TYPE, BUNDLE_TYPES, PROFILES_OF, UNREAD_INSTRUCTION_PROFILES } from "./table.mjs";
 
 export const EXPECTED_AUTHORIZER_TEXT = "the account the payment must come from is stated by the person running the verifier, never by the bundle";
 
@@ -124,7 +124,11 @@ export function m1(doc, peekFactory) {
       continue;
     }
     decoded.set(m.id, bytes);
-    rows.push({ id: "M1.member", member: m.id, status: "PASS", reason: null, detail: `${bytes.length} bytes, digest and (role, profile) as declared` });
+    // Spec v0.11 D.3: a member whose content no check reads (table 3-1's
+    // `supporting`, and the instructions B-INS carries as PRESENT) says so on its
+    // own row, so an agent need not infer it from the absence of other checks.
+    const unread = m.role === "supporting" || (m.role === "instruction" && UNREAD_INSTRUCTION_PROFILES.includes(m.profile));
+    rows.push({ id: "M1.member", member: m.id, status: "PASS", reason: null, ...(unread ? { state: "PRESENT" } : {}), detail: `${bytes.length} bytes, digest and (role, profile) as declared` });
   }
   const peek = peekFactory(decoded);
   const manifestFail = (() => {

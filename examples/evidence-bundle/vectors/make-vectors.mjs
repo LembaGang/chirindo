@@ -310,7 +310,7 @@ export async function runVector(v, dir) {
 export function project(o) {
   return {
     verdict: { code: o.verdict.code, rule: o.verdict.rule, reason: o.verdict.reason },
-    checks: o.checks.map((c) => ({ id: c.id, member: c.member, status: c.status, reason: c.reason })),
+    checks: o.checks.map((c) => ({ id: c.id, member: c.member, status: c.status, reason: c.reason, ...(Object.keys(c).includes("state") ? { state: c.state } : {}) })),
     bindings: o.bindings.map((b) => ({ id: b.id, state: b.state, reason: b.reason, carrier: b.carrier, signed_by: b.signed_by })),
     decision: o.decision,
     gate_receipts: o["gate_receipts"].map((g) => ({ member: g.member, uid: g.uid, log: g.log, seq: g.seq, at_or_before_cited: g.at_or_before_cited, cited: g.cited, state: g.state, reason: g.reason, flags: g.flags })),

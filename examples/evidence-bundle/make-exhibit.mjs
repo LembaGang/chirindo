@@ -5,7 +5,7 @@
 //
 // Exit 0: the exhibit written, nothing on stdout. Exit 2: a usage error, a
 // font file that is not the pinned one, or a file that is not an
-// evidence-bundle-verdict/0.10 verdict; one line on stderr and no file.
+// evidence-bundle-verdict/0.11 or 0.10 verdict; one line on stderr and no file.
 // Exit 3: "exhibit not written: <why>" when every limit does not fit one page
 // at 6 points; no file. Exit 1: an internal error.
 //

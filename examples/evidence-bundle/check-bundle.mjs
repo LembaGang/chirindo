@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Offline verifier for dispute evidence bundles (evidence-bundle/0.10, and 0.9).
-// Its output is evidence-bundle-verdict/0.10.
+// Its output is evidence-bundle-verdict/0.11.
 //
 //   node check-bundle.mjs <bundle.json> [--authorizer <address>] [--tx <hash>] [--pins <dir>]
 //   node check-bundle.mjs --evidence-uri <https URL> --evidence-entry sha256:<hex> [--evidence-sha256 sha256:<hex>] [...]
@@ -11,7 +11,7 @@
 // card-payment subject only, the witness's list, the witness key list when
 // a receipt needs it, and the records' jwks_uri are read (lib/online.mjs).
 //
-// Exit 0: one verdict object (evidence-bundle-verdict/0.10) on stdout, whatever
+// Exit 0: one verdict object (evidence-bundle-verdict/0.11) on stdout, whatever
 // the verdict. Exit 2: a usage error, or a bundle outside the shape this build
 // judges ("not supported in this build: <code>"), one line on stderr and
 // nothing on stdout. Exit 1: an internal error, likewise. See README.md.

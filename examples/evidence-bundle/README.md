@@ -15,7 +15,8 @@ SHA-256. The verifier checks each piece, then how the pieces bind to each
 other: the action to its log, the log to its checkpoint and witness, and the
 decision to the payment, or, for a card payment, the order the gate recorded
 to the charge the person running the verifier states; it writes one JSON
-verdict object (`evidence-bundle-verdict/0.10`, schema in `schema/`).
+verdict object (`evidence-bundle-verdict/0.11`, schema in `schema/`; a member
+whose content no check reads is marked `state: "PRESENT"` on its `M1.member` row).
 
 It also holds `build-we1.mjs`, which builds WE-1 from the committed files of
 `examples/ordering-evidence/case-a`; the WE-1 sweep (`sweep.mjs`); the
@@ -37,8 +38,8 @@ record's format (instructions in the minimal profile of Annex A, the gate's
 log and receipts, the witness's checkpoints and receipts, and EVM payment
 records), it checks it and says what it shows. Verifiable Intent and AP2
 instructions are carried with their digests and marked PRESENT, not
-verified; any other record can be carried as a supporting member, of which
-only the digest is checked. For a card payment, the issuer's authorisation
+verified; any other record can be carried as a supporting member, marked
+PRESENT, not checked. For a card payment, the issuer's authorisation
 record is not carried today: the person running the verifier states the
 charge, from the processor's records. Headless Oracle's witness countersigns
 the bundle's checkpoints, so the order of the gate's records rests on
@@ -120,7 +121,7 @@ repository root; `test/builder.mjs` uses it to show both outcomes on a copy.
 
 `make-exhibit.mjs` exits 0 with the exhibit written and nothing on stdout; 2
 for a usage error, a font file that is not the pinned one, or a file that is
-not an `evidence-bundle-verdict/0.10` verdict; 3 with `exhibit not written:
+not an `evidence-bundle-verdict/0.11` or `0.10` verdict; 3 with `exhibit not written:
 <why>` when every limit does not fit one page at 6 points. No file is written
 on 2 or 3. `make-datapoints.mjs` exits 0 with the export on stdout, and 2 for
 a usage error or a file that is not a 0.10 verdict.

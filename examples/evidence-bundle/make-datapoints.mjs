@@ -4,7 +4,7 @@
 //   node make-datapoints.mjs <verdict.json>
 //
 // Exit 0: the export on stdout, its JCS bytes and a line feed. Exit 2: a
-// usage error, or a file that is not an evidence-bundle-verdict/0.10 verdict;
+// usage error, or a file that is not an evidence-bundle-verdict/0.11 or 0.10 verdict;
 // one line on stderr and nothing on stdout. Exit 1: an internal error.
 
 import { readFileSync } from "node:fs";

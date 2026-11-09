@@ -29,6 +29,15 @@ const read = (f) => JSON.parse(readFileSync(path.join(PAGES, f), "utf8"));
 // The verdict JSON's bytes as check-bundle.mjs writes them.
 const verdictBytes = (o) => Buffer.from(JSON.stringify(o, null, 2) + "\n", "utf8");
 const withoutClock = (o) => ({ ...o, checked_at: null });
+// The pages are dated records of evidence-bundle-verdict/0.10 verdicts and stay
+// as published. Spec v0.11 changed the output only by its type and by state
+// PRESENT on some M1.member rows, so today's output reduced to 0.10 (that type,
+// no check state) must equal a 0.10 page's verdict; any other change still fails.
+const asRecorded = (now, recorded) => {
+  if (recorded.type !== "evidence-bundle-verdict/0.10") return now;
+  assert.equal(now.type, "evidence-bundle-verdict/0.11");
+  return { ...now, type: recorded.type, checks: now.checks.map(({ state, ...c }) => c) };
+};
 const fileAt = (rel) => path.join(FOLDER, rel);
 
 // The page's bundle run offline again with the page's stated inputs.
@@ -75,7 +84,7 @@ test("V-70: each page's offline verdict is what the verifier gives for its bundl
   for (const f of pageFiles()) {
     const p = read(f);
     assert.equal(p.offline_verdict.mode, "offline");
-    assert.deepEqual(withoutClock(rerun(p)), withoutClock(p.offline_verdict), f);
+    assert.deepEqual(withoutClock(asRecorded(rerun(p), p.offline_verdict)), withoutClock(p.offline_verdict), f);
   }
 });
 

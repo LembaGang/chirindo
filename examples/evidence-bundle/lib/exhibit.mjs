@@ -26,7 +26,15 @@ const SIZES = [8, 7.5, 7, 6.5, 6];
 const STATED_FIRST = ["L24", "L14", "L3"];
 const FREE_TEXT_MAX = 200;
 
-const SCHEMA = JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "schema", "evidence-bundle-verdict-0.10.schema.json"), "utf8"));
+// The views read a verdict of either published type, each under its own type's
+// schema: 0.11 is what the verifier writes now, and 0.10 records (the committed
+// pages, exhibits already handed over) stay readable and draw the same bytes.
+const schemaOf = (v) => JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "schema", `evidence-bundle-verdict-${v}.schema.json`), "utf8"));
+export const READ_TYPES = new Map([
+  [OUTPUT_TYPE, schemaOf("0.11")],
+  ["evidence-bundle-verdict/0.10", schemaOf("0.10")],
+]);
+const TYPES_TEXT = [...READ_TYPES.keys()].join(" or ");
 
 // exit 2: not a verdict this generator reads, or the font; exit 3: the
 // limits do not fit one page at 6 points.
@@ -37,17 +45,18 @@ export class ExhibitError extends Error {
   }
 }
 
-// The verdict JSON: an evidence-bundle-verdict/0.10 object valid under the schema of spec D.3.
+// The verdict JSON: an evidence-bundle-verdict/0.11 object valid under spec v0.11 D.3, or a
+// 0.10 object valid under spec v0.10 rev3 D.3.
 export function readVerdict(bytes) {
   let o;
   try {
     o = JSON.parse(Buffer.from(bytes).toString("utf8"));
   } catch {
-    throw new ExhibitError(2, "the file is not JSON, so not an evidence-bundle-verdict/0.10 verdict");
+    throw new ExhibitError(2, `the file is not JSON, so not an ${TYPES_TEXT} verdict`);
   }
-  if (o === null || typeof o !== "object" || o.type !== OUTPUT_TYPE) throw new ExhibitError(2, `the file is not an ${OUTPUT_TYPE} verdict (its type is ${JSON.stringify(o?.type ?? null)})`);
-  const errs = validate(SCHEMA, o);
-  if (errs.length) throw new ExhibitError(2, `the file is not a valid ${OUTPUT_TYPE} verdict: ${errs[0]}`);
+  if (o === null || typeof o !== "object" || !READ_TYPES.has(o.type)) throw new ExhibitError(2, `the file is not an ${TYPES_TEXT} verdict (its type is ${JSON.stringify(o?.type ?? null)})`);
+  const errs = validate(READ_TYPES.get(o.type), o);
+  if (errs.length) throw new ExhibitError(2, `the file is not a valid ${o.type} verdict: ${errs[0]}`);
   return o;
 }
 
@@ -69,7 +78,7 @@ function paragraphs(o, verdictSha256, keepTimes) {
   const stateOf = (id) => (bi(id) < 0 ? [L(`${id} not listed`)] : [L(id), V(o, `bindings.${bi(id)}.state`), ...(o.bindings[bi(id)].reason !== null ? [V(o, `bindings.${bi(id)}.reason`)] : [])]);
   const li = (id) => o.limits.findIndex((l) => l.id === id);
 
-  para([L("Agent evidence exhibit: a view of one verdict JSON (evidence-bundle-verdict/0.10). It shows the verdict's values and nothing else; the verdict JSON is the record.")]);
+  para([L(`Agent evidence exhibit: a view of one verdict JSON (${o.type}). It shows the verdict's values and nothing else; the verdict JSON is the record.`)]);
 
   // 1. The limits stated first.
   para([L("Stated first:")], { gap: true });
