@@ -25,6 +25,28 @@ two views of a verdict for chargeback platforms, the exhibit PDF
 the page-ready files of the card worked examples WE-4 and WE-5 (`pages/`).
 It is not part of the npm package.
 
+## The bundle as an envelope: what it carries today
+
+A dispute over a purchase made by an AI agent will draw on records from
+several parties: the payment provider's record of what the customer allowed,
+the network's or issuer's authorisation record, the merchant's order, and
+the agent's own log. No one of them is enough, and no one party holds them
+all. The evidence bundle is one container for the records it can carry. Each
+record goes in as a member with its own digest. Where the verifier reads the
+record's format (instructions in the minimal profile of Annex A, the gate's
+log and receipts, the witness's checkpoints and receipts, and EVM payment
+records), it checks it and says what it shows. Verifiable Intent and AP2
+instructions are carried with their digests and marked PRESENT, not
+verified; any other record can be carried as a supporting member, of which
+only the digest is checked. For a card payment, the issuer's authorisation
+record is not carried today: the person running the verifier states the
+charge, from the processor's records. Headless Oracle's witness countersigns
+the bundle's checkpoints, so the order of the gate's records rests on
+signatures and hashes; the witness is operated by Headless Oracle, and a
+time on any party's clock remains that party's statement. The bundle does
+not replace any network's or provider's record, and no network has adopted
+it.
+
 ## Setup
 
 Both this folder and `examples/ordering-evidence-h4`, whose `lib/formats.mjs`
