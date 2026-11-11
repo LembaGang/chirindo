@@ -20,7 +20,7 @@ gaps listed below are part of the evidence.
 From the repository root, with Node 20 or later (Windows or Linux):
 
 ```
-npm install
+npm ci
 npx tsx examples/e015-4-kit/run.mjs
 ```
 
