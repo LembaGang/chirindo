@@ -9,6 +9,8 @@ it are witnessed by an independent party. It produces real files and runs the
 open verifier (`chirindo verify`) against them; the results are in
 [`RESULTS.md`](RESULTS.md).
 
+To run the same five-alteration test on any tool's log, see [`PROCEDURE.md`](PROCEDURE.md).
+
 This is evidence for E015.4 "Config: Log integrity protection" (AIUC-1).
 It does not make a vendor compliant with or certified under AIUC-1, and the
 gaps listed below are part of the evidence.
