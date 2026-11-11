@@ -5,15 +5,16 @@ received_at values come from a fixed test clock and are not real times.
 
 A self-contained demonstration, for an auditor or insurer, of what Chirindo's
 signed receipt log detects on its own and what it detects once checkpoints of
-it are witnessed by an independent party. It produces real files and runs the
-open verifier (`chirindo verify`) against them; the results are in
-[`RESULTS.md`](RESULTS.md).
+it are held by a witness. In this kit the witness is a local stub, so the run
+is not an independent check (see [`PROCEDURE.md`](PROCEDURE.md), section 3).
+It produces real files and runs the open verifier (`chirindo verify`) against
+them; the results are in [`RESULTS.md`](RESULTS.md).
 
 To run the same five-alteration test on any tool's log, see [`PROCEDURE.md`](PROCEDURE.md).
 
-This is evidence for E015.4 "Config: Log integrity protection" (AIUC-1).
+This is a demonstration relevant to E015.4 "Config: Log integrity protection" (AIUC-1).
 It does not make a vendor compliant with or certified under AIUC-1, and the
-gaps listed below are part of the evidence.
+gaps listed below are part of the demonstration.
 
 ## Rerun it
 
@@ -106,4 +107,4 @@ How each receipt field maps, and what is missing:
 | E015.2 tool call results | `event.result_hash` | **Gap:** a hash only, and on ALLOW only; DENY receipts have no result. |
 | E015.2 agent provenance | `agent` | **Gap:** `agent` is `{vendor:"chirindo", version:<package version>}` from 0.5.3 (up to 0.5.2 the version was the constant `"0.0.1"`); it names the gate software, not the agent. The signing key (`kid` / `key_thumbprint`) identifies the gate instance that signed. |
 | E015.2 authorization record | `event.decision`, `event.decision_source: "config"`, `gate.*` | Policy decision recorded; no approver identity (decisions come from the policy file, not a person). |
-| E015.4 integrity protection | `prev_hash`, `sig`, `seq`, `request_commitment`; witnessed checkpoints in `<chain>.witness.ndjson` | Demonstrated by this kit, with the limits above: the chain alone does not catch a cut-off tail or a key-holder rewrite; witnessed checkpoints catch them only up to the last witnessed checkpoint. |
+| E015.4 integrity protection | `prev_hash`, `sig`, `seq`, `request_commitment`; witnessed checkpoints in `<chain>.witness.ndjson` | Demonstrated against a local stub witness only, which is not an independent check (see PROCEDURE.md, section 3), and with the limits above: the chain alone does not catch a cut-off tail or a key-holder rewrite; witnessed checkpoints catch them only up to the last witnessed checkpoint. |

@@ -18,9 +18,9 @@ Headless Oracle wrote this test. Headless Oracle also makes Chirindo, the tool t
 | Remove | Delete one record from the middle. | The same. |
 | Swap | Swap two neighbouring records. | The same. |
 | Cut off | Delete the last two records. | Something outside the log that fixes where it ends: a checkpoint held by someone other than the operator, or a count or copy the tester already holds. The records that remain are still a valid chain. |
-| Rewrite and re-sign | Change a record, then re-sign and re-link the whole log with the operator's own key. | A checkpoint or copy held by someone other than the operator. The operator's key makes every signature valid again. |
+| Rewrite and re-sign | Change a record, then re-sign and re-link the whole log with the operator's own key. | A checkpoint or copy held by someone other than the operator, and only for history up to when it was taken. The operator's key makes every signature valid again. |
 
-The first three can be made by anyone who can write to the file. They are caught without any outside party, because without the key the signatures cannot be repaired. Cutting off the tail needs no key either. Rewriting and re-signing needs the operator's key.
+The first three can be made by anyone who can write to the file. In a tool with a signed hash chain they are caught without any outside party, because without the key the signatures cannot be repaired. Cutting off the tail needs no key either. Rewriting and re-signing needs the operator's key.
 
 An outside party here means someone other than the operator and other than anyone who can change the log: for example a witness service, a public transparency log or a timestamp authority.
 
@@ -39,7 +39,7 @@ The second command makes a short session of seven tool calls. A local stub witne
 all 12 outcomes match the expected table; wrote <repository>/examples/e015-4-kit/RESULTS.md
 ```
 
-On the laptop this was written on, that command took under 1 minute.
+On the author's Windows laptop that command took about 17 seconds, not counting `npm ci`.
 
 To run a check yourself, use these two commands once the command above has created the `work` folder. Replace COPY with one of `intact`, `edited`, `deleted`, `reordered`, `truncated` or `resigned`. The first command checks the chain alone. The second also checks it against the witness checkpoints.
 
@@ -81,7 +81,7 @@ WITNESSED through count 7, received_at 2026-10-03T00:00:03.000Z, witness key 813
 
 The full output for all twelve checks is in [RESULTS.md](RESULTS.md).
 
-**How this run scores on the table in section 4.** Edit, Remove and Swap are detected by the chain alone. Cut off and Rewrite and re-sign pass the chain alone as VALID. They are detected only with the witness checkpoints. In this kit those checkpoints come from a local stub witness and are read from a file the operator supplies, which section 4 does not count as an outside party. So for this run the outside-party column reads "no" on every row. The kit shows what the verifier does with checkpoints. It is not an independent check.
+**How this run scores on the table in section 4.** Edit, Remove and Swap are detected by the chain alone. Cut off and Rewrite and re-sign pass the chain alone as VALID. They are detected only with the witness checkpoints. In this kit those checkpoints come from a local stub witness and are read from a file the operator supplies, which section 4 does not count as an outside party. So for this run the outside-party column reads "no" on every row. The kit shows what the verifier does with checkpoints. It is not an independent check. By the definition in section 5, this run is therefore not a pass.
 
 ## 4. Run it on any other tool's log
 
@@ -106,7 +106,7 @@ If you cannot make an alteration, because the storage refuses it or because the 
 
 ## 5. What a pass means, and its limits
 
-A pass means each of the five altered copies failed verification, the tool said where, and for the last two the check was made against an outside party. Read each of these limits as part of that claim:
+A pass means each of the five altered copies failed verification, the tool said where, and for the last two the check was made against an outside party. If any row is marked not testable, no pass can be claimed for the test as a whole. Read each of these limits as part of that claim:
 
 - **Records after the last outside checkpoint can be cut off or rewritten without detection.** A pass must state that count. The kit shows 0 because it writes a final checkpoint before it verifies. An agent that stops without a final checkpoint leaves a tail of records after its last one.
 - A pass does not show that every action was recorded. An action the agent never logged leaves nothing to alter.
@@ -118,4 +118,4 @@ A pass means each of the five altered copies failed verification, the tool said 
 
 ## 6. Where the wording comes from
 
-The AIUC-1 standard's control E015, "Log AI system activity" (https://standard.aiuc-1.com/accountability/log-model-activity.md, as read on 9 and 11 November 2026), lists among the things an implementation may include technical controls to ensure logs are "tamper-evident and independently verifiable", with sequence integrity so that missing, dropped or reordered records can be detected. Its evidence item for this is E015.4, log integrity protection. That item is optional in the standard as read. This procedure tests the detection part only. It is our own reading of that published text. It is not an AIUC document, and AIUC, its auditors and its insurers have not endorsed or required it.
+The AIUC-1 standard's control E015, "Log AI system activity" (https://standard.aiuc-1.com/accountability/log-model-activity.md, as read on 9 and 11 November 2026), lists among the things an implementation may include technical controls to ensure logs are "tamper-evident and independently verifiable", with sequence integrity so that gaps, omissions and reordering can be detected. E015 itself is mandatory. The standard lists E015.4, log integrity protection, among the things an implementation may include. This procedure tests the detection part only. It is our own reading of that published text. It is not an AIUC document. We are not aware that AIUC, its auditors or its insurers have endorsed or required it.
