@@ -1,0 +1,3 @@
+# B-481 T1: the OTLP trace vectors are bytes, pinned by sha256 in vectors.json;
+# no end-of-line conversion on any checkout (Windows clones may be CRLF).
+test/fixtures/otlp/** -text

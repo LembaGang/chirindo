@@ -1,0 +1,405 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "host.name",
+            "value": {
+              "stringValue": "vector-host"
+            }
+          },
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "b481-t1-mixed"
+            }
+          }
+        ],
+        "droppedAttributesCount": 0
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "scope-one",
+            "version": "0.1.0",
+            "attributes": [
+              {
+                "key": "scope.attr",
+                "value": {
+                  "stringValue": "one"
+                }
+              }
+            ]
+          },
+          "spans": [
+            {
+              "traceId": "3efd6f02fa3f639011322b21bd30a3a4",
+              "spanId": "6fe05acc3eb7fdf7",
+              "parentSpanId": "",
+              "name": "GET /items",
+              "kind": 3,
+              "startTimeUnixNano": "1794755843144000000",
+              "endTimeUnixNano": "1794755843144000005",
+              "attributes": [
+                {
+                  "key": "http.request.method",
+                  "value": {
+                    "stringValue": "GET"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "status": {}
+            },
+            {
+              "traceId": "3efd6f02fa3f639011322b21bd30a3a4",
+              "spanId": "f5d342fc57daba01",
+              "parentSpanId": "",
+              "name": "execute_tool",
+              "kind": 1,
+              "startTimeUnixNano": "1794755843144000010",
+              "endTimeUnixNano": "1794755843144000015",
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "status": {}
+            },
+            {
+              "traceId": "3efd6f02fa3f639011322b21bd30a3a4",
+              "spanId": "356800ae3e69d6ed",
+              "parentSpanId": "",
+              "name": "execute_tool twice",
+              "startTimeUnixNano": "1794755843144000020",
+              "endTimeUnixNano": "1794755843144000025",
+              "attributes": [
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "b"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "a"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "status": {}
+            },
+            {
+              "traceId": "3efd6f02fa3f639011322b21bd30a3a4",
+              "spanId": "2aaa95b635d3c15b",
+              "parentSpanId": "6fe05acc3eb7fdf7",
+              "traceState": "vendor=value",
+              "name": "execute_tool search",
+              "startTimeUnixNano": "1794755843144000030",
+              "endTimeUnixNano": "1794755843144000035",
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "search"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "status": {
+                "code": 1
+              }
+            },
+            {
+              "traceId": "3efd6f02fa3f639011322b21bd30a3a4",
+              "spanId": "07196f9a8a06beb5",
+              "parentSpanId": "",
+              "flags": 1,
+              "name": "every value type",
+              "kind": 2,
+              "startTimeUnixNano": "1794755843144000040",
+              "endTimeUnixNano": "1794755843144000045",
+              "attributes": [
+                {
+                  "key": "i.unicode",
+                  "value": {
+                    "stringValue": "naïve € 😀"
+                  }
+                },
+                {
+                  "key": "h.empty_value",
+                  "value": {}
+                },
+                {
+                  "key": "g.bytes",
+                  "value": {
+                    "bytesValue": "AAEC+vv8"
+                  }
+                },
+                {
+                  "key": "f.kvlist",
+                  "value": {
+                    "kvlistValue": {
+                      "values": [
+                        {
+                          "key": "zz",
+                          "value": {
+                            "stringValue": "kept in wire order"
+                          }
+                        },
+                        {
+                          "key": "aa",
+                          "value": {
+                            "doubleValue": -0.5
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "e.array_empty",
+                  "value": {
+                    "arrayValue": {
+                      "values": []
+                    }
+                  }
+                },
+                {
+                  "key": "e.array",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "x"
+                        },
+                        {
+                          "intValue": "1"
+                        },
+                        {
+                          "arrayValue": {
+                            "values": [
+                              {
+                                "boolValue": true
+                              }
+                            ]
+                          }
+                        },
+                        {}
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "d.double_nan",
+                  "value": {
+                    "doubleValue": "NaN"
+                  }
+                },
+                {
+                  "key": "d.double",
+                  "value": {
+                    "doubleValue": 3.25
+                  }
+                },
+                {
+                  "key": "c.int_max",
+                  "value": {
+                    "intValue": "9223372036854775807"
+                  }
+                },
+                {
+                  "key": "c.int_negative",
+                  "value": {
+                    "intValue": "-42"
+                  }
+                },
+                {
+                  "key": "b.bool_false",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "a.empty_string",
+                  "value": {
+                    "stringValue": ""
+                  }
+                },
+                {
+                  "key": "z.last",
+                  "value": {
+                    "stringValue": "sorted last"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 2,
+              "events": [
+                {
+                  "timeUnixNano": "1794755843144000041",
+                  "name": "second by wire order",
+                  "attributes": [
+                    {
+                      "key": "k",
+                      "value": {
+                        "stringValue": "v"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "timeUnixNano": "1794755843144000040",
+                  "name": "first by time",
+                  "attributes": []
+                }
+              ],
+              "droppedEventsCount": 1,
+              "links": [
+                {
+                  "traceId": "f71e639e98c5906fc05dae5064952b76",
+                  "spanId": "1e7271a416db2be3",
+                  "traceState": "x=y",
+                  "attributes": [
+                    {
+                      "key": "link.attr",
+                      "value": {
+                        "intValue": "7"
+                      }
+                    }
+                  ],
+                  "flags": 256
+                }
+              ],
+              "droppedLinksCount": 3,
+              "status": {
+                "message": "not a defined code",
+                "code": 3
+              }
+            }
+          ],
+          "schemaUrl": "https://opentelemetry.io/schemas/1.36.0"
+        },
+        {
+          "scope": {
+            "name": "scope-two"
+          },
+          "spans": [
+            {
+              "traceId": "3efd6f02fa3f639011322b21bd30a3a4",
+              "spanId": "02c329911ec6a98a",
+              "parentSpanId": "",
+              "name": "chat gpt-x",
+              "startTimeUnixNano": "1794755843144000050",
+              "endTimeUnixNano": "1794755843144000055",
+              "attributes": [
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "ignored"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "status": {}
+            },
+            {
+              "traceId": "3efd6f02fa3f639011322b21bd30a3a4",
+              "spanId": "03a564e870080684",
+              "parentSpanId": "",
+              "name": "",
+              "startTimeUnixNano": "1794755843144000060",
+              "endTimeUnixNano": "1794755843144000065",
+              "attributes": [
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": ""
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "status": {
+                "code": 2
+              }
+            }
+          ],
+          "schemaUrl": ""
+        }
+      ],
+      "schemaUrl": "https://opentelemetry.io/schemas/1.37.0"
+    },
+    {
+      "resource": {
+        "attributes": [],
+        "droppedAttributesCount": 0
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": ""
+          },
+          "spans": [
+            {
+              "traceId": "f71e639e98c5906fc05dae5064952b76",
+              "spanId": "9baf9f6f759676a6",
+              "parentSpanId": "",
+              "name": "execute_tool fetch",
+              "startTimeUnixNano": "1794755843144000070",
+              "endTimeUnixNano": "1794755843144000075",
+              "attributes": [
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "fetch"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "status": {
+                "message": "boom",
+                "code": 2
+              }
+            }
+          ],
+          "schemaUrl": ""
+        }
+      ]
+    }
+  ]
+}
