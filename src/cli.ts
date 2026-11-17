@@ -86,6 +86,7 @@ import { eraseRetained, sha256Tagged } from "./trial/files.js";
 import { PRINTABLE_256 } from "./trial/rules.js";
 import { openPurchaseCheck } from "./purchase/check.js";
 import { createPurchaseServer } from "./purchase/http.js";
+import { runOtelReceiverCli } from "./otel/command.js";
 import { DEFAULT_PAYMENT_KEYS_URL, verifyPaymentAttestation, type PaymentKey } from "./payment.js";
 import { buildIssuerPack, checkIssuerPack, type Selection, type WitnessMode } from "./issuer/pack.js";
 
@@ -127,6 +128,8 @@ Usage:
                        [--jwks-uri <https-url>] [--witness <base-url>]
                        [--witness-key <hex|jwk-file>] [--witness-name <name>]
                        [--witness-account-key-file <path>]
+  chirindo otel-receiver [--dir <path>] [--port <n>] [--token-file <file>]
+                       [--forward <http(s)-url>] [--no-retain]
   chirindo trial-erase [--dir <path>] (--args-hash <sha256:hex> | --order-ref <ref>)
   chirindo purchase-check --token-file <file> [--dir <path>]
                        [--port <n>] [--host 127.0.0.1|::1] [--server-label <name>]
@@ -167,6 +170,22 @@ Trial recorder:
   call it. trial-erase removes the retained arguments for an args_hash or an
   order reference and prints one JSON line per file removed, then
   {"removed_count": N}.
+
+OpenTelemetry receiver:
+  otel-receiver takes OTLP/HTTP exports (protobuf or JSON, optional gzip) on
+  POST /v1/traces at 127.0.0.1, and at ::1 when this machine has it, port
+  4318 by default, and writes one signed tool_call record (decision
+  observed) per span to <data-dir>/otel/chains/<session>.jsonl, which
+  chirindo verify reads. Point the SDK at http://localhost:4318 with
+  OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf (it serves OTLP/HTTP, not gRPC).
+  /v1/metrics and /v1/logs are answered and discarded, or sent on unchanged
+  with --forward. Beside the chain, <session>.retained.ndjson keeps each
+  span whole, in plain text, with every attribute the SDK recorded (tool
+  arguments included), so each args_hash can be recomputed; --no-retain keeps
+  hashes only. Refused requests go to <data-dir>/otel/gaps.ndjson. Requests
+  from web pages (an Origin header) are refused; without --token-file any
+  process on this host can add records. It creates the signing key on first
+  start.
 
 Checking a paid checkpoint:
   payment verify checks a witness payment attestation
@@ -311,7 +330,7 @@ interface ParsedArgs {
 // <chain>` would swallow the chain path as the flag's value and the command
 // would fail with a confusing usage error — the flag must work in any
 // position, because a scripted caller will not be careful about ordering.
-const BOOLEAN_FLAGS = new Set(["allow-unproven-delivery", "allow-nonstandard-tool-names", "json", "consent-missing-ok", "allow-failed", "witness-file-only", "same-party"]);
+const BOOLEAN_FLAGS = new Set(["allow-unproven-delivery", "allow-nonstandard-tool-names", "json", "consent-missing-ok", "allow-failed", "witness-file-only", "same-party", "no-retain"]);
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command = argv[0];
@@ -1550,6 +1569,8 @@ async function main(argv: string[]): Promise<number> {
       return await cmdVerify(args);
     case "trial-recorder":
       return await cmdTrialRecorder(args);
+    case "otel-receiver":
+      return await runOtelReceiverCli(args);
     case "trial-erase":
       return cmdTrialErase(args);
     case "purchase-check":
