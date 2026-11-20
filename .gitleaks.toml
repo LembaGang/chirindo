@@ -146,3 +146,16 @@ targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''(^|/)examples/evidence-bundle/pages/we-[45]-[12]\.bundle\.json$''']
 regexes = ['''^sVBDsKoyBtMRYEc-51Xmgy1PsIvo6_9QbSbsAVYqKzc$''']
+
+[[allowlists]]
+# test/otel-receiver.test.ts (B-481 T2, commit 3f5076a5), the forwarding test:
+# a hand-written `x-vendor-key` request header value. The test sends it only to
+# a 127.0.0.1 stub it starts itself, asserts the header is passed on unchanged,
+# and asserts the value is never written to disk. It carries the ticket id
+# b481 and is no vendor's credential; `generic-api-key` matches it on entropy
+# alone. Same AND rule as every entry above: this value at this path only.
+description = "otel-receiver forwarding test: hand-written x-vendor-key header fixture, sent only to a local stub"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)test/otel-receiver\.test\.ts$''']
+regexes = ['''^vk-b481-secret$''']

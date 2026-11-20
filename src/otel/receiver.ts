@@ -60,12 +60,18 @@
 //     or more, an error, 10 s) is a gap line forward-failed. Headers are never
 //     written anywhere.
 //   - The first start creates the signing key in the data directory if none.
-//   - One random session per process. No checkpoint and no witness call: T3.
+//   - One random session per process.
+//   - Checkpoints (T3): with the `witness` option, src/otel/checkpointer.ts
+//     sends a checkpoint of the chain head to the witness, paced by time;
+//     only checkpoints leave the machine, never a record. Started once both
+//     binds succeed; at close() the last checkpoint, SHUTDOWN_MS at most.
 //
 // Files under <dir>/otel/:
 //   chains/<session>.jsonl              the chain (`chirindo verify` reads it)
 //   chains/<session>.retained.ndjson    {seq, args_hash, preimage[, result_hash, result_preimage]}
+//   chains/<session>.jsonl.witness.ndjson  {checkpoint, witness_receipt, witness_error} (T3)
 //   gaps.ndjson                         {ts, session_id, route, reason, ...}
+//   witness-state.json                  {stopped_until, reason, at} after a refusal (T3)
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
@@ -87,6 +93,7 @@ import {
   type ToolCallEvent,
 } from "../vendor/recorder/index.js";
 import { openObservedWriter, type ObservedWriter } from "./append.js";
+import { createOtelCheckpointer, type OtelCheckpointer, type OtelWitnessOptions } from "./checkpointer.js";
 
 export const OTEL_RECEIVER_DEFAULT_PORT = 4318;
 export const OTEL_ROUTES = ["/v1/traces", "/v1/metrics", "/v1/logs", "/v1/chirindo/records"] as const;
@@ -138,6 +145,8 @@ export interface OtelReceiverOptions {
   gapIntervalMs?: number;
   // The ::1 bind; a seam for the tests (the default binds ::1 at the port).
   listen6?: (server: Server, port: number) => Promise<void>;
+  // T3: checkpoints to a witness; absent, none are made (--no-witness).
+  witness?: OtelWitnessOptions;
 }
 
 export interface OtelReceiverStats {
@@ -167,6 +176,8 @@ export interface OtelReceiver {
   readonly gapsPath: string;
   readonly identityPath: string;
   readonly keyCreated: boolean;
+  // T3: present when the witness option was given.
+  readonly checkpointer?: OtelCheckpointer;
   listen(): Promise<OtelListening>;
   // Resolves when every forward started so far has finished.
   settled(): Promise<void>;
@@ -308,6 +319,26 @@ export function createOtelReceiver(o: OtelReceiverOptions): OtelReceiver {
     privateKey: identity.privateKey,
     publicKey: identity.publicKey,
   });
+
+  const checkpointer: OtelCheckpointer | undefined =
+    o.witness === undefined
+      ? undefined
+      : createOtelCheckpointer({
+          dir: o.dir,
+          chainsDir: paths.chainsDir,
+          chainPath: paths.chainPath,
+          sessionId,
+          identity,
+          head: () => ({ count: writer.count, lastEntryHash: writer.lastEntryHash }),
+          target: o.witness.target,
+          intervalMs: o.witness.intervalMs,
+          ...(o.witness.idleMs !== undefined ? { idleMs: o.witness.idleMs } : {}),
+          ...(o.witness.shutdownMs !== undefined ? { shutdownMs: o.witness.shutdownMs } : {}),
+          ...(o.witness.clock !== undefined ? { clock: o.witness.clock } : {}),
+          ...(o.witness.timers !== undefined ? { timers: o.witness.timers } : {}),
+          ...(o.witness.post !== undefined ? { post: o.witness.post } : {}),
+          log,
+        });
 
   let forwardBase: URL | undefined;
   if (o.forward !== undefined) {
@@ -451,6 +482,9 @@ export function createOtelReceiver(o: OtelReceiverOptions): OtelReceiver {
         log(`[chirindo] otel-receiver: append failed (${(err as NodeJS.ErrnoException).code ?? (err as Error).message}); no further records are written by this process`);
       }
     }
+    // T3: the head moved. This only notes the time and sets a timer; the
+    // witness POST starts after the caller has answered the request.
+    if (n > 0) checkpointer?.appended();
     return n;
   };
 
@@ -840,6 +874,7 @@ export function createOtelReceiver(o: OtelReceiverOptions): OtelReceiver {
     gapsPath: paths.gapsPath,
     identityPath,
     keyCreated: init.kind === "created",
+    ...(checkpointer !== undefined ? { checkpointer } : {}),
     listen: async () => {
       await new Promise<void>((done, fail) => {
         server4.once("error", fail);
@@ -870,6 +905,7 @@ export function createOtelReceiver(o: OtelReceiverOptions): OtelReceiver {
       const tick = Math.max(20, Math.min(500, Math.floor(Math.min(headersDeadline, idleDeadline, gapInterval) / 4)));
       sweeper = setInterval(sweep, tick);
       sweeper.unref();
+      checkpointer?.start();
       const addresses = [`127.0.0.1:${port}`, ...(ipv6 === "bound" ? [`[::1]:${port}`] : [])];
       return { port, url: `http://127.0.0.1:${port}`, addresses, ipv6 };
     },
@@ -881,6 +917,8 @@ export function createOtelReceiver(o: OtelReceiverOptions): OtelReceiver {
       if (sweeper !== undefined) clearInterval(sweeper);
       await Promise.all([closeServer(server4), closeServer(server6)]);
       flushRefusals(true);
+      // T3: the last checkpoint, after the servers stopped taking records.
+      if (checkpointer !== undefined) await checkpointer.shutdown();
     },
   };
 }

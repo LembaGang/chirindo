@@ -4,6 +4,9 @@
 //
 //   chirindo otel-receiver [--dir <path>] [--port <n>] [--token-file <file>]
 //                          [--forward <http(s)-url>] [--no-retain]
+//                          [--no-witness | [--witness <url> --witness-key <hex|jwk-file>
+//                           [--witness-name <name>]] [--account-key-file <path>
+//                           [--checkpoint-interval <s>]]]
 //
 // It listens on 127.0.0.1, and on ::1 too when the machine has it (ruling L2 b).
 //
@@ -11,16 +14,21 @@
 // success one JSON line goes to stdout: {"listening", "addresses", "ipv6",
 // "session_id", "chain", "pid"}.
 // It ends on SIGINT or SIGTERM by closing the server (process.exitCode, never
-// process.exit()). No checkpoint is made at shutdown: T3.
+// process.exit()); T3: then the last checkpoint goes to the witness (10 s at
+// most) and its outcome is printed. Witness on by default (Headless Oracle,
+// key pinned): src/otel/checkpointer.ts; the start prints what leaves the
+// machine and how to turn it off. The account key comes from
+// --account-key-file only (no environment variable).
 
 import { readFileSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { resolveOtelWitness, type OtelWitnessOptions } from "./checkpointer.js";
 import { OTEL_RECEIVER_DEFAULT_PORT, createOtelReceiver, type OtelListening, type OtelReceiver } from "./receiver.js";
 
 export const OTEL_RECEIVER_COMMAND = "otel-receiver";
-export const OTEL_RECEIVER_FLAGS = ["dir", "port", "token-file", "forward", "no-retain"] as const;
+export const OTEL_RECEIVER_FLAGS = ["dir", "port", "token-file", "forward", "no-retain", "no-witness", "witness", "witness-key", "witness-name", "account-key-file", "checkpoint-interval"] as const;
 export const OTEL_RECEIVER_USAGE =
-  "usage: chirindo otel-receiver [--dir <path>] [--port <n>] [--token-file <file>] [--forward <http(s)-url>] [--no-retain]";
+  "usage: chirindo otel-receiver [--dir <path>] [--port <n>] [--token-file <file>] [--forward <http(s)-url>] [--no-retain] [--no-witness | [--witness <url> --witness-key <hex|jwk-file> [--witness-name <name>]] [--account-key-file <path> [--checkpoint-interval <s>]]]";
 
 export interface OtelCommandArgs {
   flags: Map<string, string | true>;
@@ -32,6 +40,8 @@ export interface OtelCommandIo {
   stdout(line: string): void;
   stderr(line: string): void;
   cwd?: string;
+  // T3 seams for the tests: the checkpointer's clock, timers and POST.
+  witnessSeams?: Pick<OtelWitnessOptions, "clock" | "timers" | "post" | "shutdownMs">;
 }
 
 export interface OtelCommandStarted {
@@ -96,6 +106,25 @@ export async function startOtelReceiverCommand(args: OtelCommandArgs, io: OtelCo
     }
   }
 
+  const noWitness = args.flags.get("no-witness");
+  if (noWitness !== undefined && noWitness !== true) return usage("--no-witness takes no value");
+  const wflags: Record<string, string | undefined> = {};
+  for (const k of ["witness", "witness-key", "witness-name", "account-key-file", "checkpoint-interval"]) {
+    const v = str(k);
+    if (v === null) return usage(`--${k} takes a value`);
+    wflags[k] = v;
+  }
+  const resolved = resolveOtelWitness({
+    noWitness: noWitness === true,
+    ...(wflags["witness"] !== undefined ? { witness: wflags["witness"] } : {}),
+    ...(wflags["witness-key"] !== undefined ? { witnessKey: /^[0-9a-fA-F]{64}$/.test(wflags["witness-key"]) ? wflags["witness-key"] : abs(wflags["witness-key"]) } : {}),
+    ...(wflags["witness-name"] !== undefined ? { witnessName: wflags["witness-name"] } : {}),
+    ...(wflags["account-key-file"] !== undefined ? { accountKeyFile: abs(wflags["account-key-file"]) } : {}),
+    ...(wflags["checkpoint-interval"] !== undefined ? { checkpointInterval: wflags["checkpoint-interval"] } : {}),
+  });
+  if (!resolved.ok) return usage(resolved.why);
+  const wc = resolved.config;
+
   let receiver: OtelReceiver;
   try {
     receiver = createOtelReceiver({
@@ -105,6 +134,7 @@ export async function startOtelReceiverCommand(args: OtelCommandArgs, io: OtelCo
       ...(forward !== undefined ? { forward } : {}),
       retain: retainFlag !== true,
       log: (line) => io.stderr(line),
+      ...(wc.target !== undefined ? { witness: { target: wc.target, intervalMs: wc.intervalMs, ...(io.witnessSeams ?? {}) } } : {}),
     });
   } catch (e) {
     io.stderr(`[chirindo] ${cmd}: cannot start: ${(e as Error).message}`);
@@ -127,6 +157,7 @@ export async function startOtelReceiverCommand(args: OtelCommandArgs, io: OtelCo
       ` forward=${forward !== undefined ? new URL(forward).origin : "none"}` +
       (token !== undefined ? " token=required" : " token=none (any local process can add records; web pages are refused)"),
   );
+  io.stderr(wc.startLine);
   const stop = async () => {
     await receiver.close();
     await receiver.settled();

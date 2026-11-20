@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { OTLP_MAX_BODY_BYTES } from "../src/otlp/index.js";
-import { startOtelReceiverCommand } from "../src/otel/command.js";
+import { startCommandForTest } from "./otel-command-guard.js";
 import { allowedHosts, createOtelReceiver, fromWebPage, ipv6Unavailable, isLoopbackAddress, mediaType, retainedHash, type OtelReceiver, type OtelReceiverOptions } from "../src/otel/receiver.js";
 import { argsHash, jcsBytes, resultHash, runVerify } from "../src/vendor/recorder/index.js";
 
@@ -565,7 +565,7 @@ describe("otel-receiver: start, key, sessions, gRPC, broken chain", { timeout: 1
     const out: string[] = [];
     const err: string[] = [];
     const dir = tmp();
-    const s = await startOtelReceiverCommand({ flags: new Map<string, string | true>([["dir", "gate"], ["port", "0"], ["no-retain", true]]), positional: [], passthrough: [] }, { stdout: (l) => out.push(l), stderr: (l) => err.push(l), cwd: dir });
+    const s = await startCommandForTest({ flags: new Map<string, string | true>([["dir", "gate"], ["port", "0"], ["no-retain", true], ["no-witness", true]]), positional: [], passthrough: [] }, { stdout: (l) => out.push(l), stderr: (l) => err.push(l), cwd: dir });
     expect(s.code).toBe(0);
     expect(out.length).toBe(1);
     const j = JSON.parse(out[0]!);
@@ -589,7 +589,7 @@ describe("otel-receiver: start, key, sessions, gRPC, broken chain", { timeout: 1
     const dir = tmp();
     const run = async (flags: Array<[string, string | true]>, positional: string[] = []) => {
       const err: string[] = [];
-      const s = await startOtelReceiverCommand({ flags: new Map(flags), positional, passthrough: [] }, { stdout: () => undefined, stderr: (l) => err.push(l), cwd: dir });
+      const s = await startCommandForTest({ flags: new Map<string, string | true>([...flags, ["no-witness", true]]), positional, passthrough: [] }, { stdout: () => undefined, stderr: (l) => err.push(l), cwd: dir });
       return { code: s.code, err: err.join("\n"), s };
     };
     const g: Array<[string, string | true]> = [["dir", "g"]];
@@ -1223,7 +1223,7 @@ describe("otel-receiver: forwarding details and the token file (T2 read L1, L3, 
     chmodSync(join(dir, "closed-token"), 0o600);
     for (const [f, warn] of [["open-token", true], ["closed-token", false]] as const) {
       const err: string[] = [];
-      const st = await startOtelReceiverCommand({ flags: new Map<string, string | true>([["dir", "g-" + f], ["port", "0"], ["token-file", f]]), positional: [], passthrough: [] }, { stdout: () => undefined, stderr: (l) => err.push(l), cwd: dir });
+      const st = await startCommandForTest({ flags: new Map<string, string | true>([["dir", "g-" + f], ["port", "0"], ["token-file", f], ["no-witness", true]]), positional: [], passthrough: [] }, { stdout: () => undefined, stderr: (l) => err.push(l), cwd: dir });
       expect(st.code).toBe(0);
       const warned = err.some((l) => l.includes("can be read by other users"));
       expect(warned, f).toBe(process.platform === "win32" ? false : warn);

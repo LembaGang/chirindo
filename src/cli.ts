@@ -130,6 +130,9 @@ Usage:
                        [--witness-account-key-file <path>]
   chirindo otel-receiver [--dir <path>] [--port <n>] [--token-file <file>]
                        [--forward <http(s)-url>] [--no-retain]
+                       [--no-witness | --witness <base-url> --witness-key <hex|jwk-file>
+                        [--witness-name <name>]] [--account-key-file <path>]
+                       [--checkpoint-interval <seconds>]
   chirindo trial-erase [--dir <path>] (--args-hash <sha256:hex> | --order-ref <ref>)
   chirindo purchase-check --token-file <file> [--dir <path>]
                        [--port <n>] [--host 127.0.0.1|::1] [--server-label <name>]
@@ -186,6 +189,17 @@ OpenTelemetry receiver:
   from web pages (an Origin header) are refused; without --token-file any
   process on this host can add records. It creates the signing key on first
   start.
+  It sends checkpoints of the chain head to a witness, by default Headless
+  Oracle (https://api.headlessoracle.com, its key key_2026_v1 pinned): the
+  head hash, the record count, a timestamp and the session id, with the
+  receiver's key id, public key and signature; never a record's content.
+  At most one every 120 s while records arrive with an account key
+  (--account-key-file; --checkpoint-interval 40 to 900), every 900 s
+  without one; 10 s after the records stop, but never sooner than one
+  interval after the last; and one at shutdown (10 s at most). A refusal
+  for the key, plan, payment, quota or capacity stops sending until 00:00
+  UTC; nothing is paid. Outcomes go to <session>.jsonl.witness.ndjson
+  (chirindo verify --witness-file). --no-witness sends nothing.
 
 Checking a paid checkpoint:
   payment verify checks a witness payment attestation
@@ -330,7 +344,7 @@ interface ParsedArgs {
 // <chain>` would swallow the chain path as the flag's value and the command
 // would fail with a confusing usage error — the flag must work in any
 // position, because a scripted caller will not be careful about ordering.
-const BOOLEAN_FLAGS = new Set(["allow-unproven-delivery", "allow-nonstandard-tool-names", "json", "consent-missing-ok", "allow-failed", "witness-file-only", "same-party", "no-retain"]);
+const BOOLEAN_FLAGS = new Set(["allow-unproven-delivery", "allow-nonstandard-tool-names", "json", "consent-missing-ok", "allow-failed", "witness-file-only", "same-party", "no-retain", "no-witness"]);
 
 function parseArgs(argv: string[]): ParsedArgs {
   const command = argv[0];
