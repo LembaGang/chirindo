@@ -1,0 +1,730 @@
+{
+  "about": "B-481 T1 OTLP trace vectors. Bodies from generate.mjs (the two .gz files are committed bytes); expected values pinned from src/otlp at the commit that added them.",
+  "vectors": [
+    {
+      "file": "bomb.pb.gz",
+      "bytes": 16328,
+      "sha256": "4d949cdbe8e29cf5067b8cfcf65f85f55dcaf1fb3549b5702a8df063a4853a01",
+      "content_type": "application/x-protobuf",
+      "content_encoding": "gzip",
+      "refused": "too_large"
+    },
+    {
+      "file": "deep-64.json",
+      "bytes": 82681,
+      "sha256": "7060f9aa3645aedcd1a5cf7a121c8c7493520f907dee3b7160c4b6a2a888d8a9",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "otel.span:execute_tool lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:ebba87bc4b1c3f728e876d0044e2df5b0c8696ce01e9a6b9ed69495371b2b304",
+          "request_commitment": "sha256:ff47976f02af428ca6adc2416e9bba840d51b19221c15d09e0b5dc6b2c46d96e"
+        }
+      ]
+    },
+    {
+      "file": "deep-64.pb",
+      "bytes": 583,
+      "sha256": "4a1d0f1facfd5edf30a77bbc14cd4b64d5835ef4044449474bafe9d379326ab7",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "otel.span:execute_tool lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:ebba87bc4b1c3f728e876d0044e2df5b0c8696ce01e9a6b9ed69495371b2b304",
+          "request_commitment": "sha256:ff47976f02af428ca6adc2416e9bba840d51b19221c15d09e0b5dc6b2c46d96e"
+        }
+      ]
+    },
+    {
+      "file": "deep-kv-64.json",
+      "bytes": 159667,
+      "sha256": "ad324c1a0a4c537396dac9b49361f61081ae9e45d27a1a88c1de04c2b96aa79c",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "otel.span:execute_tool lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:1c5d6bc696b5934279406b3ce6ce0f4c8032da188d69a354dfaaeb5a0753a429",
+          "request_commitment": "sha256:f7cdc5ac3233cea260ee3ada50915e77098ab258b92a8325f82744ede5e8ce6b"
+        }
+      ]
+    },
+    {
+      "file": "deep-kv-64.pb",
+      "bytes": 981,
+      "sha256": "92d6a889949a1e8e7a01613afbe5f4cbea6c2ff78ce22db284a55d960f64aa3c",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "otel.span:execute_tool lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:1c5d6bc696b5934279406b3ce6ce0f4c8032da188d69a354dfaaeb5a0753a429",
+          "request_commitment": "sha256:f7cdc5ac3233cea260ee3ada50915e77098ab258b92a8325f82744ede5e8ce6b"
+        }
+      ]
+    },
+    {
+      "file": "empty.json",
+      "bytes": 3,
+      "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "spans": 0,
+      "unknown_fields": 0,
+      "records": []
+    },
+    {
+      "file": "empty.pb",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "spans": 0,
+      "unknown_fields": 0,
+      "records": []
+    },
+    {
+      "file": "flags-max.json",
+      "bytes": 1773,
+      "sha256": "e8822fa4e53882df2af38a2474f9e749f289b1b0f32fef43f505e3ece59d1f87",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:a2d7506701aee35d80e27c754506789ea0a79c584d932d7ada23e0f636c6893d",
+          "request_commitment": "sha256:fc20961882ad849a31d550f71156d39f2305fa58c960b777e6cefad6e9d9ad16"
+        }
+      ]
+    },
+    {
+      "file": "flags-max.pb",
+      "bytes": 330,
+      "sha256": "23d17ab4eb8f3142daafd5433255b89be71eee79118b0eaef9a5ef8b63483aca",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:a2d7506701aee35d80e27c754506789ea0a79c584d932d7ada23e0f636c6893d",
+          "request_commitment": "sha256:fc20961882ad849a31d550f71156d39f2305fa58c960b777e6cefad6e9d9ad16"
+        }
+      ]
+    },
+    {
+      "file": "link-ids-odd.pb",
+      "bytes": 340,
+      "sha256": "cd31a2d7ebafe4fb88f590e1c1f2782863605db07ff279f0d6127e06c159b298",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:83578c393e4dfe585f355a32b5b7ac39414a0d0c36381115cd7a628803b1dad7",
+          "request_commitment": "sha256:40405fc1ba171868a0b18fb5a532b90f368c8d184d5efbd32df19fa7436b1673"
+        }
+      ]
+    },
+    {
+      "file": "mixed.json",
+      "bytes": 12009,
+      "sha256": "2703e15fb6c40a173592fefb69f84d74e41a9adfcb1549f54a58340e982d4916",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "spans": 8,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "otel.span:GET /items",
+          "outcome": "executed",
+          "args_hash": "sha256:4caf6df3d67c246a9f0b3dbc95ce6e378004a936d5164b70d567263e58cc85e0",
+          "request_commitment": "sha256:6b2dfc6e33b83969621918da9d663212bdc6e9507abf4147c86ce52e4c6880a9"
+        },
+        {
+          "tool_name": "otel.span:execute_tool",
+          "outcome": "executed",
+          "args_hash": "sha256:a8142a7f70243be4233be91ec1146ff0168d70b30ab9fa1380b279182767962a",
+          "request_commitment": "sha256:a58be0a27452ae7f2f037424b16168346a96aa14881206378c2d85602efb6be6"
+        },
+        {
+          "tool_name": "otel.span:execute_tool twice",
+          "outcome": "executed",
+          "args_hash": "sha256:1dea0d49bd5a1adfaa64f7198b92dc50b4c5bdb01d56b7ee3f736ea666d9fc9e",
+          "request_commitment": "sha256:751a00f319200ec20ea0af9b9b88ca7209073bff2c2d3d49a2229386d951c13c"
+        },
+        {
+          "tool_name": "search",
+          "outcome": "executed",
+          "args_hash": "sha256:7cb81a1bf32ea91ff08297c74f8cc63c6873eb88c8a38b8e003f4617ca802968",
+          "request_commitment": "sha256:92e2438384bce78c5728dc167485f34c27baba35fb3022c4c6371ea73aa21dec"
+        },
+        {
+          "tool_name": "otel.span:every value type",
+          "outcome": "executed",
+          "args_hash": "sha256:36ba914a250308f1155dd2315d97f55e7d302a6c9b81776b2838fad776bd6cb8",
+          "request_commitment": "sha256:73f64a58a2dc4913e00bc76e8f0b01152046c37a5c78644b9176b5a806e8a5cb"
+        },
+        {
+          "tool_name": "otel.span:chat gpt-x",
+          "outcome": "executed",
+          "args_hash": "sha256:eb7a3fd3ce0e9565491a0c6a70c143ef711c14e15f03bba5bd9f4b339427c22d",
+          "request_commitment": "sha256:76046653c2e05701d4aa64d08149e4431c64e9914675db9d968fb5f8632a36e6"
+        },
+        {
+          "tool_name": "otel.span:",
+          "outcome": "errored",
+          "args_hash": "sha256:e08dcbc56e43b43daf9b796ac21f48fbddfec24a0c6fcc8047db4fb6191f7e7e",
+          "request_commitment": "sha256:03af1b5414f332654420d8cd9b17600709613cde993d48700bc63eec525af434"
+        },
+        {
+          "tool_name": "fetch",
+          "outcome": "errored",
+          "args_hash": "sha256:7164e5010934d59af6ba7de4cadcbd6b38fa1875e55a851729e541a157fdcd84",
+          "request_commitment": "sha256:f11bb7d4091d27a4e7bcf40242158b39aa8ee9623a184ce85aa2d212d51eed24"
+        }
+      ]
+    },
+    {
+      "file": "mixed.pb",
+      "bytes": 1730,
+      "sha256": "5df56e24fc0a70022e13e0e2ea45c603442e5bec301ff4aec120445cfee83687",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "spans": 8,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "otel.span:GET /items",
+          "outcome": "executed",
+          "args_hash": "sha256:4caf6df3d67c246a9f0b3dbc95ce6e378004a936d5164b70d567263e58cc85e0",
+          "request_commitment": "sha256:6b2dfc6e33b83969621918da9d663212bdc6e9507abf4147c86ce52e4c6880a9"
+        },
+        {
+          "tool_name": "otel.span:execute_tool",
+          "outcome": "executed",
+          "args_hash": "sha256:a8142a7f70243be4233be91ec1146ff0168d70b30ab9fa1380b279182767962a",
+          "request_commitment": "sha256:a58be0a27452ae7f2f037424b16168346a96aa14881206378c2d85602efb6be6"
+        },
+        {
+          "tool_name": "otel.span:execute_tool twice",
+          "outcome": "executed",
+          "args_hash": "sha256:1dea0d49bd5a1adfaa64f7198b92dc50b4c5bdb01d56b7ee3f736ea666d9fc9e",
+          "request_commitment": "sha256:751a00f319200ec20ea0af9b9b88ca7209073bff2c2d3d49a2229386d951c13c"
+        },
+        {
+          "tool_name": "search",
+          "outcome": "executed",
+          "args_hash": "sha256:7cb81a1bf32ea91ff08297c74f8cc63c6873eb88c8a38b8e003f4617ca802968",
+          "request_commitment": "sha256:92e2438384bce78c5728dc167485f34c27baba35fb3022c4c6371ea73aa21dec"
+        },
+        {
+          "tool_name": "otel.span:every value type",
+          "outcome": "executed",
+          "args_hash": "sha256:36ba914a250308f1155dd2315d97f55e7d302a6c9b81776b2838fad776bd6cb8",
+          "request_commitment": "sha256:73f64a58a2dc4913e00bc76e8f0b01152046c37a5c78644b9176b5a806e8a5cb"
+        },
+        {
+          "tool_name": "otel.span:chat gpt-x",
+          "outcome": "executed",
+          "args_hash": "sha256:eb7a3fd3ce0e9565491a0c6a70c143ef711c14e15f03bba5bd9f4b339427c22d",
+          "request_commitment": "sha256:76046653c2e05701d4aa64d08149e4431c64e9914675db9d968fb5f8632a36e6"
+        },
+        {
+          "tool_name": "otel.span:",
+          "outcome": "errored",
+          "args_hash": "sha256:e08dcbc56e43b43daf9b796ac21f48fbddfec24a0c6fcc8047db4fb6191f7e7e",
+          "request_commitment": "sha256:03af1b5414f332654420d8cd9b17600709613cde993d48700bc63eec525af434"
+        },
+        {
+          "tool_name": "fetch",
+          "outcome": "errored",
+          "args_hash": "sha256:7164e5010934d59af6ba7de4cadcbd6b38fa1875e55a851729e541a157fdcd84",
+          "request_commitment": "sha256:f11bb7d4091d27a4e7bcf40242158b39aa8ee9623a184ce85aa2d212d51eed24"
+        }
+      ]
+    },
+    {
+      "file": "neg-bad-hex.json",
+      "bytes": 1766,
+      "sha256": "346bff8f0b091e088f2a32a345378161555492a242d66a4c432b0e1bd3c7097c",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "refused": "json_invalid"
+    },
+    {
+      "file": "neg-deep-65.json",
+      "bytes": 85123,
+      "sha256": "6745d6b9369ee21c758169603e8d434ec1ea50e09e63025a766dcb6a26e345c3",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "refused": "depth_exceeded"
+    },
+    {
+      "file": "neg-deep-65.pb",
+      "bytes": 589,
+      "sha256": "b515b54510d488f74f6ae07d4fe10029161c5c137e4cbc0cc0aa602313ff3c9d",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "depth_exceeded"
+    },
+    {
+      "file": "neg-deep-kv-65.json",
+      "bytes": 164483,
+      "sha256": "4b19bb0234d8c362a889fc0eb73881fa6d5fe815968530059681d18f7518ecb9",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "refused": "depth_exceeded"
+    },
+    {
+      "file": "neg-deep-kv-65.pb",
+      "bytes": 993,
+      "sha256": "ac326882fbeb72d56d849ffbf33384e158f80065d82aa8daf4329116303751b5",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "depth_exceeded"
+    },
+    {
+      "file": "neg-dup-member.json",
+      "bytes": 40,
+      "sha256": "c4ec1f4051ced2a5e724f64c294135c24440dba6deaea7a97804095eec1c5df9",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "refused": "json_invalid"
+    },
+    {
+      "file": "neg-enum-string.json",
+      "bytes": 1785,
+      "sha256": "051ffd08d7d1a7867a11ab5ee9a8d7bffacc5cd318fa48b60a2cbb4b1f3df218",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "refused": "json_invalid"
+    },
+    {
+      "file": "neg-field-zero.pb",
+      "bytes": 332,
+      "sha256": "d830132b836bf09d4f35faf5b2359a89a8ba005d2cbbe4c37d88d80957ba28d3",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "protobuf_invalid"
+    },
+    {
+      "file": "neg-group.pb",
+      "bytes": 2,
+      "sha256": "1b47e3acf9cd496936430df42e017269c3bb14f54dda91b41a90fd265960f124",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "protobuf_invalid"
+    },
+    {
+      "file": "neg-lone-surrogate.json",
+      "bytes": 1753,
+      "sha256": "427de937a515b651ee496028d80f0fdd21e849dbcd3a032c1601aa8db84a3336",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "refused": "utf8_invalid"
+    },
+    {
+      "file": "neg-not-gzip.pb.gz",
+      "bytes": 17,
+      "sha256": "461f95672f443c65211eadf8305f541a94603460ecabd16bbfb18178ec1bae77",
+      "content_type": "application/x-protobuf",
+      "content_encoding": "gzip",
+      "refused": "gzip_invalid"
+    },
+    {
+      "file": "neg-not-json.json",
+      "bytes": 20,
+      "sha256": "b517f2c8c04bc409317f7b6ba656210b32e80a7bb549527c28566a3c44149f15",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "refused": "json_invalid"
+    },
+    {
+      "file": "neg-null-root.json",
+      "bytes": 5,
+      "sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "refused": "json_invalid"
+    },
+    {
+      "file": "neg-parent-short.pb",
+      "bytes": 336,
+      "sha256": "600f17cb52545d9975318a5fd064a9467472d38b36b08b9f862db4813ce490ce",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "parent_span_id_invalid"
+    },
+    {
+      "file": "neg-parent-zero.pb",
+      "bytes": 340,
+      "sha256": "d06d50146a391ab4cb662b51959c2374298238ffab9303d29ed131af60590708",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "parent_span_id_invalid"
+    },
+    {
+      "file": "neg-span-id-missing.pb",
+      "bytes": 320,
+      "sha256": "8392438441e490fee15ff4be0f3b4bfd4dc44dfee870f67e061496005bf76fee",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "span_id_invalid"
+    },
+    {
+      "file": "neg-span-id-zero.pb",
+      "bytes": 330,
+      "sha256": "41b55284a81467c21176dfd4bb94e5c65fa613fbe2d36a90811fa2df3b985a35",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "span_id_invalid"
+    },
+    {
+      "file": "neg-trace-id-short.pb",
+      "bytes": 329,
+      "sha256": "5474fbbc2172c214465965b435583fe1bb712bb475ee2a1b47b8e485497437b2",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "trace_id_invalid"
+    },
+    {
+      "file": "neg-trace-id-zero.pb",
+      "bytes": 330,
+      "sha256": "cb02b055d2c6a0aa3aaa532809f0c92f27a605b2a24b0da8cf3cc3949eba814b",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "trace_id_invalid"
+    },
+    {
+      "file": "neg-truncated.pb",
+      "bytes": 1333,
+      "sha256": "e1b570432b486b5c2670a3c2075ab774b07e35c193d246aa9b038cc8a1cddde1",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "protobuf_invalid"
+    },
+    {
+      "file": "neg-two-members.json",
+      "bytes": 1783,
+      "sha256": "e6d94dd50459301b0a81a522d0f192763db543e3f7cc26f813742865350910bd",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "refused": "json_invalid"
+    },
+    {
+      "file": "neg-unsafe-int.json",
+      "bytes": 1764,
+      "sha256": "aa452522097b306eb27fbee74868f33f8540eb420a1ac4056b69c30f9f42e899",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "refused": "json_invalid"
+    },
+    {
+      "file": "neg-utf8.json",
+      "bytes": 39,
+      "sha256": "a3669f4231fd7dcf9441fa93eb546b8d190d3aa6ac09d248f045b22f26f35a00",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "refused": "utf8_invalid"
+    },
+    {
+      "file": "neg-utf8.pb",
+      "bytes": 335,
+      "sha256": "3a75c19fc6388f750f5ef1283a28bc036fec83280befe097affe24ae4125ef87",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "utf8_invalid"
+    },
+    {
+      "file": "neg-varint-10th-byte.pb",
+      "bytes": 341,
+      "sha256": "4cfa9ffcd5836b4d6cf562643a1663e7a7a0cdb255569a8cffae842a440dc5b1",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "protobuf_invalid"
+    },
+    {
+      "file": "neg-varint-11.pb",
+      "bytes": 12,
+      "sha256": "163b1c671e699e078d28764273ba92fd2412eb7816ae8fa3f83ae8c4bb2ff7a8",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "protobuf_invalid"
+    },
+    {
+      "file": "neg-wire-type.pb",
+      "bytes": 332,
+      "sha256": "fda60399a9bdd8ab63a448dd0c6564489c6798b84b2894930106818e4d3bd288",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "refused": "protobuf_invalid"
+    },
+    {
+      "file": "quirks.pb",
+      "bytes": 138,
+      "sha256": "afff20b71da6aeae0b39f724454f70e75735910d873257cbd81f64971bdbc722",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "otel.span:quirks",
+          "outcome": "errored",
+          "args_hash": "sha256:aad8bd7f34fbeb5564811f4f10f0a8ed5fbd161ea0312d7d4e4fad250fe20ff8",
+          "request_commitment": "sha256:d8bda05469f88ff1f5248cac4af97b7440499567fb0b30f1d26a5262c95dfedb"
+        }
+      ]
+    },
+    {
+      "file": "strindex.pb",
+      "bytes": 102,
+      "sha256": "f71fa503b20e61c67d7123bd34c9906e972cbb78049db82d73f5a7b2042ced27",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 2,
+      "records": [
+        {
+          "tool_name": "otel.span:p",
+          "outcome": "executed",
+          "args_hash": "sha256:2cf68c5850880da1a26c2a4781ba8d508c30aa1f52497a3d4f3bd3a80c64ed53",
+          "request_commitment": "sha256:1716f421d5311fd576991e7c34d4836236386ba9bb3fde210e09e7141a808ebf"
+        }
+      ]
+    },
+    {
+      "file": "t0-shape.json",
+      "bytes": 8111,
+      "sha256": "344ea25ddc9abe498b2f4d8ffcf998733285f85201123e67f91e6c7f4e30fd15",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "spans": 7,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:e6bf50bf6c73a52dc74d48bf717b8d5ad3011d7f49c06666ba4b0507bd3bc4dd",
+          "request_commitment": "sha256:dd983fd53f09a985a13674d2beff630f18fb8f445df6e09b429cc00bb8229b8c"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:c7d45a3f0ab31330ce998de802f2e02e9fc2c961a0478f9c48c63238e565286d",
+          "request_commitment": "sha256:9a1cc8c5383fb7e00835df66b0c5abec841a964f491b3c1d5b503391769a1d6e"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:0e7df72e1b2fe6553ccf4490d709dd46be4473911dcf1f6ecb0e3f940a7d97e7",
+          "request_commitment": "sha256:8eb87bdd8691fc810631311c68a78d927a98b462b5e8e3e714ee6936af9c8cc7"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "errored",
+          "args_hash": "sha256:c14e9889cea8fe332650b5b453565580150db33ab9be6bee1b35e4260d3a3866",
+          "request_commitment": "sha256:4533c88b6d6558da4fd1b6ef91aa25570fa5b4f9cfed4444f222abaae6154cd1"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:785de041648522842a4fd2dae18904915b416589fb6810fffb346c611845f59f",
+          "request_commitment": "sha256:43be19cc08e77f65064e5caab57874294c5f44cc10b3a7eacce4e041de997091"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:d12a8f02f96ace1293e40692142f880a6aab16d150765234b92f339ac8479bc5",
+          "request_commitment": "sha256:4c8d66c422a2d83574035897431871679a21e8c27c2eb505e45d06e46981b4ff"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:c660f44d3028c43fee5eac039c4bbd4f7c62510a22e23995c4ade51ce52cc67d",
+          "request_commitment": "sha256:7507f709467ecd66de520c375f1ac522d0e34045f8f00ebf3432396350c3b19c"
+        }
+      ]
+    },
+    {
+      "file": "t0-shape.pb",
+      "bytes": 1334,
+      "sha256": "be5032084c053ae78545ab309575bff346d61fb08ac3e30ccf56c7c54582a4a1",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "spans": 7,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:e6bf50bf6c73a52dc74d48bf717b8d5ad3011d7f49c06666ba4b0507bd3bc4dd",
+          "request_commitment": "sha256:dd983fd53f09a985a13674d2beff630f18fb8f445df6e09b429cc00bb8229b8c"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:c7d45a3f0ab31330ce998de802f2e02e9fc2c961a0478f9c48c63238e565286d",
+          "request_commitment": "sha256:9a1cc8c5383fb7e00835df66b0c5abec841a964f491b3c1d5b503391769a1d6e"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:0e7df72e1b2fe6553ccf4490d709dd46be4473911dcf1f6ecb0e3f940a7d97e7",
+          "request_commitment": "sha256:8eb87bdd8691fc810631311c68a78d927a98b462b5e8e3e714ee6936af9c8cc7"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "errored",
+          "args_hash": "sha256:c14e9889cea8fe332650b5b453565580150db33ab9be6bee1b35e4260d3a3866",
+          "request_commitment": "sha256:4533c88b6d6558da4fd1b6ef91aa25570fa5b4f9cfed4444f222abaae6154cd1"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:785de041648522842a4fd2dae18904915b416589fb6810fffb346c611845f59f",
+          "request_commitment": "sha256:43be19cc08e77f65064e5caab57874294c5f44cc10b3a7eacce4e041de997091"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:d12a8f02f96ace1293e40692142f880a6aab16d150765234b92f339ac8479bc5",
+          "request_commitment": "sha256:4c8d66c422a2d83574035897431871679a21e8c27c2eb505e45d06e46981b4ff"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:c660f44d3028c43fee5eac039c4bbd4f7c62510a22e23995c4ade51ce52cc67d",
+          "request_commitment": "sha256:7507f709467ecd66de520c375f1ac522d0e34045f8f00ebf3432396350c3b19c"
+        }
+      ]
+    },
+    {
+      "file": "t0-shape.pb.gz",
+      "bytes": 462,
+      "sha256": "1b1bab9188c17c272f177525411fbc56bfc0120ab427131dc386d5751549f66e",
+      "content_type": "application/x-protobuf",
+      "content_encoding": "gzip",
+      "spans": 7,
+      "unknown_fields": 0,
+      "records": [
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:e6bf50bf6c73a52dc74d48bf717b8d5ad3011d7f49c06666ba4b0507bd3bc4dd",
+          "request_commitment": "sha256:dd983fd53f09a985a13674d2beff630f18fb8f445df6e09b429cc00bb8229b8c"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:c7d45a3f0ab31330ce998de802f2e02e9fc2c961a0478f9c48c63238e565286d",
+          "request_commitment": "sha256:9a1cc8c5383fb7e00835df66b0c5abec841a964f491b3c1d5b503391769a1d6e"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:0e7df72e1b2fe6553ccf4490d709dd46be4473911dcf1f6ecb0e3f940a7d97e7",
+          "request_commitment": "sha256:8eb87bdd8691fc810631311c68a78d927a98b462b5e8e3e714ee6936af9c8cc7"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "errored",
+          "args_hash": "sha256:c14e9889cea8fe332650b5b453565580150db33ab9be6bee1b35e4260d3a3866",
+          "request_commitment": "sha256:4533c88b6d6558da4fd1b6ef91aa25570fa5b4f9cfed4444f222abaae6154cd1"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:785de041648522842a4fd2dae18904915b416589fb6810fffb346c611845f59f",
+          "request_commitment": "sha256:43be19cc08e77f65064e5caab57874294c5f44cc10b3a7eacce4e041de997091"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:d12a8f02f96ace1293e40692142f880a6aab16d150765234b92f339ac8479bc5",
+          "request_commitment": "sha256:4c8d66c422a2d83574035897431871679a21e8c27c2eb505e45d06e46981b4ff"
+        },
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:c660f44d3028c43fee5eac039c4bbd4f7c62510a22e23995c4ade51ce52cc67d",
+          "request_commitment": "sha256:7507f709467ecd66de520c375f1ac522d0e34045f8f00ebf3432396350c3b19c"
+        }
+      ]
+    },
+    {
+      "file": "unknown-fields.json",
+      "bytes": 1876,
+      "sha256": "f712fc3a52303ef55e004791a7bc1310a095f78009d0f51e8bbf016a9ccd59a0",
+      "content_type": "application/json",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 3,
+      "records": [
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:e6bf50bf6c73a52dc74d48bf717b8d5ad3011d7f49c06666ba4b0507bd3bc4dd",
+          "request_commitment": "sha256:dd983fd53f09a985a13674d2beff630f18fb8f445df6e09b429cc00bb8229b8c"
+        }
+      ]
+    },
+    {
+      "file": "unknown-fields.pb",
+      "bytes": 353,
+      "sha256": "ef91717780be9b5c378e4571ba091029848cdd7ae07a059b20aebc0e1b21b8ac",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 3,
+      "records": [
+        {
+          "tool_name": "lookup",
+          "outcome": "executed",
+          "args_hash": "sha256:e6bf50bf6c73a52dc74d48bf717b8d5ad3011d7f49c06666ba4b0507bd3bc4dd",
+          "request_commitment": "sha256:dd983fd53f09a985a13674d2beff630f18fb8f445df6e09b429cc00bb8229b8c"
+        }
+      ]
+    },
+    {
+      "file": "unknown-in-values.pb",
+      "bytes": 101,
+      "sha256": "b7f67b453511a42a48640d6952162b4aac8b2fa6f2e0803650050c9643962640",
+      "content_type": "application/x-protobuf",
+      "content_encoding": null,
+      "spans": 1,
+      "unknown_fields": 2,
+      "records": [
+        {
+          "tool_name": "otel.span:u",
+          "outcome": "executed",
+          "args_hash": "sha256:faf578268c5805181493a5db336f97de9bfdcb588dbc0871e1cc79c7c14a1e79",
+          "request_commitment": "sha256:4918cfe4ba7b172b5e1ca21474e19ebf232eff7b06efa8b21e706f2a08e197f0"
+        }
+      ]
+    }
+  ]
+}
